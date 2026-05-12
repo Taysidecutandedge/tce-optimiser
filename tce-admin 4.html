@@ -1,0 +1,1103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TCE Admin — Tayside Cut & Edge</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;background:#0d1f1a;color:#e8f0ec;min-height:100vh}
+
+/* ── PIN SCREEN ── */
+#pinScreen{position:fixed;inset:0;background:#0d1f1a;display:flex;align-items:center;justify-content:center;z-index:9999}
+.pin-box{background:#162620;border:1px solid #2b4a40;border-radius:12px;padding:40px;width:320px;text-align:center}
+.pin-logo{font-size:22px;font-weight:bold;color:#f0a500;margin-bottom:4px}
+.pin-sub{font-size:12px;color:#6b8f7e;margin-bottom:28px}
+.pin-input{width:100%;background:#0d1f1a;border:1px solid #2b4a40;border-radius:8px;color:#e8f0ec;font-size:22px;text-align:center;padding:12px;letter-spacing:8px;margin-bottom:16px}
+.pin-input:focus{outline:none;border-color:#f0a500}
+.pin-btn{width:100%;background:#f0a500;color:#0d1f1a;border:none;border-radius:8px;padding:12px;font-size:15px;font-weight:bold;cursor:pointer}
+.pin-btn:hover{background:#d4820a}
+.pin-error{color:#f87171;font-size:12px;margin-top:10px;min-height:18px}
+
+/* ── LAYOUT ── */
+#app{display:none}
+.topbar{background:#162620;border-bottom:1px solid #2b4a40;padding:0 24px;display:flex;align-items:center;gap:16px;height:52px}
+.topbar-logo{font-size:16px;font-weight:bold;color:#f0a500}
+.topbar-sub{font-size:11px;color:#6b8f7e}
+.topbar-spacer{flex:1}
+.topbar-user{font-size:12px;color:#6b8f7e}
+.lock-btn{background:#1a3a2a;color:#f87171;border:1px solid #2b4a40;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer}
+
+.tabs{display:flex;gap:0;border-bottom:1px solid #2b4a40;background:#162620;padding:0 24px}
+.tab{padding:12px 20px;font-size:13px;cursor:pointer;color:#6b8f7e;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab.active{color:#f0a500;border-bottom-color:#f0a500}
+.tab:hover:not(.active){color:#e8f0ec}
+
+.page{display:none;padding:24px;max-width:1100px;margin:0 auto}
+.page.active{display:block}
+
+/* ── COMPONENTS ── */
+.card{background:#162620;border:1px solid #2b4a40;border-radius:10px;padding:20px;margin-bottom:16px}
+.card-title{font-size:14px;font-weight:bold;color:#f0a500;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.section-title{font-size:16px;font-weight:bold;color:#e8f0ec;margin-bottom:12px}
+
+.btn{padding:7px 16px;border-radius:6px;border:none;font-size:12px;cursor:pointer;font-weight:bold}
+.btn-primary{background:#f0a500;color:#0d1f1a}
+.btn-primary:hover{background:#d4820a}
+.btn-secondary{background:#1a3a2a;color:#e8f0ec;border:1px solid #2b4a40}
+.btn-secondary:hover{background:#223a2a}
+.btn-danger{background:#3a1a1a;color:#f87171;border:1px solid #4a2a2a}
+.btn-sm{padding:4px 10px;font-size:11px}
+
+input[type=text],input[type=number],input[type=password],select,textarea{
+  background:#0d1f1a;color:#e8f0ec;border:1px solid #2b4a40;border-radius:6px;
+  padding:7px 10px;font-size:13px;width:100%}
+input:focus,select:focus,textarea:focus{outline:none;border-color:#f0a500}
+label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+.grid4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px}
+.form-row{margin-bottom:12px}
+
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:bold}
+.badge-retail{background:#1a3a2a;color:#6bcf7e}
+.badge-trade{background:#3a2a1a;color:#f0a500}
+
+/* ── JOBS TABLE ── */
+.jobs-table{width:100%;border-collapse:collapse}
+.jobs-table th{text-align:left;padding:8px 12px;font-size:11px;color:#6b8f7e;border-bottom:1px solid #2b4a40;text-transform:uppercase;letter-spacing:.5px}
+.jobs-table td{padding:10px 12px;font-size:13px;border-bottom:1px solid #1a2a24}
+.jobs-table tr:hover td{background:#1e3530;cursor:pointer}
+.jobs-table .job-name{font-weight:bold;color:#e8f0ec}
+.jobs-table .job-meta{font-size:11px;color:#6b8f7e}
+.no-data{text-align:center;color:#6b8f7e;padding:40px;font-size:13px}
+
+/* ── QUOTE VIEW ── */
+#quoteView{display:none}
+.back-btn{color:#f0a500;background:none;border:none;font-size:13px;cursor:pointer;margin-bottom:16px;padding:0}
+.back-btn:hover{text-decoration:underline}
+
+.quote-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;flex-wrap:wrap;gap:12px}
+.quote-job-name{font-size:20px;font-weight:bold;color:#e8f0ec}
+.quote-actions{display:flex;gap:8px}
+
+.quote-settings{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
+
+/* ── QUOTE TABLE ── */
+.qt{width:100%;border-collapse:collapse;margin-bottom:16px}
+.qt th{text-align:left;padding:8px 12px;font-size:11px;color:#6b8f7e;border-bottom:1px solid #2b4a40;text-transform:uppercase}
+.qt th.r,.qt td.r{text-align:right}
+.qt td{padding:9px 12px;font-size:13px;border-bottom:1px solid #1a2a24}
+.qt tr.mat-head td{background:#1e3530;font-weight:bold;color:#f0a500;font-size:12px;text-transform:uppercase;letter-spacing:.3px}
+.qt tr.subtotal td{border-top:1px solid #2b4a40;font-weight:bold;color:#e8f0ec}
+.qt tr.override td{background:#0d1f1a}
+.qt .override-input{width:80px;padding:3px 6px;font-size:12px}
+.qt .override-label{font-size:11px;color:#6b8f7e}
+
+.totals-box{background:#1e3530;border:1px solid #2b4a40;border-radius:8px;padding:16px;max-width:320px;margin-left:auto}
+.totals-row{display:flex;justify-content:space-between;padding:5px 0;font-size:14px}
+.totals-row.grand{font-size:18px;font-weight:bold;color:#f0a500;border-top:1px solid #2b4a40;margin-top:8px;padding-top:12px}
+
+/* ── PRICING SETTINGS ── */
+.price-table{width:100%;border-collapse:collapse}
+.price-table th{text-align:left;padding:6px 10px;font-size:11px;color:#6b8f7e;border-bottom:1px solid #2b4a40}
+.price-table td{padding:5px 10px;border-bottom:1px solid #1a2a24}
+.price-table input{width:80px;padding:3px 6px;font-size:12px}
+.price-table .code{font-size:12px;color:#aaa;font-family:monospace}
+.price-table .group{font-size:11px;color:#6b8f7e}
+.save-bar{position:sticky;bottom:0;background:#162620;border-top:1px solid #2b4a40;padding:12px 0;display:flex;justify-content:flex-end;gap:10px}
+
+/* ── CUSTOMERS ── */
+.cust-card{background:#0d1f1a;border:1px solid #1a2a24;border-radius:8px;padding:14px;margin-bottom:10px;display:flex;align-items:center;gap:14px}
+.cust-name{font-weight:bold;font-size:14px;flex:1}
+.cust-meta{font-size:11px;color:#6b8f7e}
+
+/* ── LOADING ── */
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid #2b4a40;border-top-color:#f0a500;border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-msg{color:#6b8f7e;font-size:13px;display:flex;align-items:center;gap:8px;padding:20px 0}
+
+.tag{background:#0d1f1a;border:1px solid #2b4a40;border-radius:4px;padding:1px 6px;font-size:11px;color:#6b8f7e;font-family:monospace}
+</style>
+</head>
+<body>
+
+<!-- PIN SCREEN -->
+<div id="pinScreen">
+  <div class="pin-box">
+    <div class="pin-logo">⚙ TCE Admin</div>
+    <div class="pin-sub">Tayside Cut & Edge — Admin Portal</div>
+    <input type="password" class="pin-input" id="pinInput" maxlength="8" placeholder="••••"
+      onkeydown="if(event.key==='Enter')checkPin()">
+    <button class="pin-btn" onclick="checkPin()">Unlock</button>
+    <div class="pin-error" id="pinError"></div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app">
+  <div class="topbar">
+    <div>
+      <div class="topbar-logo">⚙ TCE Admin</div>
+    </div>
+    <div class="topbar-sub">Tayside Cut & Edge — Admin Portal</div>
+    <div class="topbar-spacer"></div>
+    <span class="topbar-user" id="topbarUser"></span>
+    <button class="lock-btn" onclick="lockApp()">🔒 Lock</button>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" onclick="showTab('jobs')">📋 Jobs & Quotes</div>
+    <div class="tab" onclick="showTab('pricing')">💷 Board Prices</div>
+    <div class="tab" onclick="showTab('cutting')">✂ Cut & EB Rates</div>
+    <div class="tab" onclick="showTab('customers')">👥 Customers</div>
+    <div class="tab" onclick="showTab('settings')">⚙ Settings</div>
+  </div>
+
+  <!-- JOBS & QUOTES TAB -->
+  <div class="page active" id="tab-jobs">
+    <div id="jobsList">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div class="section-title">Saved Jobs</div>
+        <a href="https://taysidecutandedge.github.io/tce-optimiser" target="_blank" class="btn btn-secondary btn-sm">← Back to Optimiser</a>
+      </div>
+      <div class="card">
+        <div id="jobsTableWrap"><div class="loading-msg"><span class="spinner"></span> Loading jobs...</div></div>
+      </div>
+    </div>
+
+    <div id="quoteView">
+      <button class="back-btn" onclick="showJobsList()">← Back to Jobs</button>
+      <div class="quote-header">
+        <div>
+          <div class="quote-job-name" id="qJobName">—</div>
+          <div style="font-size:12px;color:#6b8f7e;margin-top:4px" id="qJobMeta">—</div>
+        </div>
+        <div class="quote-actions">
+          <button class="btn btn-secondary" onclick="saveQuote()">💾 Save Quote</button>
+          <button class="btn btn-primary" onclick="printQuote()">🖨 Print Quote</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Quote Settings</div>
+        <div class="quote-settings">
+          <div class="form-row">
+            <label>Customer</label>
+            <select id="qCustomer" onchange="buildQuote()">
+              <option value="">— Select customer —</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>Customer tier</label>
+            <select id="qTier" onchange="buildQuote()">
+              <option value="retail">Retail (standard rates)</option>
+              <option value="trade">Trade (+7% boards, same cut/EB)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Cost Breakdown</div>
+        <div id="quoteBreakdown"><div class="loading-msg"><span class="spinner"></span> Building quote...</div></div>
+      </div>
+
+      <div id="savedQuotesSection" style="margin-top:16px"></div>
+    </div>
+  </div>
+
+  <!-- BOARD PRICES TAB -->
+  <div class="page" id="tab-pricing">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div class="section-title">Board Prices — Egger / Lathams Scotland 2025</div>
+      <button class="btn btn-primary" onclick="savePricing()">💾 Save All Prices</button>
+    </div>
+    <div class="card">
+      <div id="pricingTableWrap"><div class="loading-msg"><span class="spinner"></span> Loading...</div></div>
+    </div>
+  </div>
+
+  <!-- CUT & EB RATES TAB -->
+  <div class="page" id="tab-cutting">
+    <div class="section-title" style="margin-bottom:16px">Cut & Edgebanding Rates</div>
+    <div class="grid2">
+      <div class="card">
+        <div class="card-title">✂ Cut Rates per Sheet</div>
+        <div id="cutRatesWrap"><div class="loading-msg"><span class="spinner"></span> Loading...</div></div>
+        <div style="margin-top:12px">
+          <button class="btn btn-secondary btn-sm" onclick="addCutRate()">+ Add Size</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">🔲 Edgebanding Rates</div>
+        <div id="ebRatesWrap"><div class="loading-msg"><span class="spinner"></span> Loading...</div></div>
+        <div style="margin-top:12px">
+          <button class="btn btn-secondary btn-sm" onclick="addEbRate()">+ Add Tape Type</button>
+        </div>
+      </div>
+    </div>
+    <div style="text-align:right;margin-top:4px">
+      <button class="btn btn-primary" onclick="saveCutEbRates()">💾 Save Rates</button>
+    </div>
+  </div>
+
+  <!-- CUSTOMERS TAB -->
+  <div class="page" id="tab-customers">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div class="section-title">Customers</div>
+      <button class="btn btn-primary" onclick="showAddCustomer()">+ Add Customer</button>
+    </div>
+    <div id="addCustomerForm" style="display:none" class="card">
+      <div class="card-title">New Customer</div>
+      <div class="grid3">
+        <div class="form-row"><label>Company Name</label><input type="text" id="newCustName" placeholder="e.g. Swaans Interiors"></div>
+        <div class="form-row"><label>Tier</label>
+          <select id="newCustTier">
+            <option value="retail">Retail</option>
+            <option value="trade">Trade (+7%)</option>
+          </select>
+        </div>
+        <div class="form-row"><label>Notes</label><input type="text" id="newCustNotes"></div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary btn-sm" onclick="saveNewCustomer()">Save</button>
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('addCustomerForm').style.display='none'">Cancel</button>
+      </div>
+    </div>
+    <div id="customersWrap"><div class="loading-msg"><span class="spinner"></span> Loading...</div></div>
+  </div>
+
+  <!-- SETTINGS TAB -->
+  <div class="page" id="tab-settings">
+    <div class="section-title" style="margin-bottom:16px">Settings</div>
+    <div class="grid2">
+      <div class="card">
+        <div class="card-title">🔒 Change PIN</div>
+        <div class="form-row"><label>Current PIN</label><input type="password" id="curPin"></div>
+        <div class="form-row"><label>New PIN (4+ digits)</label><input type="password" id="newPin"></div>
+        <div class="form-row"><label>Confirm PIN</label><input type="password" id="conPin"></div>
+        <button class="btn btn-primary btn-sm" onclick="changePin()" style="margin-top:4px">Update PIN</button>
+        <div id="pinMsg" style="font-size:12px;margin-top:8px"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">ℹ About</div>
+        <div style="font-size:12px;color:#6b8f7e;line-height:1.7">
+          <div>TCE Admin Portal</div>
+          <div>Tayside Cut & Edge</div>
+          <div style="margin-top:8px">Supabase: <span class="tag">mxjduublgtlpqtdgutzi</span></div>
+          <div>Optimiser: <a href="https://taysidecutandedge.github.io/tce-optimiser" style="color:#f0a500" target="_blank">tce-optimiser</a></div>
+          <div style="margin-top:8px">rob@rccjoinery.co.uk · 07876614414</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════════════════════
+const SB_URL = 'https://mxjduublgtlpqtdgutzi.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im14amR1dWJsZ3RscHF0ZGd1dHppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwOTg2MjMsImV4cCI6MjA5MTY3NDYyM30.wfG9a91Udp7KQ7ywda6aNS9k-n79qtrGSe-epuCuk34';
+let ADMIN_PIN = localStorage.getItem('tce_admin_pin') || '3984';
+let SB_TOKEN = null;
+
+// Default pricing (fallback if Supabase empty)
+const DEFAULT_PRICES = {
+  'F186':73.9,'F187':73.9,'F206':73.9,'F235':76.5,'F237':76.5,'F243':76.5,'F244':76.5,
+  'F323':76.5,'F416':73.9,'F417':73.9,'F422':73.9,'F424':73.9,'F433':73.9,'F434':76.5,
+  'F500':76.5,'F527':76.5,'F528':76.5,'F634':76.5,'F638':73.9,'F765':71.0,'F800':73.9,'F812':73.9,
+  'H1142':82.2,'H1143':82.2,'H1145':71.0,'H1146':71.0,'H1176':87.6,'H1180':87.6,'H1181':87.6,
+  'H1186':87.6,'H1204':95.0,'H1223':73.9,'H1225':71.0,'H1227':95.0,'H1228':95.0,'H1242':71.0,
+  'H1250':82.2,'H1277':66.3,'H1303':71.0,'H1307':73.9,'H1313':71.0,'H1318':71.0,'H1330':71.0,
+  'H1334':66.3,'H1336':87.6,'H1357':71.0,'H1367':87.6,'H1369':87.6,'H1371':73.9,'H1372':71.0,
+  'H1377':82.2,'H1379':82.2,'H1384':87.6,'H1385':87.6,'H1386':87.6,'H1399':71.0,'H1474':73.9,
+  'H1477':73.9,'H1478':73.9,'H1484':73.9,'H1486':82.2,'H1714':73.9,'H1715':71.0,'H1732':66.3,
+  'H2033':71.0,'H3003':73.9,'H3012':73.9,'H3041':95.0,'H3043':71.0,'H3058':73.9,'H3078':73.9,
+  'H3081':73.9,'H309':73.9,'H3090':73.9,'H3131':71.0,'H3133':71.0,'H3146':73.9,'H3154':82.2,
+  'H3157':71.0,'H3158':73.9,'H3170':71.0,'H3171':71.0,'H3176':87.6,'H3180':87.6,'H3189':119.0,
+  'H3190':73.9,'H3195':73.9,'H3198':73.9,'H3303':71.0,'H3309':87.6,'H3311':87.6,'H3317':87.6,
+  'H3325':87.6,'H3326':87.6,'H3331':71.0,'H3332':71.0,'H3335':87.6,'H3342':119.0,'H3349':73.9,
+  'H3368':66.3,'H3382':66.3,'H3422':73.9,'H3700':71.0,'H3702':71.0,'H3704':66.3,'H3710':71.0,
+  'H3730':71.0,'H3734':66.3,
+  'U100':56.2,'U104':52.1,'U115':56.2,'U125':56.2,'U156':52.1,'U201':56.2,'U211':56.2,
+  'U216':52.1,'U222':52.1,'U325':66.3,'U335':56.2,'U399':66.3,'U502':56.2,'U504':66.3,
+  'U540':56.2,'U565':66.3,'U599':56.2,'U604':56.2,'U636':56.2,'U638':56.2,'U645':66.3,
+  'U655':66.3,'U665':165.0,'U699':56.2,'U702':56.2,'U705':56.2,'U707':56.2,'U708':52.1,
+  'U717':56.2,'U727':56.2,'U732':52.1,'U740':56.2,'U741':56.2,'U748':56.2,'U750':56.2,
+  'U763':56.2,'U765':52.1,'U767':56.2,'U775':56.2,'U780':56.2,'U788':56.2,'U818':71.0,
+  'U899':56.2,'U960':56.2,'U961':56.2,'U963':56.2,'U968':56.2,'U999':56.2,
+  'W980':51.8,'W1000':56.2,'W1100':56.2,'W1200':56.2
+};
+
+const DEFAULT_CUT_RATES = [
+  {size_label:'2800×2070',rate_retail:70,rate_trade:70},
+  {size_label:'2440×1220 (8×4)',rate_retail:55,rate_trade:50},
+];
+
+const DEFAULT_EB_RATES = [
+  {tape_key:'23x1 ABS',tape_label:'23mm × 1mm ABS',base_rate:2.90,mat_rate:0.60},
+  {tape_key:'23x2 ABS',tape_label:'23mm × 2mm ABS',base_rate:2.90,mat_rate:0.90},
+  {tape_key:'43x1 ABS',tape_label:'43mm × 1mm ABS',base_rate:2.90,mat_rate:1.20},
+  {tape_key:'43x2 ABS',tape_label:'43mm × 2mm ABS',base_rate:2.90,mat_rate:1.60},
+  {tape_key:'23x1 Oak',tape_label:'23mm × 1mm Oak',base_rate:2.90,mat_rate:0.75},
+  {tape_key:'23x2 Oak',tape_label:'23mm × 2mm Oak',base_rate:2.90,mat_rate:1.20},
+  {tape_key:'43x1 Oak',tape_label:'43mm × 1mm Oak',base_rate:2.90,mat_rate:1.25},
+  {tape_key:'43x2 Oak',tape_label:'43mm × 2mm Oak',base_rate:2.90,mat_rate:2.00},
+  {tape_key:'no_mat',tape_label:'Application only (no material)',base_rate:2.90,mat_rate:0.00},
+];
+
+// In-memory data
+let _pricing = {}; // egger_code → price
+let _cutRates = [];
+let _ebRates = [];
+let _customers = [];
+let _jobs = [];
+let _currentJob = null;
+let _quoteOverrides = {}; // matName → {boardPrice, cutRate, surcharge, ebTapeKey}
+
+// ═══════════════════════════════════════════════════════════
+// PIN / AUTH
+// ═══════════════════════════════════════════════════════════
+function checkPin() {
+  const v = document.getElementById('pinInput').value;
+  if (v === ADMIN_PIN) {
+    document.getElementById('pinScreen').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    loginSupabase();
+  } else {
+    document.getElementById('pinError').textContent = 'Incorrect PIN';
+    document.getElementById('pinInput').value = '';
+    setTimeout(()=>document.getElementById('pinError').textContent='', 2000);
+  }
+}
+
+function lockApp() {
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('pinScreen').style.display = 'flex';
+  document.getElementById('pinInput').value = '';
+  SB_TOKEN = null;
+}
+
+function changePin() {
+  const cur = document.getElementById('curPin').value;
+  const nw = document.getElementById('newPin').value;
+  const cn = document.getElementById('conPin').value;
+  const msg = document.getElementById('pinMsg');
+  if (cur !== ADMIN_PIN) { msg.style.color='#f87171'; msg.textContent='Current PIN incorrect'; return; }
+  if (nw.length < 4) { msg.style.color='#f87171'; msg.textContent='PIN must be 4+ digits'; return; }
+  if (nw !== cn) { msg.style.color='#f87171'; msg.textContent='PINs do not match'; return; }
+  ADMIN_PIN = nw;
+  localStorage.setItem('tce_admin_pin', nw);
+  msg.style.color='#6bcf7e'; msg.textContent='PIN updated';
+  document.getElementById('curPin').value='';
+  document.getElementById('newPin').value='';
+  document.getElementById('conPin').value='';
+}
+
+// ═══════════════════════════════════════════════════════════
+// SUPABASE AUTH + FETCH
+// ═══════════════════════════════════════════════════════════
+async function loginSupabase() {
+  // Try password auth first
+  try {
+    const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':SB_KEY},
+      body:JSON.stringify({email:'cutlist@taysidecutandedge.co.uk',password:'TCE2026'})
+    });
+    const d = await r.json();
+    if (d.access_token) {
+      SB_TOKEN = d.access_token;
+      document.getElementById('topbarUser').textContent = 'cutlist@taysidecutandedge.co.uk';
+      console.log('Auth OK');
+    } else {
+      console.warn('Auth response:', d);
+      // Use invite code auth as fallback — same as optimiser
+      SB_TOKEN = null;
+    }
+  } catch(e) { 
+    console.warn('Supabase auth failed:', e);
+    SB_TOKEN = null;
+  }
+  await loadAllData();
+}
+
+// Use same auth headers as optimiser — anon key works for reading with RLS
+function sbH() {
+  const h = {'apikey':SB_KEY,'Content-Type':'application/json'};
+  if (SB_TOKEN) h['Authorization'] = `Bearer ${SB_TOKEN}`;
+  return h;
+}
+
+async function sbFetch(path, optsOrQuery={}) {
+  // Accept either a query string directly or an options object
+  let opts = typeof optsOrQuery === 'string' ? {} : optsOrQuery;
+  const qs = typeof optsOrQuery === 'string' ? optsOrQuery : (opts.query || '');
+  
+  const headers = {...sbH(), ...(opts.headers||{})};
+  const url = path.startsWith('http') ? path : `${SB_URL}/rest/v1/${path}${qs}`;
+  
+  const r = await fetch(url, {
+    method: opts.method || 'GET',
+    headers,
+    body: opts.body ? JSON.stringify(opts.body) : undefined
+  });
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  if (opts.method && opts.method !== 'GET') return true;
+  return r.json();
+}
+
+// ═══════════════════════════════════════════════════════════
+// DATA LOADING
+// ═══════════════════════════════════════════════════════════
+async function loadAllData() {
+  await Promise.all([loadPricing(), loadCutRates(), loadEbRates(), loadCustomers(), loadJobs()]);
+}
+
+async function loadPricing() {
+  try {
+    const rows = await sbFetch('tce_pricing','?select=egger_code,price_retail,group_name');
+    if (rows && rows.length) {
+      _pricing = {};
+      rows.forEach(r => _pricing[r.egger_code] = {price:r.price_retail, group:r.group_name});
+    } else {
+      // Seed from defaults
+      _pricing = {};
+      Object.entries(DEFAULT_PRICES).forEach(([k,v]) => _pricing[k] = {price:v, group:''});
+      await seedPricing();
+    }
+  } catch(e) {
+    _pricing = {};
+    Object.entries(DEFAULT_PRICES).forEach(([k,v]) => _pricing[k] = {price:v, group:''});
+  }
+  renderPricingTab();
+}
+
+async function seedPricing() {
+  const rows = Object.entries(DEFAULT_PRICES).map(([code,price])=>({egger_code:code,price_retail:price,group_name:''}));
+  try { await sbFetch('tce_pricing',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates'},body:rows}); } catch(e){}
+}
+
+async function loadCutRates() {
+  try {
+    const rows = await sbFetch('tce_cut_rates','?select=*&order=id');
+    if (rows && rows.length) { _cutRates = rows; }
+    else { _cutRates = [...DEFAULT_CUT_RATES]; await seedCutRates(); }
+  } catch(e) { _cutRates = [...DEFAULT_CUT_RATES]; }
+  renderCutRates();
+}
+
+async function seedCutRates() {
+  try { await sbFetch('tce_cut_rates',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates'},body:DEFAULT_CUT_RATES}); } catch(e){}
+}
+
+async function loadEbRates() {
+  try {
+    const rows = await sbFetch('tce_eb_rates','?select=*&order=id');
+    if (rows && rows.length) { _ebRates = rows; }
+    else { _ebRates = [...DEFAULT_EB_RATES]; await seedEbRates(); }
+  } catch(e) { _ebRates = [...DEFAULT_EB_RATES]; }
+  renderEbRates();
+}
+
+async function seedEbRates() {
+  try { await sbFetch('tce_eb_rates',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates'},body:DEFAULT_EB_RATES}); } catch(e){}
+}
+
+async function loadCustomers() {
+  try {
+    // Try ordering by name, fall back if column name differs
+    let rows;
+    try { rows = await sbFetch('tce_customers','?select=*&order=company_name'); }
+    catch(e) { rows = await sbFetch('tce_customers','?select=*'); }
+    // Normalise — ensure each customer has a .name field
+    _customers = (rows||[]).map(r=>({...r, name: r.company_name||r.contact_name||r.name||'Unknown'}));
+  } catch(e) { _customers = []; }
+  renderCustomers();
+  populateCustomerDropdown();
+}
+
+async function loadJobs() {
+  try {
+    const rows = await sbFetch('tce_jobs','?select=id,job_name,client_name,saved_at&order=saved_at.desc');
+    _jobs = rows || [];
+  } catch(e) { _jobs = []; }
+  renderJobsTable();
+}
+
+// ═══════════════════════════════════════════════════════════
+// TABS
+// ═══════════════════════════════════════════════════════════
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['jobs','pricing','cutting','customers','settings'][i]===name));
+  document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id===`tab-${name}`));
+}
+
+// ═══════════════════════════════════════════════════════════
+// JOBS & QUOTES
+// ═══════════════════════════════════════════════════════════
+function renderJobsTable() {
+  const wrap = document.getElementById('jobsTableWrap');
+  if (!_jobs.length) { wrap.innerHTML='<div class="no-data">No saved jobs yet. Run the optimiser and save a job first.</div>'; return; }
+  wrap.innerHTML = `<table class="jobs-table">
+    <thead><tr><th>Job Name</th><th>Client</th><th>Saved</th><th></th></tr></thead>
+    <tbody>${_jobs.map(j=>`
+      <tr onclick="openJob('${j.id}')">
+        <td><div class="job-name">${j.job_name||'Untitled'}</div></td>
+        <td><div class="job-meta">${j.client_name||'—'}</div></td>
+        <td><div class="job-meta">${j.saved_at?new Date(j.saved_at).toLocaleDateString('en-GB'):''}</div></td>
+        <td><span class="btn btn-secondary btn-sm">Open →</span></td>
+      </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+
+async function openJob(id) {
+  const row = _jobs.find(j=>j.id===id);
+  if (!row) return;
+  try {
+    const full = await sbFetch('tce_jobs',`?id=eq.${id}&select=*`);
+    _currentJob = full[0];
+  } catch(e) { return; }
+
+  _quoteOverrides = {};
+  document.getElementById('jobsList').style.display = 'none';
+  document.getElementById('quoteView').style.display = 'block';
+  document.getElementById('qJobName').textContent = _currentJob.job_name || 'Untitled Job';
+  document.getElementById('qJobMeta').textContent = `Client: ${_currentJob.client_name||'—'} · Saved: ${new Date(_currentJob.saved_at).toLocaleDateString('en-GB')}`;
+
+  populateCustomerDropdown();
+  buildQuote();
+  loadSavedQuotes(id);
+}
+
+function showJobsList() {
+  document.getElementById('jobsList').style.display = 'block';
+  document.getElementById('quoteView').style.display = 'none';
+  _currentJob = null;
+}
+
+// ═══════════════════════════════════════════════════════════
+// QUOTE BUILDING
+// ═══════════════════════════════════════════════════════════
+function eggerCodeFromName(name) {
+  // PM detection first
+  if (/\bPM\b/i.test(name)) {
+    const base = name.match(/([A-Z]\d{3,4})/i);
+    if (base) { /* check if PM variant exists */ }
+    return name.match(/([A-Z]\d{3,4})/i)?.[1]?.toUpperCase() + '_PM' || null;
+  }
+  const m = name.match(/([A-Z]\d{3,4})/i);
+  return m ? m[1].toUpperCase() : null;
+}
+
+function lookupBoardPrice(matName, tier) {
+  // Check for PM/PG/TM in name
+  const nameLower = matName.toLowerCase();
+  let code = null;
+  let basePrice = null;
+
+  if (/\bpm\b/.test(nameLower)) basePrice = 165;
+  else if (/\bpg\b/.test(nameLower)) basePrice = 155;
+  else if (/\btm28\b/.test(nameLower)) basePrice = 119;
+  else if (/\btm12\b/.test(nameLower)) basePrice = 95;
+  else if (/\btm9\b/.test(nameLower)) basePrice = 95;
+  else {
+    code = matName.match(/([A-Z]\d{3,4})/i)?.[1]?.toUpperCase();
+    if (code && _pricing[code]) basePrice = parseFloat(_pricing[code].price);
+  }
+
+  if (basePrice === null) return null;
+  return tier === 'trade' ? basePrice * 1.07 : basePrice;
+}
+
+function getDefaultCutRate(jobData, tier) {
+  // Try to match sheet size from job
+  if (!jobData?.jobSheets?.length) return tier==='trade'?70:70;
+  const s = jobData.jobSheets[0];
+  const label = `${s.l}×${s.w}`;
+  const rate = _cutRates.find(r=>r.size_label===label||r.size_label.includes('2800'));
+  return rate ? (tier==='trade'?parseFloat(rate.rate_trade):parseFloat(rate.rate_retail)) : 70;
+}
+
+function buildQuote() {
+  if (!_currentJob) return;
+  const tier = document.getElementById('qTier').value;
+  const wrap = document.getElementById('quoteBreakdown');
+
+  // Parse job data
+  let jobData;
+  try { jobData = typeof _currentJob.job_data === 'string' ? JSON.parse(_currentJob.job_data) : _currentJob.job_data; }
+  catch(e) { wrap.innerHTML='<div class="no-data">Could not parse job data</div>'; return; }
+
+  // Count sheets and EB per material
+  const matData = {};
+  if (jobData?.parts) {
+    // Estimate from parts — count unique materials
+    const matNames = [...new Set(jobData.parts.map(p=>p.matName))];
+    matNames.forEach(m => { if(m) matData[m] = {sheets:0, ebMm:0}; });
+  }
+
+  // Note: actual sheet/EB counts come from the optimiser run
+  // If job was saved with results, use those; otherwise show estimate
+  if (jobData?.lastResult) {
+    jobData.lastResult.sheets?.forEach(s => {
+      if(!matData[s.name]) matData[s.name]={sheets:0,ebMm:0};
+      matData[s.name].sheets++;
+    });
+    Object.entries(jobData.lastResult.ebMap||{}).forEach(([key,mm])=>{
+      const mat = key.split(' · ').slice(1).join(' · ');
+      if(matData[mat]) matData[mat].ebMm = (matData[mat].ebMm||0)+mm;
+    });
+  } else {
+    // No results saved — show note
+    wrap.innerHTML = `<div class="no-data" style="text-align:left;padding:20px">
+      <p style="margin-bottom:8px">⚠ This job doesn't have saved optimiser results.</p>
+      <p style="color:#6b8f7e;font-size:12px">Open the job in the optimiser, run Calculate, then Save Job again. The sheet counts and edgebanding metres will then be available here.</p>
+      <p style="margin-top:12px;font-size:12px;color:#6b8f7e">Materials in this job: ${Object.keys(matData).join(', ')||'none'}</p>
+    </div>`;
+    return;
+  }
+
+  const defaultCutRate = getDefaultCutRate(jobData, tier);
+  let rows = '';
+  let grandEx = 0;
+
+  Object.entries(matData).forEach(([mat, data]) => {
+    if (!data.sheets && !data.ebMm) return;
+    const ov = _quoteOverrides[mat] || {};
+    const autoPrice = lookupBoardPrice(mat, tier);
+    const boardPrice = ov.boardPrice !== undefined ? ov.boardPrice : (autoPrice ?? 0);
+    const surcharge = ov.surcharge || false;
+    const cutRate = ov.cutRate !== undefined ? ov.cutRate : defaultCutRate;
+    const ebTapeKey = ov.ebTapeKey || '23x1 ABS';
+    const ebRate = _ebRates.find(r=>r.tape_key===ebTapeKey);
+    const ebRateTotal = ebRate ? (parseFloat(ebRate.base_rate) + parseFloat(ebRate.mat_rate)) : 3.50;
+    const ebM = (data.ebMm||0)/1000;
+
+    const boardBase = data.sheets * boardPrice;
+    const boardTotal = surcharge ? boardBase * 1.08 : boardBase;
+    const cutTotal = data.sheets * cutRate;
+    const ebTotal = ebM * ebRateTotal;
+    const matTotal = boardTotal + cutTotal + ebTotal;
+    grandEx += matTotal;
+
+    const priceNote = autoPrice !== null
+      ? `£${autoPrice.toFixed(2)}/sheet${tier==='trade'?' (incl. 7%)':''}`
+      : '<span style="color:#f87171">Not in price list</span>';
+
+    rows += `
+    <tr class="mat-head"><td colspan="6">${mat}</td></tr>
+    <tr>
+      <td>Boards</td>
+      <td class="override-label">${data.sheets} sheets × <input type="number" class="override-input" value="${boardPrice.toFixed(2)}"
+        onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},boardPrice:parseFloat(this.value)||0};buildQuote()" step="0.01">
+        <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#6b8f7e;margin-left:8px">
+          <input type="checkbox" ${surcharge?'checked':''} onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},surcharge:this.checked};buildQuote()"> +8% surcharge
+        </label>
+      </td>
+      <td></td><td></td>
+      <td class="r" style="font-size:11px;color:#6b8f7e">${priceNote}</td>
+      <td class="r">£${boardTotal.toFixed(2)}</td>
+    </tr>
+    <tr>
+      <td>Cutting</td>
+      <td class="override-label">${data.sheets} sheets × <input type="number" class="override-input" value="${cutRate.toFixed(2)}"
+        onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},cutRate:parseFloat(this.value)||0};buildQuote()" step="0.01">/sheet</td>
+      <td></td><td></td><td></td>
+      <td class="r">£${cutTotal.toFixed(2)}</td>
+    </tr>
+    ${ebM > 0 ? `<tr>
+      <td>Edgebanding</td>
+      <td class="override-label">${ebM.toFixed(2)}m ×
+        <select style="width:auto;display:inline;padding:2px 4px;font-size:11px;margin:0 4px"
+          onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},ebTapeKey:this.value};buildQuote()">
+          ${_ebRates.map(r=>`<option value="${r.tape_key}" ${r.tape_key===ebTapeKey?'selected':''}>${r.tape_label}</option>`).join('')}
+        </select>
+      </td>
+      <td></td><td></td>
+      <td class="r" style="font-size:11px;color:#6b8f7e">@ £${ebRateTotal.toFixed(2)}/lm</td>
+      <td class="r">£${ebTotal.toFixed(2)}</td>
+    </tr>` : ''}
+    <tr class="subtotal">
+      <td colspan="5">${mat} subtotal</td>
+      <td class="r">£${matTotal.toFixed(2)}</td>
+    </tr>`;
+  });
+
+  const grandInc = grandEx * 1.20;
+  const vatAmt = grandEx * 0.20;
+
+  wrap.innerHTML = `
+    <table class="qt">
+      <thead><tr><th>Item</th><th>Detail</th><th></th><th></th><th class="r">Rate</th><th class="r">Total</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="totals-box">
+      <div class="totals-row"><span>Total ex-VAT</span><span>£${grandEx.toFixed(2)}</span></div>
+      <div class="totals-row"><span>VAT (20%)</span><span>£${vatAmt.toFixed(2)}</span></div>
+      <div class="totals-row grand"><span>Total inc-VAT</span><span>£${grandInc.toFixed(2)}</span></div>
+    </div>`;
+}
+
+async function saveQuote() {
+  if (!_currentJob) return;
+  const tier = document.getElementById('qTier').value;
+  const custName = document.getElementById('qCustomer').value;
+
+  // Grab totals from DOM
+  const totalEls = document.querySelectorAll('.totals-row span:last-child');
+  const exVat = totalEls[0]?.textContent?.replace('£','') || '0';
+  const incVat = totalEls[2]?.textContent?.replace('£','') || '0';
+
+  const payload = {
+    job_id: _currentJob.id,
+    job_name: _currentJob.job_name,
+    customer_name: custName || null,
+    customer_tier: tier,
+    quote_data: {overrides: _quoteOverrides, tier},
+    total_ex_vat: parseFloat(exVat),
+    total_inc_vat: parseFloat(incVat)
+  };
+
+  try {
+    await sbFetch('tce_quotes',{method:'POST',headers:{'Prefer':'return=minimal'},body:payload});
+    alert('Quote saved');
+    loadSavedQuotes(_currentJob.id);
+  } catch(e) { alert('Error saving quote: '+e.message); }
+}
+
+async function loadSavedQuotes(jobId) {
+  try {
+    const rows = await sbFetch('tce_quotes',`?job_id=eq.${jobId}&select=*&order=created_at.desc`);
+    const sec = document.getElementById('savedQuotesSection');
+    if (!rows?.length) { sec.innerHTML=''; return; }
+    sec.innerHTML = `<div class="card">
+      <div class="card-title">Saved Quotes for this Job</div>
+      <table class="jobs-table">
+        <thead><tr><th>Date</th><th>Customer</th><th>Tier</th><th class="r">Ex-VAT</th><th class="r">Inc-VAT</th></tr></thead>
+        <tbody>${rows.map(q=>`<tr>
+          <td>${new Date(q.created_at).toLocaleDateString('en-GB')}</td>
+          <td>${q.customer_name||'—'}</td>
+          <td><span class="badge badge-${q.customer_tier}">${q.customer_tier}</span></td>
+          <td style="text-align:right">£${parseFloat(q.total_ex_vat).toFixed(2)}</td>
+          <td style="text-align:right">£${parseFloat(q.total_inc_vat).toFixed(2)}</td>
+        </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  } catch(e){}
+}
+
+function printQuote() {
+  if (!_currentJob) return;
+  const tier = document.getElementById('qTier').value;
+  const custName = document.getElementById('qCustomer').value || '—';
+  const jobName = _currentJob.job_name || 'Job';
+  const today = new Date().toLocaleDateString('en-GB');
+
+  // Re-parse matData for clean print
+  let jobData;
+  try { jobData = typeof _currentJob.job_data==='string'?JSON.parse(_currentJob.job_data):_currentJob.job_data; } catch(e){return;}
+
+  const matData = {};
+  jobData?.lastResult?.sheets?.forEach(s=>{
+    if(!matData[s.name]) matData[s.name]={sheets:0,ebMm:0};
+    matData[s.name].sheets++;
+  });
+  Object.entries(jobData?.lastResult?.ebMap||{}).forEach(([key,mm])=>{
+    const mat=key.split(' · ').slice(1).join(' · ');
+    if(matData[mat]) matData[mat].ebMm=(matData[mat].ebMm||0)+mm;
+  });
+
+  const defaultCutRate = getDefaultCutRate(jobData, tier);
+  let rows=''; let grandEx=0;
+
+  Object.entries(matData).forEach(([mat,data])=>{
+    if(!data.sheets&&!data.ebMm) return;
+    const ov=_quoteOverrides[mat]||{};
+    const autoPrice=lookupBoardPrice(mat,tier);
+    const boardPrice=ov.boardPrice!==undefined?ov.boardPrice:(autoPrice??0);
+    const surcharge=ov.surcharge||false;
+    const cutRate=ov.cutRate!==undefined?ov.cutRate:defaultCutRate;
+    const ebTapeKey=ov.ebTapeKey||'23x1 ABS';
+    const ebRate=_ebRates.find(r=>r.tape_key===ebTapeKey);
+    const ebRateTotal=ebRate?(parseFloat(ebRate.base_rate)+parseFloat(ebRate.mat_rate)):3.50;
+    const ebM=(data.ebMm||0)/1000;
+    const boardBase=data.sheets*boardPrice;
+    const boardTotal=surcharge?boardBase*1.08:boardBase;
+    const cutTotal=data.sheets*cutRate;
+    const ebTotal=ebM*ebRateTotal;
+    const matTotal=boardTotal+cutTotal+ebTotal;
+    grandEx+=matTotal;
+
+    rows+=`
+      <tr class="mat-row"><td colspan="3"><strong>${mat}</strong></td></tr>
+      <tr><td>Boards (${data.sheets} × £${boardPrice.toFixed(2)}${surcharge?' +8%':''})</td><td></td><td class="amt">£${boardTotal.toFixed(2)}</td></tr>
+      <tr><td>Cutting (${data.sheets} sheets × £${cutRate.toFixed(2)})</td><td></td><td class="amt">£${cutTotal.toFixed(2)}</td></tr>
+      ${ebM>0?`<tr><td>Edgebanding (${ebM.toFixed(2)}m × £${ebRateTotal.toFixed(2)}/lm)</td><td></td><td class="amt">£${ebTotal.toFixed(2)}</td></tr>`:''}
+      <tr class="sub-row"><td colspan="2">Subtotal</td><td class="amt">£${matTotal.toFixed(2)}</td></tr>`;
+  });
+
+  const vat=grandEx*0.20;
+  const inc=grandEx*1.20;
+
+  const html=`<!DOCTYPE html><html><head><title>Quote — ${jobName}</title>
+  <style>
+    body{font-family:Arial,sans-serif;font-size:12px;color:#111;padding:28px;max-width:680px;margin:0 auto}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;border-bottom:2px solid #111;padding-bottom:12px}
+    .co{font-size:16px;font-weight:bold}.co-sub{font-size:11px;color:#555;margin-top:2px}
+    .job-title{font-size:18px;font-weight:bold;margin-bottom:4px}
+    .meta{color:#555;font-size:11px;margin-bottom:20px}
+    table{width:100%;border-collapse:collapse;margin-bottom:20px}
+    td{padding:4px 8px;border-bottom:1px solid #eee}
+    .mat-row td{background:#f5f5f5;font-size:11px;text-transform:uppercase;letter-spacing:.3px;border-top:2px solid #ddd;padding-top:8px}
+    .sub-row td{font-weight:bold;border-bottom:2px solid #ccc}
+    .amt{text-align:right;font-variant-numeric:tabular-nums}
+    .totals{max-width:280px;margin-left:auto;border-top:2px solid #111;padding-top:10px}
+    .tot-row{display:flex;justify-content:space-between;padding:3px 0;font-size:13px}
+    .tot-grand{font-size:16px;font-weight:bold;border-top:1px solid #111;margin-top:6px;padding-top:8px}
+    .footer{margin-top:40px;font-size:10px;color:#888;border-top:1px solid #eee;padding-top:8px;text-align:center}
+    @media print{body{padding:0}}
+  </style></head><body>
+  <div class="header">
+    <div><div class="co">Tayside Cut & Edge</div><div class="co-sub">rob@rccjoinery.co.uk · 07876614414</div></div>
+    <div style="text-align:right"><div style="font-size:11px;color:#555">Date: ${today}</div><div style="font-size:11px;color:#555">For approval only</div></div>
+  </div>
+  <div class="job-title">${jobName}</div>
+  <div class="meta">Customer: ${custName} · Tier: ${tier.charAt(0).toUpperCase()+tier.slice(1)}</div>
+  <table><tbody>${rows}</tbody></table>
+  <div class="totals">
+    <div class="tot-row"><span>Total ex-VAT</span><span>£${grandEx.toFixed(2)}</span></div>
+    <div class="tot-row"><span>VAT (20%)</span><span>£${vat.toFixed(2)}</span></div>
+    <div class="tot-row tot-grand"><span>Total inc-VAT</span><span>£${inc.toFixed(2)}</span></div>
+  </div>
+  <div class="footer">Tayside Cut & Edge · Cutlist & Edgebanding Service · Verify all dimensions before cutting</div>
+  </body></html>`;
+
+  const w=window.open('','_blank','width=750,height=600');
+  w.document.write(html); w.document.close();
+  setTimeout(()=>w.print(),400);
+}
+
+// ═══════════════════════════════════════════════════════════
+// PRICING TAB
+// ═══════════════════════════════════════════════════════════
+function renderPricingTab() {
+  const wrap = document.getElementById('pricingTableWrap');
+  const sorted = Object.entries(_pricing).sort((a,b)=>a[0].localeCompare(b[0]));
+
+  // Group by price for cleaner display
+  const byPrice = {};
+  sorted.forEach(([code,info])=>{
+    const p = parseFloat(info.price).toFixed(2);
+    if(!byPrice[p]) byPrice[p] = [];
+    byPrice[p].push(code);
+  });
+
+  // Search bar + table
+  wrap.innerHTML = `
+    <div style="margin-bottom:12px;display:flex;align-items:center;gap:10px">
+      <input type="text" id="priceSearch" placeholder="Search code e.g. U702…"
+        style="max-width:220px"
+        oninput="filterPriceTable(this.value)">
+      <span style="font-size:12px;color:#6b8f7e">${sorted.length} codes loaded</span>
+    </div>
+    <div id="pmPriceNote" style="display:none;background:#1a3a1a;border:1px solid #2b6a2b;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#8ef">
+      ℹ <strong>PM / PG / TM boards</strong> — these use special pricing not tied to an Egger code.<br>
+      PM (Perfect Sense Matt) = £165 &nbsp;|&nbsp; PG (Perfect Sense Gloss) = £155 &nbsp;|&nbsp; TM9/TM12 = £95 &nbsp;|&nbsp; TM28 = £119<br>
+      These are auto-detected from the material name in the quote builder — no code needed.
+    </div>
+    <table class="price-table" id="priceTable">
+      <thead><tr>
+        <th style="width:120px">Egger Code</th>
+        <th style="width:160px">Matches material names containing…</th>
+        <th>Price/Sheet (£) <span style="font-weight:normal;color:#6b8f7e;font-size:10px">— edit and click Save All Prices</span></th>
+      </tr></thead>
+      <tbody>${sorted.map(([code,info])=>`<tr data-code="${code.toLowerCase()}">
+        <td class="code" style="font-size:13px;font-weight:bold;color:#f0a500">${code}</td>
+        <td class="group" style="font-size:11px;color:#8ab">${info.group||''}</td>
+        <td><input type="number" step="0.01" value="${parseFloat(info.price).toFixed(2)}"
+          onchange="_pricing['${code}'].price=parseFloat(this.value)||0"
+          style="width:90px;font-size:14px;font-weight:bold"></td>
+      </tr>`).join('')}
+      </tbody>
+    </table>
+    <div style="margin-top:16px;padding:12px;background:#0d1f1a;border-radius:8px;border:1px solid #2b4a40">
+      <div style="font-size:12px;color:#6b8f7e;margin-bottom:6px">Quick reference — codes by price group</div>
+      <div style="font-size:11px;color:#8ab;line-height:1.8">
+        ${Object.entries(byPrice).sort((a,b)=>parseFloat(a[0])-parseFloat(b[0])).map(([price,codes])=>
+          `<span style="color:#e8f0ec;font-weight:bold">£${price}:</span> ${codes.join(', ')}`
+        ).join('<br>')}
+      </div>
+    </div>`;
+}
+
+function filterPriceTable(q) {
+  const rows = document.querySelectorAll('#priceTable tbody tr');
+  const lq = q.toLowerCase().replace(/\s+/g,''); // strip spaces for matching
+  rows.forEach(r => {
+    const code = r.dataset.code || '';
+    // Match if code contains query OR query contains the code (e.g. "u702pm" contains "u702")
+    const match = !lq || code.includes(lq) || lq.includes(code);
+    r.style.display = match ? '' : 'none';
+  });
+  // If searching "U702 PM" — also show a note about PM pricing
+  const pmNote = document.getElementById('pmPriceNote');
+  if (pmNote) pmNote.style.display = /pm/i.test(q) ? 'block' : 'none';
+}
+
+async function savePricing() {
+  const rows = Object.entries(_pricing).map(([code,info])=>({
+    egger_code:code, price_retail:parseFloat(info.price), group_name:info.group||''
+  }));
+  try {
+    await sbFetch('tce_pricing',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates'},body:rows});
+    showToast('Prices saved ✓');
+  } catch(e) { alert('Save failed: '+e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// CUT & EB RATES
+// ═══════════════════════════════════════════════════════════
+function renderCutRates() {
+  const wrap = document.getElementById('cutRatesWrap');
+  wrap.innerHTML = `<table class="price-table">
+    <thead><tr><th>Sheet Size</th><th>Retail (£)</th><th>Trade (£)</th><th></th></tr></thead>
+    <tbody id="cutRatesBody">${_cutRates.map((r,i)=>`<tr>
+      <td><input type="text" value="${r.size_label}" onchange="_cutRates[${i}].size_label=this.value" style="width:140px"></td>
+      <td><input type="number" step="0.01" value="${parseFloat(r.rate_retail).toFixed(2)}" onchange="_cutRates[${i}].rate_retail=parseFloat(this.value)||0" style="width:70px"></td>
+      <td><input type="number" step="0.01" value="${parseFloat(r.rate_trade).toFixed(2)}" onchange="_cutRates[${i}].rate_trade=parseFloat(this.value)||0" style="width:70px"></td>
+      <td><button class="btn btn-danger btn-sm" onclick="_cutRates.splice(${i},1);renderCutRates()">×</button></td>
+    </tr>`).join('')}
+    </tbody></table>`;
+}
+
+function addCutRate() {
+  _cutRates.push({size_label:'New Size',rate_retail:70,rate_trade:70});
+  renderCutRates();
+}
+
+function renderEbRates() {
+  const wrap = document.getElementById('ebRatesWrap');
+  wrap.innerHTML = `<table class="price-table">
+    <thead><tr><th>Tape Label</th><th>Base (£/m)</th><th>Mat (£/m)</th><th></th></tr></thead>
+    <tbody>${_ebRates.map((r,i)=>`<tr>
+      <td><input type="text" value="${r.tape_label}" onchange="_ebRates[${i}].tape_label=this.value" style="width:160px"></td>
+      <td><input type="number" step="0.01" value="${parseFloat(r.base_rate).toFixed(2)}" onchange="_ebRates[${i}].base_rate=parseFloat(this.value)||0" style="width:60px"></td>
+      <td><input type="number" step="0.01" value="${parseFloat(r.mat_rate).toFixed(2)}" onchange="_ebRates[${i}].mat_rate=parseFloat(this.value)||0" style="width:60px"></td>
+      <td><button class="btn btn-danger btn-sm" onclick="_ebRates.splice(${i},1);renderEbRates()">×</button></td>
+    </tr>`).join('')}
+    </tbody></table>`;
+}
+
+function addEbRate() {
+  _ebRates.push({tape_key:`tape_${Date.now()}`,tape_label:'New Tape',base_rate:2.90,mat_rate:0.60});
+  renderEbRates();
+}
+
+async function saveCutEbRates() {
+  try {
+    // Upsert cut rates
+    const cutRows = _cutRates.map(r=>({
+      size_label:r.size_label, rate_retail:parseFloat(r.rate_retail), rate_trade:parseFloat(r.rate_trade)
+    }));
+    await sbFetch('tce_cut_rates',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates'},body:cutRows});
+
+    // Upsert EB rates
+    const ebRows = _ebRates.map(r=>({
+      tape_key:r.tape_key||r.tape_label.replace(/\s/g,'_'),
+      tape_label:r.tape_label, base_rate:parseFloat(r.base_rate), mat_rate:parseFloat(r.mat_rate)
+    }));
+    await sbFetch('tce_eb_rates',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates'},body:ebRows});
+
+    showToast('Rates saved ✓');
+  } catch(e) { alert('Save failed: '+e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// CUSTOMERS
+// ═══════════════════════════════════════════════════════════
+function renderCustomers() {
+  const wrap = document.getElementById('customersWrap');
+  if (!_customers.length) { wrap.innerHTML='<div class="no-data">No customers yet. Add your first customer above.</div>'; return; }
+  wrap.innerHTML = _customers.map(c=>`
+    <div class="cust-card">
+      <div>
+        <div class="cust-name">${c.name}</div>
+        <div class="cust-meta">${c.contact_name||''} ${c.email?'· '+c.email:''} ${c.notes?'· '+c.notes:''}</div>
+      </div>
+      <span class="badge badge-${c.tier||'retail'}">${(c.tier||'retail').toUpperCase()}</span>
+      <div style="color:#6b8f7e;font-size:12px">${c.tier==='trade'?'+7% boards':''}</div>
+      <button class="btn btn-danger btn-sm" onclick="deleteCustomer('${c.id}')">Delete</button>
+    </div>`).join('');
+}
+
+function populateCustomerDropdown() {
+  const sel = document.getElementById('qCustomer');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— No customer selected —</option>' +
+    _customers.map(c=>`<option value="${c.name}" data-tier="${c.tier||'retail'}">${c.name} (${c.tier||'retail'})</option>`).join('');
+  sel.onchange = function() {
+    const opt = sel.selectedOptions[0];
+    if (opt?.dataset?.tier) {
+      document.getElementById('qTier').value = opt.dataset.tier;
+    }
+    buildQuote();
+  };
+}
+
+function showAddCustomer() {
+  document.getElementById('addCustomerForm').style.display = 'block';
+}
+
+async function saveNewCustomer() {
+  const name = document.getElementById('newCustName').value.trim();
+  if (!name) { alert('Name required'); return; }
+  const tier = document.getElementById('newCustTier').value;
+  const payload = {
+    company_name: name,
+    tier,
+    markup_pct: tier==='trade'?7:0,
+    notes: document.getElementById('newCustNotes').value
+  };
+  try {
+    await sbFetch('tce_customers',{method:'POST',headers:{'Prefer':'return=minimal'},body:payload});
+    document.getElementById('addCustomerForm').style.display='none';
+    document.getElementById('newCustName').value='';
+    document.getElementById('newCustNotes').value='';
+    await loadCustomers();
+    showToast('Customer added ✓');
+  } catch(e) { alert('Error: '+e.message); }
+}
+
+async function deleteCustomer(id) {
+  if (!confirm('Delete this customer?')) return;
+  try {
+    await sbFetch(`tce_customers?id=eq.${id}`,{method:'DELETE'});
+    await loadCustomers();
+  } catch(e) { alert('Error: '+e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════════════════════════
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.textContent = msg;
+  t.style.cssText='position:fixed;bottom:24px;right:24px;background:#1a5c3a;color:#e8f0ec;padding:10px 20px;border-radius:8px;font-size:13px;z-index:9999;border:1px solid #2b8a4a';
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 2500);
+}
+
+// ── INIT ──
+document.getElementById('pinInput').focus();
+document.addEventListener('keydown', e => {
+  if (e.key==='Enter' && document.getElementById('pinScreen').style.display!=='none') checkPin();
+});
+</script>
+</body>
+</html>
