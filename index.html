@@ -457,6 +457,7 @@ select option{background:var(--surf2)}
     <div style="display:flex;gap:8px">
       <input id="cloudJobName" placeholder="Job name to save..." style="flex:1;background:var(--surf2);border:1px solid var(--brd);color:var(--txt);border-radius:6px;padding:7px 10px;font-size:13px;font-family:var(--sans)">
       <button class="btn btn-sm" style="background:var(--acc);color:#111;font-weight:700" onclick="cloudSaveJob()">💾 Save</button>
+      <button class="btn btn-sm" style="background:var(--surf2);color:var(--txt);border:1px solid var(--brd);white-space:nowrap" onclick="cloudSaveAsRevision()" title="Save as a new revision, keeping the original">Save as Rev</button>
     </div>
     <div style="display:flex;gap:8px;align-items:center">
       <span style="font-size:11px;color:var(--txt3);white-space:nowrap">Customer:</span>
@@ -888,6 +889,18 @@ async function loadCloudJobList(){
   }catch(e){
     list.innerHTML='<div class="cj-empty" style="color:var(--err)">Could not load jobs: '+e.message+'</div>';
   }
+}
+
+async function cloudSaveAsRevision(){
+  const cur=(document.getElementById('cloudJobName').value||'').trim()||projectName||'Unnamed Job';
+  const base=cur.replace(/\s*[-—]\s*Rev\s*\d+\s*$/i,'').trim();
+  const m=cur.match(/Rev\s*(\d+)\s*$/i);
+  const nextN=m?((parseInt(m[1])||1)+1):2;
+  const revName=prompt('Save as a new revision — keeps the original job and creates a copy.\n\nRevision name:', base+' — Rev '+nextN);
+  if(!revName||!revName.trim())return;
+  document.getElementById('cloudJobName').value=revName.trim();
+  _loadedCloudJobId=null;   // force a brand-new job row instead of overwriting the original
+  await cloudSaveJob();
 }
 
 async function cloudSaveJob(){
@@ -2734,6 +2747,11 @@ function applyImport(){
     }
   });
   if(sheetsAdded>0)renderJobSheets();
+
+  // Offer to replace the existing cutlist (parts only — your sheets stay).
+  if(parts.length>0 && confirm('This job already has '+parts.length+' part'+(parts.length!==1?'s':'')+'.\n\nOK = Replace them with this cutlist (your sheets are kept).\nCancel = Add this cutlist to the existing parts.')){
+    parts=[]; pid=1;
+  }
 
   // -- PASS 3: split shaker doors from normal parts --
   const shakerRows=[];
