@@ -2711,12 +2711,26 @@ function applyImport(){
   // ── PASS 2: add matching library sheets BEFORE processing parts ──
   // This ensures importResolveSheet finds them when resolving matName below.
   let sheetsAdded=0;
+  const autoCreated=[];   // boards not in the library, created straight from the cutlist
   matsFound.forEach(mn=>{
+    if(/shaker\s*door/i.test(mn)) return;          // shaker doors handled separately
     const mat=importResolveLib(mn);
-    if(mat&&!jobSheets.some(js=>js.libRef===mat.id)){
-      jobSheets.push({id:jsid++,libRef:mat.id,name:mat.name,l:mat.l,w:mat.w,thick:mat.thick,
-        cost:mat.cost,color:mat.color,grainLen:mat.grainLen,qty:1,trimT:15,trimB:15,trimL:15,trimR:15});
+    if(mat){
+      if(!jobSheets.some(js=>js.libRef===mat.id)){
+        jobSheets.push({id:jsid++,libRef:mat.id,name:mat.name,l:mat.l,w:mat.w,thick:mat.thick,
+          cost:mat.cost,color:mat.color,grainLen:mat.grainLen,qty:1,trimT:15,trimB:15,trimL:15,trimR:15});
+        sheetsAdded++;
+      }
+    } else if(!jobSheets.some(js=>(js.name||'').toLowerCase()===mn.toLowerCase())){
+      // Not in the library: create a sheet from the cutlist name so the board is
+      // never silently skipped. Defaults to a full Egger sheet; thickness is read
+      // from the name if present (e.g. "12mm ..."), otherwise 18mm.
+      const thM=mn.match(/(\d+(?:\.\d+)?)\s*mm/i);
+      const thick=thM?parseFloat(thM[1]):18;
+      jobSheets.push({id:jsid++,libRef:null,name:mn,l:2800,w:2070,thick:thick,
+        cost:0,color:nc(),grainLen:true,qty:1,trimT:15,trimB:15,trimL:15,trimR:15});
       sheetsAdded++;
+      autoCreated.push(mn);
     }
   });
   if(sheetsAdded>0)renderJobSheets();
@@ -2771,6 +2785,7 @@ function applyImport(){
   };
 
   const sheetMsg=sheetsAdded>0?'\n'+sheetsAdded+' sheet type'+(sheetsAdded!==1?'s':'')+' auto-added.':'';
+  const newMsg=autoCreated.length?'\n\nNote: '+autoCreated.length+' board'+(autoCreated.length!==1?'s were':' was')+' not in your library, so created from the cutlist at 2800 x 2070 - please check size/thickness/cost:\n- '+autoCreated.join('\n- '):'';
 
   if(shakerRows.length>0){
     const normalAdded=processNormalRows();
@@ -2793,14 +2808,14 @@ function applyImport(){
       return {h:l,w,label:rawL||board,qty,cfg,company,notes};
     });
     openShakerModal(doors, ()=>{});
-    if(normalAdded>0) alert('Imported '+normalAdded+' standard part'+(normalAdded!==1?'s':'')+'.'+sheetMsg+'\n\nReview your '+shakerRows.length+' shaker door'+(shakerRows.length!==1?'s':'')+' in the door review panel.');
+    if(normalAdded>0) alert('Imported '+normalAdded+' standard part'+(normalAdded!==1?'s':'')+'.'+sheetMsg+newMsg+'\n\nReview your '+shakerRows.length+' shaker door'+(shakerRows.length!==1?'s':'')+' in the door review panel.');
     return;
   }
 
   // No shaker doors - standard flow
   const added=processNormalRows();
   save();renderParts();cm('importModal');
-  alert('Imported '+added+' part'+(added!==1?'s':'')+' successfully.'+sheetMsg);
+  alert('Imported '+added+' part'+(added!==1?'s':'')+' successfully.'+sheetMsg+newMsg);
 }
 
 // ═══════════════════════════════════════════════
