@@ -654,6 +654,10 @@ function renderJobsTable() {
 
 async function openJob(id) {
   if (!id) { console.error('openJob: no id provided'); return; }
+  if (typeof SB_TOKEN === 'undefined' || !SB_TOKEN) {
+    alert('Please sign in first to open a saved job.');
+    return;
+  }
 
   // 1. Fetch job data first
   let full;
@@ -663,7 +667,7 @@ async function openJob(id) {
     alert('Could not load job: ' + e.message);
     return;
   }
-  if (!full || !full.length) { alert('Job not found'); return; }
+  if (!full || !full.length) { alert('Job not found. If you were signed out, please sign in and try again.'); return; }
   _currentJob = full[0];
   _quoteOverrides = {};
 
@@ -716,39 +720,48 @@ function lookupBoardPrice(matName, tier) {
   let materialType = 'Egger';
   let supplierName = 'Lathams';
 
-  // PM/PG/TM detection - read editable prices from the Pricing tab (_pricing),
-  // falling back to the original defaults if a field hasn't been set yet
-  if (/\bpm\b/.test(nameLower)) { basePrice = parseFloat(_pricing['PM']?.price) || 165; materialType = 'Egger'; }
-  else if (/\bpg\b/.test(nameLower)) { basePrice = parseFloat(_pricing['PG']?.price) || 155; materialType = 'Egger'; }
-  else if (/\btm28\b/.test(nameLower)) { basePrice = parseFloat(_pricing['TM28']?.price) || 119; materialType = 'Egger'; }
-  else if (/\btm12\b/.test(nameLower)) { basePrice = parseFloat(_pricing['TM12']?.price) || 95; materialType = 'Egger'; }
-  else if (/\btm9\b/.test(nameLower)) { basePrice = parseFloat(_pricing['TM9']?.price) || 95; materialType = 'Egger'; }
-  else {
-    // Check custom boards first (MR MDF, Birch Ply etc)
-    // Match by board_name contained in matName and thickness extracted from matName
+  // ── Board price lookup (code + finish) ─────────────────────────────
+  // Prices are keyed "CODE FINISH" in _pricing, e.g. "U999 ST19", "U702 PM".
+  const code = matName.match(/([A-Z]\d{3,4})/i)?.[1]?.toUpperCase() || null;
+  const finM = matName.match(/\b(ST\s?\d+|PM|PG|TM\s?\d+)\b/i);
+  const finish = finM ? finM[1].toUpperCase().replace(/\s+/g, '') : null;
+
+  // 1) Exact Egger board match (code + finish) — the normal case
+  if (code && finish && _pricing[code + ' ' + finish]) {
+    basePrice = parseFloat(_pricing[code + ' ' + finish].price);
+    materialType = 'Egger';
+  }
+
+  // 2) Custom boards (MR MDF, Birch Ply, MDF, etc.)
+  if (basePrice === null) {
     const thickMatch = matName.match(/(\d+)mm/i);
     const thickMm = thickMatch ? parseInt(thickMatch[1]) : null;
     const sizeMatch = matName.match(/(3050|2440)/);
     const sheetW = sizeMatch ? sizeMatch[1] : '2440';
-
     const customMatch = _customBoards.find(b => {
       const nameMatch = nameLower.includes(b.board_name.toLowerCase());
       const thickOk = thickMm ? b.thickness_mm === thickMm : true;
       const sizeOk = b.sheet_size.startsWith(sheetW);
       return nameMatch && thickOk && sizeOk;
     });
-
     if (customMatch) {
       basePrice = parseFloat(customMatch.base_cost) || 0;
-      materialType = customMatch.board_name; // "MR MDF" or "Birch Ply"
+      materialType = customMatch.board_name;
       supplierName = customMatch.supplier || 'Lathams';
-    } else {
-      // Fall back to Egger lookup
-      const code = matName.match(/([A-Z]\d{3,4})/i)?.[1]?.toUpperCase();
-      if (code && _pricing[code]) {
-        basePrice = parseFloat(_pricing[code].price);
-        materialType = 'Egger';
-      }
+    }
+  }
+
+  // 3) Egger fallbacks if no exact board: flat premium price, then any variant
+  //    of the same code, then a legacy flat code price.
+  if (basePrice === null && code) {
+    materialType = 'Egger';
+    if (finish && /^(PM|PG|TM\d+)$/.test(finish) && _pricing[finish]) {
+      basePrice = parseFloat(_pricing[finish].price);
+    }
+    if (basePrice === null) {
+      const vKey = Object.keys(_pricing).find(k => k.indexOf(code + ' ') === 0);
+      if (vKey) basePrice = parseFloat(_pricing[vKey].price);
+      else if (_pricing[code]) basePrice = parseFloat(_pricing[code].price);
     }
   }
 
@@ -1066,7 +1079,11 @@ function renderPricingTab() {
   const wrap = document.getElementById('pricingTableWrap');
   if (document.getElementById('priceTable')) return; // already rendered, preserve edits
 
-  const sorted = Object.entries(_pricing).sort((a,b)=>a[0].localeCompare(b[0]));
+  // Show only real boards (keyed "CODE FINISH", e.g. "U999 ST19"); legacy
+  // bare-code and flat special rows stay in the DB as fallbacks but are hidden.
+  const sorted = Object.entries(_pricing)
+    .filter(([code]) => code.includes(' '))
+    .sort((a,b)=>a[0].localeCompare(b[0]));
 
   // Group by price band for reference panel
   const byPrice = {};
@@ -1206,8 +1223,7 @@ async function savePricing() {
 
   // Single bulk upsert (insert-or-update) keyed on egger_code so existing rows
   // UPDATE (instead of colliding on the primary key) and any missing rows are
-  // created - e.g. the PM/PG/TM special finishes, which previously had no row
-  // and so could never be saved.
+  // created. Prices are keyed "CODE FINISH" (e.g. "U999 ST19").
   const payload = Object.entries(_pricing).map(([code, info]) => ({
     egger_code: code,
     price_retail: parseFloat(info.price) || 0,
@@ -1220,7 +1236,7 @@ async function savePricing() {
       body: JSON.stringify(payload)
     });
     if (r.ok) {
-      showToast('All ' + payload.length + ' prices saved \u2713');
+      showToast('All ' + payload.length + ' prices saved ✓');
     } else {
       const msg = await r.text().catch(() => '');
       console.error('savePricing failed:', r.status, msg);
