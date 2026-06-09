@@ -357,27 +357,6 @@ select option{background:var(--surf2)}
 .lbl-bot{display:flex;justify-content:space-between;align-items:center}
 .lbl-num{font-size:10px;font-weight:700;color:#000}
 @media print{.lm-bar{display:none!important}#labelModal{background:#fff!important}.lm-body{padding:0!important;overflow:visible!important}.dymo-label{break-inside:avoid;page-break-inside:avoid;box-shadow:none!important}.lm-labels{gap:4px}}
-/* ── Admin pricing panel ── */
-.adm-mat-block{background:#162620;border:1px solid #2b4a40;border-radius:8px;margin-bottom:14px;overflow:hidden}
-.adm-mat-header{display:flex;align-items:center;gap:12px;padding:10px 16px;background:#1e3530;border-bottom:1px solid #2b4a40}
-.adm-mat-name{font-weight:bold;color:#f0a500;font-size:14px;flex:1}
-.adm-mat-lookup{font-size:11px;color:#8ab;background:#0d1f1a;padding:3px 8px;border-radius:4px;border:1px solid #2b4a40}
-.adm-mat-sheets,.adm-mat-eb{font-size:11px;color:#6b8f7e;white-space:nowrap}
-.adm-mat-rows{padding:0}
-.adm-row{display:grid;grid-template-columns:140px 1fr 90px;align-items:center;gap:12px;padding:9px 16px;border-bottom:1px solid #1e3530}
-.adm-row-label{font-size:12px;color:#8ab;font-weight:500}
-.adm-inputs{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.adm-inputs input[type=number]{width:72px;background:#0d1f1a;color:#e8f0ec;border:1px solid #2b4a40;border-radius:4px;padding:5px 7px;font-size:13px}
-.adm-inputs select{background:#0d1f1a;color:#e8f0ec;border:1px solid #2b4a40;border-radius:4px;padding:5px 7px;font-size:12px;max-width:200px}
-.adm-inputs .adm-prefix{color:#6b8f7e;font-size:13px}
-.adm-check{display:flex;align-items:center;gap:5px;font-size:11px;color:#8ab;cursor:pointer;white-space:nowrap}
-.adm-check input{cursor:pointer}
-.adm-eb-rate{font-size:11px;color:#6b8f7e;white-space:nowrap}
-.adm-line-total{font-weight:bold;color:#e8f0ec;font-size:13px;text-align:right}
-.adm-mat-subtotal{display:flex;justify-content:space-between;align-items:center;background:#1a2e28;padding:9px 16px;font-weight:bold;font-size:13px;color:#f0a500;border-top:2px solid #2b4a40}
-.adm-setting-row{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:12px;color:#aaa}
-.adm-setting-row input{background:#0d1f1a;color:#e8f0ec;border:1px solid #2b4a40;border-radius:4px;padding:4px 6px}
-.adm-setting-row button{background:#1a3a2a;color:#e8f0ec;border:1px solid #2b4a40;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px}
 </style>
 </head>
 <body>
@@ -585,6 +564,7 @@ select option{background:var(--surf2)}
       <span style="flex:1"></span>
       <span style="font-size:11px;color:var(--txt3);align-self:center">Tap a sheet to add it to the job</span>
     </div>
+    <input id="libSearch" type="text" placeholder="Search code, finish or name… e.g. U999 ST19" oninput="renderLibList()" autocomplete="off" style="width:100%;box-sizing:border-box;margin-bottom:12px;padding:9px 11px;border:1px solid #2b4a40;border-radius:6px;background:#0d1f1a;color:#e8f0ec;font-size:14px">
     <div id="libList"></div>
   </div>
 </div>
@@ -941,7 +921,7 @@ async function cloudSaveJob(){
       : SB_URL+'/rest/v1/tce_jobs';
     const r=await fetch(url,{
       method: isUpdate ? 'PATCH' : 'POST',
-      headers:{...sbAuthH(), ...(isUpdate?{'Prefer':'return=minimal'}:{'Prefer':'return=representation'})},
+      headers:{...sbAuthH(), ...(isUpdate?{'Prefer':'return=minimal'}:{})},
       body:JSON.stringify({
         user_id:_sbUser.id,
         job_name:name,
@@ -954,13 +934,6 @@ async function cloudSaveJob(){
       let errMsg='Save failed ('+r.status+')';
       try{const ed=await r.json();errMsg=ed.message||ed.hint||ed.error||errMsg;}catch(e2){}
       throw new Error(errMsg);
-    }
-    // If this was a new POST, capture the returned ID so subsequent saves in the same session PATCH instead of creating duplicates
-    if(!isUpdate){
-      try{
-        const saved=await r.json();
-        if(saved&&saved[0]&&saved[0].id) _loadedCloudJobId=saved[0].id;
-      }catch(e2){}
     }
     loadCloudJobList();
     // Show brief confirmation
@@ -1072,12 +1045,17 @@ window.onload=async()=>{
 // ═══════════════════════════════════════════════
 // LIBRARY
 // ═══════════════════════════════════════════════
-function openLibModal(){renderLibList();sm('libModal');}
+function openLibModal(){const sb=document.getElementById('libSearch');if(sb)sb.value='';renderLibList();sm('libModal');}
 
 function renderLibList(){
   const el=document.getElementById('libList');
   if(!library.length){el.innerHTML='<div class="lib-empty">No sheets saved. Click "+ New Sheet".</div>';return;}
-  el.innerHTML=library.map(s=>`
+  const q=(document.getElementById('libSearch')?.value||'').toLowerCase().replace(/\s+/g,' ').trim();
+  const qns=q.replace(/\s+/g,'');
+  const norm=v=>(v||'').toLowerCase().replace(/\s+/g,' ');
+  const list=q? library.filter(s=>{const n=norm(s.name); return n.includes(q)||n.replace(/\s+/g,'').includes(qns)||norm(s.notes).includes(q);}) : library;
+  if(!list.length){el.innerHTML='<div class="lib-empty">No boards match “'+esc(q)+'”.</div>';return;}
+  el.innerHTML=list.map(s=>`
     <div class="lib-card" onclick="addJobSheetFromLib(${s.id})">
       <div>
         <div class="lib-card-name"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${s.color};margin-right:6px;vertical-align:middle"></span>${esc(s.name)}</div>
@@ -1325,6 +1303,20 @@ function renderParts(){
 // ═══════════════════════════════════════════════════════════════
 
 function calculate(){
+  // Show progress indicator while optimising
+  const runBtn=document.querySelector('.btn-run');
+  const origText=runBtn?runBtn.textContent:'';
+  if(runBtn){runBtn.textContent='⏳ Optimising...';runBtn.disabled=true;}
+  // Use setTimeout so UI updates before heavy calculation starts
+  setTimeout(()=>{
+    try{ _calculateInner(); }
+    finally{
+      if(runBtn){runBtn.textContent=origText;runBtn.disabled=false;}
+    }
+  },30);
+}
+
+function _calculateInner(){
   const cncMode=document.getElementById('cncMode')&&document.getElementById('cncMode').checked;
   const sawKerf=parseFloat(document.getElementById('kerf').value)||0;
   const cncKerf=parseFloat((document.getElementById('cncKerf')||{}).value)||8;
@@ -1776,52 +1768,118 @@ function calculate(){
       if(Math.abs(a._pw-b._pw)>1) return b._pw-a._pw;
       return b._ph-a._ph;
     }},
-    // Strategy F: large parts first, small parts grouped at end
-    // Fills sheets cleanly with big parts, consolidates small parts onto final sheets
-    // leaving larger usable offcuts rather than scattered small gaps throughout
     {name:'large-first-small-last',sort:(a,b)=>{
       const aFull=a._ph>getUH(a._msid)-1, bFull=b._ph>getUH(b._msid)-1;
       if(aFull&&!bFull) return -1; if(!aFull&&bFull) return 1;
       const mA=a._msid||0, mB=b._msid||0; if(mA!==mB) return mA-mB;
-      const SMALL=300*300; // parts under 300x300mm considered small
+      const SMALL=300*300;
       const aSmall=(a._pw*a._ph)<SMALL, bSmall=(b._pw*b._ph)<SMALL;
-      if(aSmall&&!bSmall) return 1;   // small goes after large
-      if(!aSmall&&bSmall) return -1;  // large goes before small
-      // Within large parts: widest first then tallest (clean strip filling)
+      if(aSmall&&!bSmall) return 1;
+      if(!aSmall&&bSmall) return -1;
       if(Math.abs(a._pw-b._pw)>50) return b._pw-a._pw;
       return b._ph-a._ph;
     }},
-    // Strategy G: strict strip consolidation — bucket by rip width, fill each strip fully
-    // Produces fewer, fuller strips and fewer orphaned small parts on late sheets
     {name:'strip-consolidate',sort:(a,b)=>{
       const aFull=a._ph>getUH(a._msid)-1, bFull=b._ph>getUH(b._msid)-1;
       if(aFull&&!bFull) return -1; if(!aFull&&bFull) return 1;
       const mA=a._msid||0, mB=b._msid||0; if(mA!==mB) return mA-mB;
-      // Bucket into 50mm rip-width bands so parts sharing a rip cut group together
       const aBucket=Math.round(a._pw/50)*50, bBucket=Math.round(b._pw/50)*50;
-      if(aBucket!==bBucket) return bBucket-aBucket; // widest bucket first
-      // Within same bucket: heaviest group first
+      if(aBucket!==bBucket) return bBucket-aBucket;
       const wgA=getWGA(a._msid,a._pw),wgB=getWGA(b._msid,b._pw);
       if(Math.abs(wgA-wgB)>500) return wgB-wgA;
       return b._ph-a._ph;
     }},
   ];
 
-  // Run all strategies, pick best (fewest sheets → then highest avg util)
+  // ── Strategy runner + randomised iteration engine ─────────────────────────
+  // Phase 1: run all fixed strategies (fast, deterministic)
+  // Phase 2: run randomised sort perturbations to find better arrangements
+  // Picks best result across all runs (fewest sheets → highest utilisation)
+
+  const scoreResult=res=>{
+    if(res.unplaced.length) return Infinity;
+    const totalArea=res.sheets.reduce((a,s)=>a+s.placements.reduce((b,p)=>b+p.w*p.h,0),0);
+    const sheetArea=res.sheets.reduce((a,s)=>a+s.uw*s.fullL,0);
+    const avgUtil=sheetArea>0?totalArea/sheetArea:0;
+    return res.sheets.length*1000 - avgUtil*10;
+  };
+
   let best=null;
   const debugInfo=[];
+
+  // Phase 1: fixed strategies
   for(const strat of strategies){
     const res=runStrategy(strat.sort);
     const totalArea=res.sheets.reduce((a,s)=>a+s.placements.reduce((b,p)=>b+p.w*p.h,0),0);
     const sheetArea=res.sheets.reduce((a,s)=>a+s.uw*s.fullL,0);
     const avgUtil=sheetArea>0?totalArea/sheetArea:0;
     debugInfo.push({name:strat.name,sheets:res.sheets.length,util:(avgUtil*100).toFixed(1),unplaced:res.unplaced.length});
-    if(res.unplaced.length) continue; // skip strategies that failed to place everything
-    const score=res.sheets.length*1000 - avgUtil*10; // fewer sheets >>> higher util
+    if(res.unplaced.length) continue;
+    const score=res.sheets.length*1000 - avgUtil*10;
     if(!best||score<best.score){
       best={score,sheets:res.sheets,unplaced:res.unplaced,strategy:strat.name};
     }
   }
+
+  // Phase 2: randomised sort perturbations
+  // Each iteration takes a base strategy and adds random noise to the sort key
+  // This explores different strip orderings the fixed strategies can't reach
+  const RAND_ITERATIONS=40;
+  const RAND_SEED_BASE=Date.now();
+
+  // Simple seeded random (mulberry32)
+  const makeRng=seed=>{
+    let s=seed>>>0;
+    return ()=>{ s+=0x6D2B79F5; let t=Math.imul(s^s>>>15,1|s); t^=t+Math.imul(t^t>>>7,61|t); return ((t^t>>>14)>>>0)/4294967296; };
+  };
+
+  // Base sort functions to perturb (use the fixed strategy sorts as starting points)
+  const baseSorts=[
+    strategies[0].sort, // wide→length-group
+    strategies[1].sort, // wide→width-group
+    strategies[4].sort, // wga-global
+  ];
+
+  let randBest=0;
+  for(let i=0;i<RAND_ITERATIONS;i++){
+    const rng=makeRng(RAND_SEED_BASE+i*7919);
+    const baseSort=baseSorts[i%baseSorts.length];
+    // Perturbation: add random jitter to width/height grouping
+    // Different noise levels per iteration to explore broadly then narrowly
+    const widthJitter=50+Math.floor(rng()*200);  // 50-250mm width grouping noise
+    const areaWeight=rng()*2;                      // 0-2x area weighting
+    const heightBias=rng()>0.5?1:-1;              // random height preference direction
+
+    const perturbedSort=(a,b)=>{
+      // Always respect full-run and material boundaries
+      const aFull=a._ph>getUH(a._msid)-1, bFull=b._ph>getUH(b._msid)-1;
+      if(aFull&&!bFull) return -1; if(!aFull&&bFull) return 1;
+      const mA=a._msid||0, mB=b._msid||0; if(mA!==mB) return mA-mB;
+      // Width bucket with jitter
+      const aBucket=Math.round(a._pw/widthJitter)*widthJitter;
+      const bBucket=Math.round(b._pw/widthJitter)*widthJitter;
+      if(aBucket!==bBucket) return bBucket-aBucket;
+      // Area weighting with random blend of width-group and length-group area
+      const wgA=getWGA(a._msid,a._pw), wgB=getWGA(b._msid,b._pw);
+      const lgA=getLGA(a._msid,a._ph), lgB=getLGA(b._msid,b._ph);
+      const scoreA=wgA*areaWeight+lgA*(2-areaWeight);
+      const scoreB=wgB*areaWeight+lgB*(2-areaWeight);
+      if(Math.abs(scoreA-scoreB)>500) return scoreB-scoreA;
+      // Height/width tie-break with random direction
+      if(Math.abs(a._pw-b._pw)>1) return b._pw-a._pw;
+      return (b._ph-a._ph)*heightBias;
+    };
+
+    const res=runStrategy(perturbedSort);
+    const sc=scoreResult(res);
+    if(sc<Infinity){
+      randBest++;
+      if(!best||sc<best.score){
+        best={score:sc,sheets:res.sheets,unplaced:res.unplaced,strategy:'rand-'+i};
+      }
+    }
+  }
+  debugInfo.push({name:'rand-iterations',sheets:best?best.sheets.length:'-',util:best?(100-best.score%1000/10).toFixed(1)+' (best)':'-',unplaced:0});
   // Expose for iPad/laptop debug comparison + render a visible banner
   if(typeof window!=='undefined'){
     const summary=debugInfo.map(d=>d.name+':'+d.sheets+'sh/'+d.util+'%'+(d.unplaced?' U'+d.unplaced:'')).join(' | ');
@@ -4155,9 +4213,9 @@ function renderAdminPanel() {
       </div>
       <div class="adm-mat-rows">
         <div class="adm-row">
-          <div class="adm-row-label">Board price/sheet</div>
+          <label>Board price/sheet</label>
           <div class="adm-inputs">
-            <span class="adm-prefix">£</span>
+            <span>£</span>
             <input type="number" step="0.01" value="${boardPrice.toFixed(2)}"
               onchange="adminSetOverride('${mat}','boardPrice',parseFloat(this.value)||0);adminRefresh()">
             <label class="adm-check">
@@ -4169,16 +4227,16 @@ function renderAdminPanel() {
           <span class="adm-line-total">£${boardTotal.toFixed(2)}</span>
         </div>
         <div class="adm-row">
-          <div class="adm-row-label">Cut charge/sheet</div>
+          <label>Cut charge/sheet</label>
           <div class="adm-inputs">
-            <span class="adm-prefix">£</span>
+            <span>£</span>
             <input type="number" step="0.01" value="${cutRate.toFixed(2)}"
               onchange="adminSetOverride('${mat}','cutRate',parseFloat(this.value)||0);adminRefresh()">
           </div>
           <span class="adm-line-total">£${cutTotal.toFixed(2)}</span>
         </div>
         <div class="adm-row">
-          <div class="adm-row-label">EB tape type</div>
+          <label>EB tape type</label>
           <div class="adm-inputs">
             <select onchange="adminSetOverride('${mat}','ebTapeType',this.value);adminRefresh()">
               ${Object.entries(EB_TAPE_RATES).map(([k,v])=>`<option value="${k}" ${k===ebTape?'selected':''}>${v.label} (+£${v.mat.toFixed(2)}/m)</option>`).join('')}
@@ -4315,23 +4373,21 @@ function adminPrint() {
     .footer{margin-top:40px;font-size:10px;color:#888;border-top:1px solid #eee;padding-top:8px}
   
 /* ── Admin pricing panel ── */
-.adm-mat-block{background:#162620;border:1px solid #2b4a40;border-radius:8px;margin-bottom:14px;overflow:hidden}
-.adm-mat-header{display:flex;align-items:center;gap:12px;padding:10px 16px;background:#1e3530;border-bottom:1px solid #2b4a40}
-.adm-mat-name{font-weight:bold;color:#f0a500;font-size:14px;flex:1}
-.adm-mat-lookup{font-size:11px;color:#8ab;background:#0d1f1a;padding:3px 8px;border-radius:4px;border:1px solid #2b4a40}
-.adm-mat-sheets,.adm-mat-eb{font-size:11px;color:#6b8f7e;white-space:nowrap}
-.adm-mat-rows{padding:0}
-.adm-row{display:grid;grid-template-columns:140px 1fr 90px;align-items:center;gap:12px;padding:9px 16px;border-bottom:1px solid #1e3530}
-.adm-row-label{font-size:12px;color:#8ab;font-weight:500}
-.adm-inputs{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.adm-inputs input[type=number]{width:72px;background:#0d1f1a;color:#e8f0ec;border:1px solid #2b4a40;border-radius:4px;padding:5px 7px;font-size:13px}
-.adm-inputs select{background:#0d1f1a;color:#e8f0ec;border:1px solid #2b4a40;border-radius:4px;padding:5px 7px;font-size:12px;max-width:200px}
-.adm-inputs .adm-prefix{color:#6b8f7e;font-size:13px}
-.adm-check{display:flex;align-items:center;gap:5px;font-size:11px;color:#8ab;cursor:pointer;white-space:nowrap}
-.adm-check input{cursor:pointer}
-.adm-eb-rate{font-size:11px;color:#6b8f7e;white-space:nowrap}
-.adm-line-total{font-weight:bold;color:#e8f0ec;font-size:13px;text-align:right}
-.adm-mat-subtotal{display:flex;justify-content:space-between;align-items:center;background:#1a2e28;padding:9px 16px;font-weight:bold;font-size:13px;color:#f0a500;border-top:2px solid #2b4a40}
+.adm-mat-block{background:#162620;border:1px solid #2b4a40;border-radius:8px;margin-bottom:12px;overflow:hidden}
+.adm-mat-header{display:flex;align-items:center;gap:12px;padding:10px 14px;background:#1e3530;flex-wrap:wrap}
+.adm-mat-name{font-weight:bold;color:#f0a500;font-size:14px;flex:1;min-width:120px}
+.adm-mat-lookup{font-size:11px;color:#8ab;background:#122;padding:2px 8px;border-radius:4px}
+.adm-mat-sheets,.adm-mat-eb{font-size:11px;color:#6b8f7e}
+.adm-mat-rows{padding:10px 14px;display:flex;flex-direction:column;gap:8px}
+.adm-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.adm-row label{width:130px;font-size:12px;color:#aaa;flex-shrink:0}
+.adm-inputs{display:flex;align-items:center;gap:6px;flex:1;flex-wrap:wrap}
+.adm-inputs input[type=number]{width:70px;background:#0d1f1a;color:#e8f0ec;border:1px solid #2b4a40;border-radius:4px;padding:4px 6px;font-size:12px}
+.adm-inputs select{background:#0d1f1a;color:#e8f0ec;border:1px solid #2b4a40;border-radius:4px;padding:4px 6px;font-size:12px}
+.adm-check{display:flex;align-items:center;gap:4px;font-size:11px;color:#8ab;cursor:pointer}
+.adm-eb-rate{font-size:11px;color:#6b8f7e}
+.adm-line-total{margin-left:auto;font-weight:bold;color:#e8f0ec;font-size:13px;min-width:80px;text-align:right}
+.adm-mat-subtotal{display:flex;justify-content:space-between;border-top:1px solid #2b4a40;padding-top:8px;margin-top:4px;font-weight:bold;font-size:13px;color:#f0a500}
 .adm-setting-row{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:12px;color:#aaa}
 .adm-setting-row input{background:#0d1f1a;color:#e8f0ec;border:1px solid #2b4a40;border-radius:4px;padding:4px 6px}
 .adm-setting-row button{background:#1a3a2a;color:#e8f0ec;border:1px solid #2b4a40;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px}
