@@ -716,12 +716,13 @@ function lookupBoardPrice(matName, tier) {
   let materialType = 'Egger';
   let supplierName = 'Lathams';
 
-  // PM/PG/TM detection
-  if (/\bpm\b/.test(nameLower)) { basePrice = 165; materialType = 'Egger'; }
-  else if (/\bpg\b/.test(nameLower)) { basePrice = 155; materialType = 'Egger'; }
-  else if (/\btm28\b/.test(nameLower)) { basePrice = 119; materialType = 'Egger'; }
-  else if (/\btm12\b/.test(nameLower)) { basePrice = 95; materialType = 'Egger'; }
-  else if (/\btm9\b/.test(nameLower)) { basePrice = 95; materialType = 'Egger'; }
+  // PM/PG/TM detection - read editable prices from the Pricing tab (_pricing),
+  // falling back to the original defaults if a field hasn't been set yet
+  if (/\bpm\b/.test(nameLower)) { basePrice = parseFloat(_pricing['PM']?.price) || 165; materialType = 'Egger'; }
+  else if (/\bpg\b/.test(nameLower)) { basePrice = parseFloat(_pricing['PG']?.price) || 155; materialType = 'Egger'; }
+  else if (/\btm28\b/.test(nameLower)) { basePrice = parseFloat(_pricing['TM28']?.price) || 119; materialType = 'Egger'; }
+  else if (/\btm12\b/.test(nameLower)) { basePrice = parseFloat(_pricing['TM12']?.price) || 95; materialType = 'Egger'; }
+  else if (/\btm9\b/.test(nameLower)) { basePrice = parseFloat(_pricing['TM9']?.price) || 95; materialType = 'Egger'; }
   else {
     // Check custom boards first (MR MDF, Birch Ply etc)
     // Match by board_name contained in matName and thickness extracted from matName
@@ -1203,29 +1204,32 @@ async function savePricing() {
     }
   });
 
-  let saved = 0, failed = 0;
-  for (const [code, info] of Object.entries(_pricing)) {
-    try {
-      // Try PATCH first (update existing row)
-      const patch = await fetch(`${SB_URL}/rest/v1/tce_pricing?egger_code=eq.${code}`, {
-        method:'PATCH',
-        headers:{...sbH(),'Prefer':'return=minimal'},
-        body: JSON.stringify({price_retail:parseFloat(info.price), group_name:info.group||''})
-      });
-      // If no row updated (0 rows), INSERT it
-      const count = patch.headers.get('content-range');
-      if (count === '*/0' || !patch.ok) {
-        const post = await fetch(`${SB_URL}/rest/v1/tce_pricing`, {
-          method:'POST',
-          headers:{...sbH(),'Prefer':'return=minimal'},
-          body: JSON.stringify({egger_code:code, price_retail:parseFloat(info.price), group_name:info.group||''})
-        });
-        if (post.ok) saved++; else failed++;
-      } else { saved++; }
-    } catch(e) { failed++; }
+  // Single bulk upsert (insert-or-update) keyed on egger_code so existing rows
+  // UPDATE (instead of colliding on the primary key) and any missing rows are
+  // created - e.g. the PM/PG/TM special finishes, which previously had no row
+  // and so could never be saved.
+  const payload = Object.entries(_pricing).map(([code, info]) => ({
+    egger_code: code,
+    price_retail: parseFloat(info.price) || 0,
+    group_name: info.group || ''
+  }));
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/tce_pricing?on_conflict=egger_code`, {
+      method: 'POST',
+      headers: {...sbH(), 'Prefer': 'resolution=merge-duplicates,return=minimal'},
+      body: JSON.stringify(payload)
+    });
+    if (r.ok) {
+      showToast('All ' + payload.length + ' prices saved \u2713');
+    } else {
+      const msg = await r.text().catch(() => '');
+      console.error('savePricing failed:', r.status, msg);
+      showToast('Save failed (' + r.status + ') - nothing saved, see console');
+    }
+  } catch (e) {
+    console.error('savePricing error:', e);
+    showToast('Save failed - check your connection');
   }
-  if (failed===0) showToast('All ' + saved + ' prices saved ✓');
-  else showToast(saved + ' saved, ' + failed + ' failed — refresh and try again');
 }
 
 // ═══════════════════════════════════════════════════════════
