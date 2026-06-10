@@ -3016,7 +3016,9 @@ function buildPrintLayout(){
             '<tbody>'+panelRows+'</tbody>'+
           '</table>'+
         '</div>'+
-        '<div class="pl-diagram"><canvas id="pv-'+idx+'"></canvas></div>'+
+        '<div class="pl-diagram"><canvas id="pv-'+idx+'"></canvas>'+
+          '<div style="margin-top:6px;font-size:8pt;color:#333;display:flex;align-items:center;gap:6px;line-height:1.3"><span style="display:inline-block;width:20px;height:9px;background:#1230d8;border-radius:1px;flex-shrink:0"></span><span>Blue edge = edge banding to be applied &mdash; see the EB column for which sides (L1/L2 = long edges, W1/W2 = short edges)</span></div>'+
+        '</div>'+
       '</div>'+
       '<div class="pl-footer">'+
         '<span>Tayside Cut &amp; Edge \u2014 For approval only. Verify all dimensions before cutting.</span>'+
@@ -3096,8 +3098,8 @@ function drawSheetCanvas(cid, sheet){
     }
 
     // EB edge indicators
-    const EBW=Math.max(2,Math.min(4,Math.min(w,h)*.04));
-    ctx.fillStyle='rgba(20,55,170,.42)';
+    const EBW=Math.max(3,Math.min(7,Math.min(w,h)*.07));
+    ctx.fillStyle='#1230d8';
     // EB indicators — draw each banded edge on the correct physical side for how
     // the panel is actually drawn (handles grain rotation AND pack rotation).
     const _clenH=Math.abs(p.w-p.origL)<Math.abs(p.w-p.origW);
