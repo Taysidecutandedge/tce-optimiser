@@ -877,7 +877,7 @@ async function loadCloudJobList(){
     jobs.forEach(j=>{
       const item=document.createElement('div');
       item.className='cj-item';
-      const dt=new Date(j.saved_at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
+      const dt=new Date(j.saved_at).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
       item.innerHTML=`
         <div onclick="cloudLoadJob(${j.id})" style="flex:1;cursor:pointer">
           <div class="cj-item-name">${esc(j.job_name||'Unnamed Job')}</div>
@@ -2149,8 +2149,8 @@ function drawSheet(cid,sheet){
     }
 
     // EB stripes
-    const EBW=Math.max(2,Math.min(4,w*.04,h*.04));
-    ctx.fillStyle='rgba(50,80,200,.5)';
+    const EBW=Math.max(3,Math.min(7,Math.min(w,h)*.07));
+    ctx.fillStyle='#1230d8';
     // EB indicators — draw each banded edge on the correct physical side for how
     // the panel is actually drawn (handles grain rotation AND pack rotation).
     // Length runs horizontally only when the drawn width equals the part's length.
