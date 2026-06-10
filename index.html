@@ -2151,13 +2151,16 @@ function drawSheet(cid,sheet){
     // EB stripes
     const EBW=Math.max(2,Math.min(4,w*.04,h*.04));
     ctx.fillStyle='rgba(50,80,200,.5)';
-    // EB indicators — swap L/W if panel is rotated on sheet
-    const ebL1=p.rot?p.eb.W1:p.eb.L1, ebL2=p.rot?p.eb.W2:p.eb.L2;
-    const ebW1=p.rot?p.eb.L1:p.eb.W1, ebW2=p.rot?p.eb.L2:p.eb.W2;
-    if(ebL1)ctx.fillRect(x+1,y+1,w-2,EBW);
-    if(ebL2)ctx.fillRect(x+1,y+h-1-EBW,w-2,EBW);
-    if(ebW1)ctx.fillRect(x+1,y+1,EBW,h-2);
-    if(ebW2)ctx.fillRect(x+w-1-EBW,y+1,EBW,h-2);
+    // EB indicators — draw each banded edge on the correct physical side for how
+    // the panel is actually drawn (handles grain rotation AND pack rotation).
+    // Length runs horizontally only when the drawn width equals the part's length.
+    const _lenH=Math.abs(p.w-p.origL)<Math.abs(p.w-p.origW);
+    const _ebTop=()=>ctx.fillRect(x+1,y+1,w-2,EBW);
+    const _ebBot=()=>ctx.fillRect(x+1,y+h-1-EBW,w-2,EBW);
+    const _ebLft=()=>ctx.fillRect(x+1,y+1,EBW,h-2);
+    const _ebRgt=()=>ctx.fillRect(x+w-1-EBW,y+1,EBW,h-2);
+    if(_lenH){ if(p.eb.L1)_ebTop(); if(p.eb.L2)_ebBot(); if(p.eb.W1)_ebLft(); if(p.eb.W2)_ebRgt(); }
+    else     { if(p.eb.L1)_ebLft(); if(p.eb.L2)_ebRgt(); if(p.eb.W1)_ebTop(); if(p.eb.W2)_ebBot(); }
 
     ctx.strokeStyle=STROKE; ctx.lineWidth=.8;
     ctx.strokeRect(x+.5,y+.5,w-1,h-1);
@@ -3095,13 +3098,15 @@ function drawSheetCanvas(cid, sheet){
     // EB edge indicators
     const EBW=Math.max(2,Math.min(4,Math.min(w,h)*.04));
     ctx.fillStyle='rgba(20,55,170,.42)';
-    // EB indicators — swap L/W if panel is rotated on sheet
-    const cebL1=p.rot?p.eb.W1:p.eb.L1, cebL2=p.rot?p.eb.W2:p.eb.L2;
-    const cebW1=p.rot?p.eb.L1:p.eb.W1, cebW2=p.rot?p.eb.L2:p.eb.W2;
-    if(cebL1)ctx.fillRect(x,y,w,EBW);
-    if(cebL2)ctx.fillRect(x,y+h-EBW,w,EBW);
-    if(cebW1)ctx.fillRect(x,y,EBW,h);
-    if(cebW2)ctx.fillRect(x+w-EBW,y,EBW,h);
+    // EB indicators — draw each banded edge on the correct physical side for how
+    // the panel is actually drawn (handles grain rotation AND pack rotation).
+    const _clenH=Math.abs(p.w-p.origL)<Math.abs(p.w-p.origW);
+    const _cTop=()=>ctx.fillRect(x,y,w,EBW);
+    const _cBot=()=>ctx.fillRect(x,y+h-EBW,w,EBW);
+    const _cLft=()=>ctx.fillRect(x,y,EBW,h);
+    const _cRgt=()=>ctx.fillRect(x+w-EBW,y,EBW,h);
+    if(_clenH){ if(p.eb.L1)_cTop(); if(p.eb.L2)_cBot(); if(p.eb.W1)_cLft(); if(p.eb.W2)_cRgt(); }
+    else      { if(p.eb.L1)_cLft(); if(p.eb.L2)_cRgt(); if(p.eb.W1)_cTop(); if(p.eb.W2)_cBot(); }
 
     // Border
     ctx.strokeStyle=STROKE; ctx.lineWidth=.7;
