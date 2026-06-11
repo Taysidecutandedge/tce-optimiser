@@ -3204,6 +3204,7 @@ function drawSheetCanvas(cid, sheet){
 // CUTTING MODE
 // ═══════════════════════════════════════════════
 let _cmPanels=[];   // flat ordered list of all panels across all sheets
+let _cmSession='';   // current cutting session id (used by the offload screen)
 let _cmIdx=0;       // current panel index
 let _cmDone=new Set(); // indices of confirmed panels
 let _cmRecut=new Set(); // indices marked for recut
@@ -3237,6 +3238,7 @@ function openCuttingMode(){
   if(newCount!==_cmPrevCount){
     // New calculation — reset everything
     _cmDone=new Set(); _cmRecut=new Set(); _cmIdx=0;
+    _cmSession=(projectName||'job')+'-'+Date.now();
   } else {
     // Re-entering — resume at first unconfirmed
     _cmIdx=0;
@@ -3261,11 +3263,31 @@ function cmStep(dir){
   _cmIdx=idx; cmRender();
 }
 
+function cmEmitCutEvent(p){
+  // Fire-and-forget: publish this confirmed panel to the offload screen.
+  // Fully wrapped so it can NEVER affect cutting if anything fails (offline, error).
+  try{
+    if(!_sbToken) return;            // only when signed in
+    const body={
+      session_id:_cmSession||(projectName||'job'),
+      action:'confirm',
+      panel:{
+        label:p.label, origL:p.origL, origW:p.origW,
+        eb:p.eb, grain:p.grain,
+        sheetName:p.sheetName, sheetIdx:p.sheetIdx,
+        panelNum:_cmIdx+1, panelTotal:_cmPanels.length
+      }
+    };
+    fetch(SB_URL+'/rest/v1/tce_cut_events',{method:'POST',headers:{...sbAuthH(),'Prefer':'return=minimal'},body:JSON.stringify(body)}).catch(()=>{});
+  }catch(e){}
+}
+
 function cmConfirm(){
   if(_cmIdx>=_cmPanels.length)return;
   const p=_cmPanels[_cmIdx];
   _cmDone.add(_cmIdx);
   printLabelForPanel(p,p.sheetIdx);
+  cmEmitCutEvent(p);
   let next=_cmIdx+1;
   while(next<_cmPanels.length&&_cmDone.has(next))next++;
   _cmIdx=next<_cmPanels.length?next:_cmPanels.length;
