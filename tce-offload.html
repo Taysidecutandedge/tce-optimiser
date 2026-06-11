@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TCE — Offload Station</title>
+<style>
+  :root{--bg:#0a0b0f;--surf:#161a20;--surf2:#1f2630;--brd:#2b3744;--txt:#e8f0ec;--txt2:#9fb0ad;--txt3:#6b8f7e;--acc:#f0a500;--ok:#27ae60;--eb:#5c9fff;--err:#ff6666}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font-family:Arial,Helvetica,sans-serif;-webkit-text-size-adjust:100%}
+  #login{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;background:var(--bg);z-index:10}
+  #login h1{font-size:20px;color:var(--acc);margin:0 0 6px}
+  #login input{width:280px;max-width:80vw;padding:12px 14px;font-size:16px;border:1px solid var(--brd);border-radius:8px;background:var(--surf2);color:var(--txt)}
+  #login button,.btn{padding:12px 18px;font-size:16px;font-weight:700;border:none;border-radius:8px;background:var(--acc);color:#111;cursor:pointer}
+  #loginErr{color:var(--err);font-size:13px;min-height:16px}
+  #app{display:none;height:100%;flex-direction:column}
+  .topbar{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--surf);border-bottom:1px solid var(--brd);flex-shrink:0}
+  .topbar .title{font-weight:700;color:var(--acc);font-size:14px}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--err);box-shadow:0 0 0 0 rgba(0,0,0,0)}
+  .dot.on{background:var(--ok)}
+  .status{font-size:12px;color:var(--txt2);font-family:monospace}
+  .topbar .spacer{flex:1}
+  .now{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:18px;gap:10px}
+  .now .waiting{color:var(--txt3);font-size:22px}
+  .panel-label{font-size:clamp(34px,8vw,84px);font-weight:900;line-height:1.05}
+  .panel-dims{font-size:clamp(26px,6vw,60px);font-weight:700;color:var(--acc);font-family:monospace}
+  .panel-meta{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;align-items:center;margin-top:6px}
+  .tag{font-size:clamp(14px,3vw,22px);font-weight:700;padding:6px 12px;border-radius:8px;background:rgba(92,159,255,.16);color:var(--eb)}
+  .tag.grain{background:rgba(240,165,0,.16);color:var(--acc)}
+  .tag.noeb{background:var(--surf2);color:var(--txt3)}
+  .sheet-line{font-size:clamp(14px,3vw,22px);color:var(--txt2);font-family:monospace}
+  .panel-num{font-size:clamp(14px,3vw,20px);color:var(--txt3)}
+  .recent{flex-shrink:0;border-top:1px solid var(--brd);background:var(--surf);padding:8px 12px;max-height:22vh;overflow:auto}
+  .recent h2{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--txt3);margin:0 0 6px}
+  .rrow{display:flex;gap:10px;font-size:13px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04);color:var(--txt2)}
+  .rrow b{color:var(--txt)}
+  .rrow .t{margin-left:auto;font-family:monospace;color:var(--txt3)}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <h1>TCE — Offload Station</h1>
+  <input id="email" type="email" placeholder="Email" autocomplete="username" value="cutlist@taysidecutandedge.co.uk">
+  <input id="pass" type="password" placeholder="Password" autocomplete="current-password">
+  <button onclick="doLogin()">Sign In</button>
+  <div id="loginErr"></div>
+  <div style="font-size:11px;color:#6b8f7e;max-width:300px;text-align:center">Shows each panel as the saw operator confirms it. Phase 1 — live view only (printing comes next).</div>
+</div>
+
+<div id="app">
+  <div class="topbar">
+    <span class="title">✂ Offload Station</span>
+    <span class="spacer"></span>
+    <span class="dot" id="liveDot"></span>
+    <span class="status" id="liveStatus">connecting…</span>
+  </div>
+  <div class="now" id="now">
+    <div class="waiting">Waiting for the next cut…</div>
+  </div>
+  <div class="recent">
+    <h2>Recent</h2>
+    <div id="recentList"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SB_URL='https://mxjduublgtlpqtdgutzi.supabase.co';
+const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im14amR1dWJsZ3RscHF0ZGd1dHppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwOTg2MjMsImV4cCI6MjA5MTY3NDYyM30.wfG9a91Udp7KQ7ywda6aNS9k-n79qtrGSe-epuCuk34';
+const sb = supabase.createClient(SB_URL, SB_KEY, { auth:{ persistSession:true, autoRefreshToken:true } });
+
+function esc(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+const recent=[];
+
+async function doLogin(){
+  const email=document.getElementById('email').value.trim();
+  const pass=document.getElementById('pass').value;
+  document.getElementById('loginErr').textContent='';
+  const {error}=await sb.auth.signInWithPassword({email,password:pass});
+  if(error){ document.getElementById('loginErr').textContent=error.message; return; }
+  startApp();
+}
+
+async function startApp(){
+  document.getElementById('login').style.display='none';
+  document.getElementById('app').style.display='flex';
+  try{
+    const {data}=await sb.from('tce_cut_events').select('*').eq('action','confirm').order('created_at',{ascending:false}).limit(8);
+    if(data&&data.length){
+      [...data].reverse().forEach(r=>pushRecent(r,false));
+      render(data[0]);
+    }
+  }catch(e){}
+  subscribe();
+}
+
+function setLive(on,txt){
+  document.getElementById('liveDot').classList.toggle('on',!!on);
+  document.getElementById('liveStatus').textContent=txt;
+}
+
+function subscribe(){
+  setLive(false,'connecting…');
+  sb.channel('cut-events-offload')
+    .on('postgres_changes',{event:'INSERT',schema:'public',table:'tce_cut_events'},payload=>{
+      const r=payload.new;
+      if(r.action==='confirm'||r.action==='reprint'){ render(r); pushRecent(r,true); }
+    })
+    .subscribe((status)=>{
+      if(status==='SUBSCRIBED') setLive(true,'live');
+      else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'){ setLive(false,'reconnecting…'); setTimeout(subscribe,3000); }
+      else setLive(false,status.toLowerCase());
+    });
+}
+
+function render(r){
+  const p=(r&&r.panel)||{};
+  const ebSides=['L1','L2','W1','W2'].filter(s=>p.eb&&p.eb[s]);
+  const tk=s=>(p.eb&&p.eb.tk&&p.eb.tk[s])||'1';
+  const code=t=>t==='2'?' (O)':(t==='0.6'?' (P)':'');
+  const ebHTML=ebSides.length
+    ? ebSides.map(s=>'<span class="tag">'+s+' · '+tk(s)+'mm'+code(tk(s))+'</span>').join('')
+    : '<span class="tag noeb">No edgebanding</span>';
+  const grain=p.grain==='W'?'↔ Cross grain':p.grain==='N'?'○ No grain':'↕ Grain along length';
+  const sheet=(p.sheetIdx!=null?('Sheet '+(p.sheetIdx+1)):'')+(p.sheetName?' · '+esc(p.sheetName):'');
+  const pnum=(p.panelNum&&p.panelTotal)?('Panel '+p.panelNum+' of '+p.panelTotal):'';
+  document.getElementById('now').innerHTML=
+    '<div class="panel-label">'+esc(p.label||'Panel')+'</div>'+
+    '<div class="panel-dims">'+esc(p.origL)+' × '+esc(p.origW)+' mm</div>'+
+    '<div class="panel-meta">'+ebHTML+'<span class="tag grain">'+grain+'</span></div>'+
+    (sheet?'<div class="sheet-line">'+sheet+'</div>':'')+
+    (pnum?'<div class="panel-num">'+pnum+'</div>':'');
+}
+
+function pushRecent(r,prepend){
+  const p=(r&&r.panel)||{};
+  const t=new Date(r.created_at||Date.now()).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+  const html='<div class="rrow"><b>'+esc(p.label||'Panel')+'</b><span>'+esc(p.origL)+'×'+esc(p.origW)+'</span><span class="t">'+t+'</span></div>';
+  const list=document.getElementById('recentList');
+  if(prepend) list.insertAdjacentHTML('afterbegin',html); else list.insertAdjacentHTML('beforeend',html);
+  while(list.children.length>12) list.removeChild(list.lastChild);
+}
+
+(async function(){
+  const {data}=await sb.auth.getSession();
+  if(data&&data.session) startApp();
+})();
+</script>
+</body>
+</html>
