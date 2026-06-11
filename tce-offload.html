@@ -14,12 +14,15 @@
   #login button,.btn{padding:12px 18px;font-size:16px;font-weight:700;border:none;border-radius:8px;background:var(--acc);color:#111;cursor:pointer}
   #loginErr{color:var(--err);font-size:13px;min-height:16px}
   #app{display:none;height:100%;flex-direction:column}
-  .topbar{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--surf);border-bottom:1px solid var(--brd);flex-shrink:0}
+  .topbar{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--surf);border-bottom:1px solid var(--brd);flex-shrink:0;flex-wrap:wrap}
   .topbar .title{font-weight:700;color:var(--acc);font-size:14px}
-  .dot{width:10px;height:10px;border-radius:50%;background:var(--err);box-shadow:0 0 0 0 rgba(0,0,0,0)}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--err)}
   .dot.on{background:var(--ok)}
   .status{font-size:12px;color:var(--txt2);font-family:monospace}
   .topbar .spacer{flex:1}
+  .toggle{font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px;border:1px solid var(--brd);background:var(--surf2);color:var(--txt2);cursor:pointer}
+  .toggle.on{background:rgba(39,174,96,.18);color:#7fe0a0;border-color:#27ae60}
+  .printstat{font-size:12px;font-family:monospace;color:var(--txt3);min-width:120px;text-align:right}
   .now{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:18px;gap:10px}
   .now .waiting{color:var(--txt3);font-size:22px}
   .panel-label{font-size:clamp(34px,8vw,84px);font-weight:900;line-height:1.05}
@@ -30,11 +33,14 @@
   .tag.noeb{background:var(--surf2);color:var(--txt3)}
   .sheet-line{font-size:clamp(14px,3vw,22px);color:var(--txt2);font-family:monospace}
   .panel-num{font-size:clamp(14px,3vw,20px);color:var(--txt3)}
-  .recent{flex-shrink:0;border-top:1px solid var(--brd);background:var(--surf);padding:8px 12px;max-height:22vh;overflow:auto}
+  .reprint-now{margin-top:10px;padding:12px 22px;font-size:clamp(15px,3.4vw,20px);font-weight:700;border:1px solid var(--brd);border-radius:10px;background:var(--surf2);color:var(--txt);cursor:pointer}
+  .recent{flex-shrink:0;border-top:1px solid var(--brd);background:var(--surf);padding:8px 12px;max-height:26vh;overflow:auto}
   .recent h2{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--txt3);margin:0 0 6px}
-  .rrow{display:flex;gap:10px;font-size:13px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04);color:var(--txt2)}
+  .rrow{display:flex;gap:10px;align-items:center;font-size:13px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04);color:var(--txt2)}
   .rrow b{color:var(--txt)}
-  .rrow .t{margin-left:auto;font-family:monospace;color:var(--txt3)}
+  .rrow .t{font-family:monospace;color:var(--txt3)}
+  .rrow .sp{flex:1}
+  .rprt{font-size:12px;font-weight:700;padding:5px 10px;border-radius:6px;border:1px solid var(--brd);background:var(--surf2);color:var(--eb);cursor:pointer;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -45,21 +51,23 @@
   <input id="pass" type="password" placeholder="Password" autocomplete="current-password">
   <button onclick="doLogin()">Sign In</button>
   <div id="loginErr"></div>
-  <div style="font-size:11px;color:#6b8f7e;max-width:300px;text-align:center">Shows each panel as the saw operator confirms it. Phase 1 — live view only (printing comes next).</div>
+  <div style="font-size:11px;color:#6b8f7e;max-width:320px;text-align:center">Shows each panel as the saw operator confirms it, and prints its label. Reprint any label from here if one's damaged.</div>
 </div>
 
 <div id="app">
   <div class="topbar">
     <span class="title">✂ Offload Station</span>
-    <span class="spacer"></span>
     <span class="dot" id="liveDot"></span>
     <span class="status" id="liveStatus">connecting…</span>
+    <span class="spacer"></span>
+    <button class="toggle" id="autoBtn" onclick="toggleAuto()">Auto-print: OFF</button>
+    <span class="printstat" id="printStat"></span>
   </div>
   <div class="now" id="now">
     <div class="waiting">Waiting for the next cut…</div>
   </div>
   <div class="recent">
-    <h2>Recent</h2>
+    <h2>Recent — tap Reprint if a label is damaged</h2>
     <div id="recentList"></div>
   </div>
 </div>
@@ -68,10 +76,13 @@
 <script>
 const SB_URL='https://mxjduublgtlpqtdgutzi.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im14amR1dWJsZ3RscHF0ZGd1dHppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwOTg2MjMsImV4cCI6MjA5MTY3NDYyM30.wfG9a91Udp7KQ7ywda6aNS9k-n79qtrGSe-epuCuk34';
+const DYMO_PRINT='https://localhost:41951/DYMO/DLS/Printing/PrintLabel';
 const sb = supabase.createClient(SB_URL, SB_KEY, { auth:{ persistSession:true, autoRefreshToken:true } });
 
 function esc(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+let _current=null;
 const recent=[];
+let autoPrint = localStorage.getItem('tce_autoprint')==='1';
 
 async function doLogin(){
   const email=document.getElementById('email').value.trim();
@@ -85,8 +96,9 @@ async function doLogin(){
 async function startApp(){
   document.getElementById('login').style.display='none';
   document.getElementById('app').style.display='flex';
+  updateAutoBtn();
   try{
-    const {data}=await sb.from('tce_cut_events').select('*').eq('action','confirm').order('created_at',{ascending:false}).limit(8);
+    const {data}=await sb.from('tce_cut_events').select('*').eq('action','confirm').order('created_at',{ascending:false}).limit(10);
     if(data&&data.length){
       [...data].reverse().forEach(r=>pushRecent(r,false));
       render(data[0]);
@@ -99,13 +111,24 @@ function setLive(on,txt){
   document.getElementById('liveDot').classList.toggle('on',!!on);
   document.getElementById('liveStatus').textContent=txt;
 }
+function setPrintStat(txt){ document.getElementById('printStat').textContent=txt; }
+
+function toggleAuto(){ autoPrint=!autoPrint; localStorage.setItem('tce_autoprint',autoPrint?'1':'0'); updateAutoBtn(); }
+function updateAutoBtn(){
+  const b=document.getElementById('autoBtn');
+  b.textContent='Auto-print: '+(autoPrint?'ON':'OFF');
+  b.classList.toggle('on',autoPrint);
+}
 
 function subscribe(){
   setLive(false,'connecting…');
   sb.channel('cut-events-offload')
     .on('postgres_changes',{event:'INSERT',schema:'public',table:'tce_cut_events'},payload=>{
       const r=payload.new;
-      if(r.action==='confirm'||r.action==='reprint'){ render(r); pushRecent(r,true); }
+      if(r.action==='confirm'||r.action==='reprint'){
+        render(r); pushRecent(r,true);
+        if(autoPrint && r.action==='confirm') printLabel(r.panel);
+      }
     })
     .subscribe((status)=>{
       if(status==='SUBSCRIBED') setLive(true,'live');
@@ -116,6 +139,7 @@ function subscribe(){
 
 function render(r){
   const p=(r&&r.panel)||{};
+  _current=p;
   const ebSides=['L1','L2','W1','W2'].filter(s=>p.eb&&p.eb[s]);
   const tk=s=>(p.eb&&p.eb.tk&&p.eb.tk[s])||'1';
   const code=t=>t==='2'?' (O)':(t==='0.6'?' (P)':'');
@@ -130,16 +154,53 @@ function render(r){
     '<div class="panel-dims">'+esc(p.origL)+' × '+esc(p.origW)+' mm</div>'+
     '<div class="panel-meta">'+ebHTML+'<span class="tag grain">'+grain+'</span></div>'+
     (sheet?'<div class="sheet-line">'+sheet+'</div>':'')+
-    (pnum?'<div class="panel-num">'+pnum+'</div>':'');
+    (pnum?'<div class="panel-num">'+pnum+'</div>':'')+
+    '<button class="reprint-now" onclick="reprintCurrent()">🖨 Reprint this label</button>';
 }
 
 function pushRecent(r,prepend){
   const p=(r&&r.panel)||{};
   const t=new Date(r.created_at||Date.now()).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
-  const html='<div class="rrow"><b>'+esc(p.label||'Panel')+'</b><span>'+esc(p.origL)+'×'+esc(p.origW)+'</span><span class="t">'+t+'</span></div>';
+  if(prepend) recent.unshift(p); else recent.push(p);
+  const html='<div class="rrow"><b>'+esc(p.label||'Panel')+'</b><span>'+esc(p.origL)+'×'+esc(p.origW)+'</span><span class="t">'+t+'</span><span class="sp"></span><button class="rprt" onclick="reprintIndex(this)">🖨 Reprint</button></div>';
   const list=document.getElementById('recentList');
   if(prepend) list.insertAdjacentHTML('afterbegin',html); else list.insertAdjacentHTML('beforeend',html);
-  while(list.children.length>12) list.removeChild(list.lastChild);
+  rebindRecent();
+  while(list.children.length>12){ list.removeChild(list.lastChild); }
+}
+function rebindRecent(){
+  const rows=document.querySelectorAll('#recentList .rrow');
+  rows.forEach((row,i)=>{ row.dataset.idx=i; });
+}
+function reprintIndex(btn){
+  const row=btn.closest('.rrow'); if(!row) return;
+  const i=parseInt(row.dataset.idx); const p=recent[i];
+  if(p) printLabel(p);
+}
+function reprintCurrent(){ if(_current) printLabel(_current); }
+
+function ebCodeFor(tk){ return tk==='2'?'O':(tk==='0.6'?'P':'Y'); }
+function printLabel(p){
+  if(!p){ return; }
+  setPrintStat('printing…');
+  const grain=p.grain==='W'?'W':p.grain==='N'?'N':'Y';
+  const ebSides=['L1','L2','W1','W2'].filter(s=>p.eb&&p.eb[s])
+    .map(s=>s+':'+ebCodeFor((p.eb.tk&&p.eb.tk[s])||'1')).join(' ');
+  const pnum=(p.panelNum&&p.panelTotal)?(p.panelNum+'/'+p.panelTotal):'';
+  const company='Tayside Cut & Edge';
+  const label=String(p.label||'Panel');
+  const dims=p.origL+' x '+p.origW;
+  const xml='<?xml version="1.0" encoding="utf-8"?><DieCutLabel Version="8.0" Units="twips"><PaperOrientation>Landscape</PaperOrientation><Id>LW</Id><PaperName>57 mm x 32 mm</PaperName><DrawCommands><RoundRectangle X="0" Y="0" Width="3240" Height="1800" Rx="270" Ry="270"/></DrawCommands>'
+    +'<ObjectInfo><TextObject><n>T1</n><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/><BackColor Alpha="0"/><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Top</VerticalAlignment><TextFitMode>ShrinkToFit</TextFitMode><StyledText><Element><String>['+grain+']</String><Attributes><Font Family="Arial" Size="8" Bold="True"/></Attributes></Element></StyledText></TextObject><Bounds X="100" Y="50" Width="3040" Height="200"/></ObjectInfo>'
+    +'<ObjectInfo><TextObject><n>T2</n><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/><BackColor Alpha="0"/><HorizontalAlignment>Left</HorizontalAlignment><VerticalAlignment>Top</VerticalAlignment><TextFitMode>ShrinkToFit</TextFitMode><StyledText><Element><String>'+company+'</String><Attributes><Font Family="Arial" Size="7" Bold="True"/></Attributes></Element></StyledText></TextObject><Bounds X="100" Y="260" Width="3040" Height="180"/></ObjectInfo>'
+    +'<ObjectInfo><TextObject><n>T3</n><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/><BackColor Alpha="0"/><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Top</VerticalAlignment><TextFitMode>ShrinkToFit</TextFitMode><StyledText><Element><String>['+grain+']  '+dims+'  ['+grain+']</String><Attributes><Font Family="Arial" Size="9" Bold="True"/></Attributes></Element></StyledText></TextObject><Bounds X="100" Y="460" Width="3040" Height="220"/></ObjectInfo>'
+    +'<ObjectInfo><TextObject><n>T4</n><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/><BackColor Alpha="0"/><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment><TextFitMode>ShrinkToFit</TextFitMode><StyledText><Element><String>'+label+'</String><Attributes><Font Family="Arial" Size="14" Bold="True"/></Attributes></Element></StyledText></TextObject><Bounds X="100" Y="700" Width="3040" Height="340"/></ObjectInfo>'
+    +'<ObjectInfo><TextObject><n>T5</n><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/><BackColor Alpha="0"/><HorizontalAlignment>Right</HorizontalAlignment><VerticalAlignment>Bottom</VerticalAlignment><TextFitMode>ShrinkToFit</TextFitMode><StyledText><Element><String>['+grain+']  '+ebSides+'  '+pnum+'</String><Attributes><Font Family="Arial" Size="8" Bold="True"/></Attributes></Element></StyledText></TextObject><Bounds X="100" Y="1520" Width="3040" Height="220"/></ObjectInfo>'
+    +'</DieCutLabel>';
+  fetch(DYMO_PRINT,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:'printerName=&labelXml='+encodeURIComponent(xml)+'&printParamsXml=&labelSetXml='})
+    .then(r=>setPrintStat(r.ok?'sent to printer ✓':'printer error '+r.status))
+    .catch(()=>setPrintStat('printer not reachable'));
 }
 
 (async function(){
