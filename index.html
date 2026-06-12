@@ -492,6 +492,7 @@ select option{background:var(--surf2)}
   <div class="sec">
     <div class="sec-hdr">
       <span class="sec-ttl">Parts to Cut</span>
+      <button class="btn btn-ghost btn-sm" onclick="addShakerDoor()">✂ Add Shaker Door</button>
       <button class="btn btn-ghost btn-sm" onclick="addPart()">+ Add Part</button>
     </div>
     <div style="overflow-x:auto">
@@ -1195,7 +1196,8 @@ function addPart(d){
     matName:d?.matName||'',
     company:d?.company||'',
     eb:d?.eb??makeEB(),
-    color:nc()
+    color:nc(),
+    door:d?.door||null
   });
   if(!d){save();renderParts();}
 }
@@ -2492,28 +2494,45 @@ function explodeShakerDoor(doorRef,H,W,qty,cfg,ebFrame,ebPanel,company){
   const mr=cfg.midRail||cfg.outerRail;
   const centres=getShakerCentres(H,cfg.outerRail,mr,cfg.panels,cfg.centres);
   const openingHeights=getShakerOpeningHeights(H,cfg.outerRail,mr,cfg.panels,centres);
-  // Stiles: L1/L2 = long edges (height of door) — these get banded
-  const ebF=ebFrame?{L1:true,L2:true,W1:false,W2:false,tk:{L1:'1',L2:'1',W1:'1',W2:'1'}}:makeEB();
-  // Rails: l = width across door (long dim), w = rail width (short dim)
-  // L1/L2 are the long faces — these get banded
-  const ebR=ebFrame?{L1:true,L2:true,W1:false,W2:false,tk:{L1:'1',L2:'1',W1:'1',W2:'1'}}:makeEB();
+  // "EB on frame" now = edge-band the FINISHED door's OUTER PERIMETER only (you
+  // band after glue-up). Stiles carry the door's left/right edges (L1) + the
+  // top/bottom corner ends (W1/W2); the top/bottom rail entry carries the door's
+  // top & bottom edges (L1). Inner edges, divider rails and panels are NOT banded.
+  // These sum to the door perimeter 2*(H+W).
+  const ebStile=ebFrame?{L1:true,L2:false,W1:true,W2:true,tk:{L1:'1',L2:'1',W1:'1',W2:'1'}}:makeEB();
+  const ebRail =ebFrame?{L1:true,L2:false,W1:false,W2:false,tk:{L1:'1',L2:'1',W1:'1',W2:'1'}}:makeEB();
+  const ebDiv  =makeEB();
   const ebP=ebPanel?{L1:true,L2:true,W1:true,W2:true,tk:{L1:'1',L2:'1',W1:'1',W2:'1'}}:makeEB();
+  const trim=(cfg.frameOversize!=null?cfg.frameOversize:10);   // frame squaring oversize (0 = exact)
+  const tongue=(cfg.panelTongue!=null?cfg.panelTongue:10);     // panel tongue into groove each side
+  const frameMat=(cfg.frameThk||22)+'mm MR MDF';
+  const panelMat=(cfg.panelThk||9)+'mm MR MDF';
   const parts2=[];
-  parts2.push({label:doorRef+'-Stile',l:H+SK_TRIM*2,w:cfg.outerRail+SK_TRIM,qty:2*qty,matName:'22mm MR MDF',grainOverride:'L',company,eb:ebF});
-  parts2.push({label:doorRef+'-TopRail',l:W-2*cfg.outerRail,w:cfg.outerRail+SK_TRIM,qty:2*qty,matName:'22mm MR MDF',grainOverride:'L',company,eb:ebR});
+  parts2.push({label:doorRef+'-Stile',l:H+trim*2,w:cfg.outerRail+trim,qty:2*qty,matName:frameMat,kind:'frame',grainOverride:'L',company,eb:ebStile});
+  parts2.push({label:doorRef+'-TopRail',l:W-2*cfg.outerRail,w:cfg.outerRail+trim,qty:2*qty,matName:frameMat,kind:'frame',grainOverride:'L',company,eb:ebRail});
   for(let d=0;d<cfg.panels-1;d++){
     const lbl=cfg.panels>2?doorRef+'-DivRail'+(d+1):doorRef+'-DivRail';
-    parts2.push({label:lbl,l:W-2*cfg.outerRail,w:mr,qty:qty,matName:'22mm MR MDF',grainOverride:'L',company,eb:{...ebR}});
+    parts2.push({label:lbl,l:W-2*cfg.outerRail,w:mr,qty:qty,matName:frameMat,kind:'frame',grainOverride:'L',company,eb:{...ebDiv}});
   }
-  const panelW=W-2*cfg.outerRail+SK_TONGUE*2;
+  const panelW=W-2*cfg.outerRail+tongue*2;
   openingHeights.forEach((oh,i)=>{
     const lbl=cfg.panels>1?(i===0?doorRef+'-P1-Bot':i===cfg.panels-1?doorRef+'-P'+cfg.panels+'-Top':doorRef+'-P'+(i+1)):doorRef+'-Panel';
-    parts2.push({label:lbl,l:oh+SK_TONGUE*2,w:panelW,qty:qty,matName:'12mm MDF',grainOverride:'N',company,eb:{...ebP}});
+    parts2.push({label:lbl,l:oh+tongue*2,w:panelW,qty:qty,matName:panelMat,kind:'panel',grainOverride:'N',company,eb:{...ebP}});
   });
+  const doorInfo={ref:doorRef,h:H,w:W,panels:cfg.panels,qty,frameMat,panelMat,company};
+  parts2.forEach(p=>{p.door=doorInfo;});
   return parts2;
 }
 
 let _shakerDoors=[], _shakerNormalParts=null;
+
+function addShakerDoor(){
+  const h=parseInt(prompt('Shaker door \u2014 finished HEIGHT (mm):','')); if(!h||h<=0) return;
+  const w=parseInt(prompt('Shaker door \u2014 finished WIDTH (mm):','')); if(!w||w<=0) return;
+  const q=parseInt(prompt('Quantity:','1'))||1;
+  const door={h,w,qty:q,label:'Shaker Door',company:'',notes:'',cfg:parseShakerNotes('')};
+  openShakerModal([door],null);
+}
 
 function openShakerModal(doors,normalFn){
   _shakerDoors=doors; _shakerNormalParts=normalFn;
@@ -2538,8 +2557,12 @@ function renderShakerDoors(){
         '<div class="sk-field"><label>Panels</label><select id="sk-panels-'+di+'" onchange="updateShakerPreview('+di+')">'
         +[1,2,3,4].map(n=>'<option value="'+n+'"'+(cfg.panels===n?' selected':'')+'>'+n+(n>1?' panels':' panel')+'</option>').join('')+'</select></div>'+
         '<div class="sk-field" id="sk-cw-'+di+'" style="'+(cfg.panels>1?'':'display:none')+'"><label>Rail centre(s) from bottom (mm)</label><input type="text" id="sk-centres-'+di+'" value="'+cfg.centres.join(', ')+'" placeholder="e.g. 800" oninput="updateShakerPreview('+di+')" onchange="updateShakerPreview('+di+')"></div>'+
+        '<div class="sk-field"><label>Frame thk</label><select id="sk-fthk-'+di+'" onchange="updateShakerPreview('+di+')">'+[18,22,25].map(n=>'<option value="'+n+'"'+((cfg.frameThk||22)===n?' selected':'')+'>'+n+'mm</option>').join('')+'</select></div>'+
+        '<div class="sk-field"><label>Panel thk</label><select id="sk-pthk-'+di+'" onchange="updateShakerPreview('+di+')">'+[6,9,12].map(n=>'<option value="'+n+'"'+((cfg.panelThk||9)===n?' selected':'')+'>'+n+'mm</option>').join('')+'</select></div>'+
+        '<div class="sk-field"><label>Frame oversize (mm)</label><input type="number" id="sk-foversize-'+di+'" value="'+(cfg.frameOversize!=null?cfg.frameOversize:10)+'" min="0" max="50" title="Squaring allowance added to frame parts. Set 0 for exact size." oninput="updateShakerPreview('+di+')" onchange="updateShakerPreview('+di+')"></div>'+
+        '<div class="sk-field"><label>Panel tongue (mm)</label><input type="number" id="sk-ptongue-'+di+'" value="'+(cfg.panelTongue!=null?cfg.panelTongue:10)+'" min="0" max="50" title="Tongue into the groove each side." oninput="updateShakerPreview('+di+')" onchange="updateShakerPreview('+di+')"></div>'+
       '</div>'+
-      '<div class="sk-eb-row"><input type="checkbox" id="sk-ebframe-'+di+'" checked><label for="sk-ebframe-'+di+'" style="cursor:pointer">EB on frame parts</label>&nbsp;&nbsp;<input type="checkbox" id="sk-ebpanel-'+di+'"><label for="sk-ebpanel-'+di+'" style="cursor:pointer">EB on panels</label></div>'+
+      '<div class="sk-eb-row"><input type="checkbox" id="sk-ebframe-'+di+'" checked><label for="sk-ebframe-'+di+'" style="cursor:pointer">Edge band door (outer perimeter)</label>&nbsp;&nbsp;<input type="checkbox" id="sk-ebpanel-'+di+'"><label for="sk-ebpanel-'+di+'" style="cursor:pointer">Also band panels</label></div>'+
       '<div class="sk-parts" id="sk-preview-'+di+'"></div>'+
       (door.qty?'':'<div class="sk-warn">Quantity missing - enter above</div>');
     list.appendChild(card);
@@ -2548,11 +2571,17 @@ function renderShakerDoors(){
 }
 
 function getShakerCfgFromUI(di){
+  const fo=document.getElementById('sk-foversize-'+di);
+  const pt=document.getElementById('sk-ptongue-'+di);
   return{
     outerRail:parseInt(document.getElementById('sk-rail-'+di)?.value)||70,
     midRail:parseInt(document.getElementById('sk-midrail-'+di)?.value)||70,
     panels:parseInt(document.getElementById('sk-panels-'+di)?.value)||1,
-    centres:(document.getElementById('sk-centres-'+di)?.value||'').split(/[\s,]+/).map(Number).filter(n=>n>0)
+    centres:(document.getElementById('sk-centres-'+di)?.value||'').split(/[\s,]+/).map(Number).filter(n=>n>0),
+    frameThk:parseInt(document.getElementById('sk-fthk-'+di)?.value)||22,
+    panelThk:parseInt(document.getElementById('sk-pthk-'+di)?.value)||9,
+    frameOversize:(fo&&fo.value!=='')?(parseInt(fo.value)||0):10,
+    panelTongue:(pt&&pt.value!=='')?(parseInt(pt.value)||0):10
   };
 }
 
@@ -2564,13 +2593,16 @@ function updateShakerPreview(di){
   const mr=cfg.midRail||cfg.outerRail;
   const centres=getShakerCentres(door.h,cfg.outerRail,mr,cfg.panels,cfg.centres);
   const ohs=getShakerOpeningHeights(door.h,cfg.outerRail,mr,cfg.panels,centres);
-  const tbL=door.w-2*cfg.outerRail, panelW=door.w-2*cfg.outerRail+SK_TONGUE*2;
-  let html='<span>Stile</span> '+(door.h+SK_TRIM*2)+'x'+(cfg.outerRail+SK_TRIM)+' x'+(2*qty)+' <span style="color:var(--acc)">22mm MR MDF</span> &nbsp;';
-  html+='<span>Top/Bot Rail</span> '+tbL+'x'+(cfg.outerRail+SK_TRIM)+' x'+(2*qty)+' <span style="color:var(--acc)">22mm MR MDF</span>';
-  if(cfg.panels>1) html+=' &nbsp;<span>Div Rail</span> '+tbL+'x'+mr+' x'+((cfg.panels-1)*qty)+' <span style="color:var(--acc)">22mm MR MDF</span>';
+  const trim=(cfg.frameOversize!=null?cfg.frameOversize:10);
+  const tongue=(cfg.panelTongue!=null?cfg.panelTongue:10);
+  const frameMat=(cfg.frameThk||22)+'mm MR MDF', panelMat=(cfg.panelThk||9)+'mm MR MDF';
+  const tbL=door.w-2*cfg.outerRail, panelW=door.w-2*cfg.outerRail+tongue*2;
+  let html='<span>Stile</span> '+(door.h+trim*2)+'x'+(cfg.outerRail+trim)+' x'+(2*qty)+' <span style="color:var(--acc)">'+frameMat+'</span> &nbsp;';
+  html+='<span>Top/Bot Rail</span> '+tbL+'x'+(cfg.outerRail+trim)+' x'+(2*qty)+' <span style="color:var(--acc)">'+frameMat+'</span>';
+  if(cfg.panels>1) html+=' &nbsp;<span>Div Rail</span> '+tbL+'x'+mr+' x'+((cfg.panels-1)*qty)+' <span style="color:var(--acc)">'+frameMat+'</span>';
   ohs.forEach((oh,i)=>{
     const lbl=cfg.panels>1?(i===0?'P1-Bot':i===cfg.panels-1?'P'+cfg.panels+'-Top':'P'+(i+1)):'Panel';
-    html+='<br><span>'+lbl+'</span> '+(oh+SK_TONGUE*2)+'x'+panelW+' x'+qty+' <span style="color:var(--eb)">12mm MDF</span>';
+    html+='<br><span>'+lbl+'</span> '+(oh+tongue*2)+'x'+panelW+' x'+qty+' <span style="color:var(--eb)">'+panelMat+'</span>';
   });
   const prev=document.getElementById('sk-preview-'+di); if(prev) prev.innerHTML=html;
   checkShakerMaterials();
@@ -2584,8 +2616,9 @@ function checkShakerMaterials(){
     const n=l.name.toLowerCase();
     return n.includes('mdf')&&n.startsWith(thk+'mm');
   });
-  if(!hasThkMDF(22)) missing.push('22mm MR MDF');
-  if(!hasThkMDF(12)) missing.push('12mm MDF');
+  const need=new Set();
+  _shakerDoors.forEach((d,di)=>{ const c=getShakerCfgFromUI(di); need.add('frame:'+(c.frameThk||22)); need.add('panel:'+(c.panelThk||9)); });
+  need.forEach(t=>{ const thk=parseInt(t.split(':')[1]); if(!hasThkMDF(thk)) missing.push(thk+'mm MR MDF'); });
   div.innerHTML=missing.length?'<div class="sk-miss">Not in library: '+missing.join(', ')+' - will be auto-added at 2440x1220mm</div>':'';
 }
 
@@ -2634,23 +2667,22 @@ function confirmShakerDoors(){
   for(let di=0;di<_shakerDoors.length;di++){
     if(!parseInt(document.getElementById('sk-qty-'+di)?.value)){alert('Door D'+(di+1)+' needs a quantity.');return;}
   }
-  // Resolve actual sheet names (may differ from canonical e.g. "12mm Mr MDF" not "12mm MDF")
-  const frameMat=ensureShakerSheet('22mm MR MDF',22);
-  const panelMat=ensureShakerSheet('12mm MDF',12);
-  renderJobSheets();
   let total=0;
   _shakerDoors.forEach((door,di)=>{
     const cfg=getShakerCfgFromUI(di);
     const qty=parseInt(document.getElementById('sk-qty-'+di)?.value)||1;
     const ebFrame=document.getElementById('sk-ebframe-'+di)?.checked||false;
     const ebPanel=document.getElementById('sk-ebpanel-'+di)?.checked||false;
+    // Resolve the actual library sheet names for THIS door's chosen thicknesses
+    const frameMat=ensureShakerSheet((cfg.frameThk||22)+'mm MR MDF',cfg.frameThk||22);
+    const panelMat=ensureShakerSheet((cfg.panelThk||9)+'mm MR MDF',cfg.panelThk||9);
     explodeShakerDoor('D'+(di+1),door.h,door.w,qty,cfg,ebFrame,ebPanel,door.company||'').forEach(sp=>{
-      // Use actual resolved sheet names so dropdown auto-selects correctly
-      const resolvedMat=sp.matName.includes('12')?panelMat:frameMat;
-      addPart({label:sp.label,l:sp.l,w:sp.w,qty:sp.qty,grainOverride:sp.grainOverride,matName:resolvedMat,company:sp.company,eb:sp.eb});
+      const resolvedMat=sp.kind==='panel'?panelMat:frameMat;
+      addPart({label:sp.label,l:sp.l,w:sp.w,qty:sp.qty,grainOverride:sp.grainOverride,matName:resolvedMat,company:sp.company,eb:sp.eb,door:sp.door});
       total++;
     });
   });
+  renderJobSheets();
   if(typeof _shakerNormalParts==='function') _shakerNormalParts();
   save();renderParts();closeShakerModal();
   alert(_shakerDoors.length+' door'+(_shakerDoors.length!==1?'s':'')+' exploded into '+total+' parts.');
@@ -3275,7 +3307,8 @@ function cmEmitCutEvent(p){
         label:p.label, origL:p.origL, origW:p.origW,
         eb:p.eb, grain:p.grain,
         sheetName:p.sheetName, sheetIdx:p.sheetIdx,
-        panelNum:_cmIdx+1, panelTotal:_cmPanels.length
+        panelNum:_cmIdx+1, panelTotal:_cmPanels.length,
+        door:_shakerDoorForPanel(p)
       }
     };
     fetch(SB_URL+'/rest/v1/tce_cut_events',{method:'POST',headers:{...sbAuthH(),'Prefer':'return=minimal'},body:JSON.stringify(body)}).catch(()=>{});
@@ -3287,6 +3320,7 @@ function cmConfirm(){
   const p=_cmPanels[_cmIdx];
   _cmDone.add(_cmIdx);
   printLabelForPanel(p,p.sheetIdx);
+  const _dd=_shakerDoorForPanel(p); if(_dd) printShakerDoorLabel(_dd);
   cmEmitCutEvent(p);
   let next=_cmIdx+1;
   while(next<_cmPanels.length&&_cmDone.has(next))next++;
@@ -3617,6 +3651,32 @@ function buildLabelPages(){
     group.appendChild(wrap);
     body.appendChild(group);
   });
+  // Shaker door assembly labels — one per finished door, printed alongside the parts
+  const doorMap={};
+  parts.forEach(pt=>{ if(pt.door&&pt.door.ref&&!doorMap[pt.door.ref]) doorMap[pt.door.ref]=pt.door; });
+  const doors=Object.values(doorMap);
+  if(doors.length){
+    const group=document.createElement('div'); group.className='lm-sheet-group';
+    const hdr=document.createElement('div'); hdr.className='lm-sheet-hdr';
+    hdr.textContent='Shaker Doors — '+doors.length+' door'+(doors.length!==1?'s':'')+' (assembly labels)';
+    group.appendChild(hdr);
+    const wrap=document.createElement('div'); wrap.className='lm-labels';
+    doors.forEach(d=>{
+      const total=d.qty||1;
+      for(let n=1;n<=total;n++){
+        const lbl=document.createElement('div'); lbl.className='dymo-label';
+        const cust=(d.company||customer)?esc(d.company||customer):'';
+        lbl.innerHTML=
+          '<div class="lbl-top" style="font-weight:800;color:#9c27b0">SHAKER DOOR '+esc(d.ref)+'</div>'+
+          '<div class="lbl-names"><span>'+esc(d.frameMat||'')+'</span><span>'+cust+'</span></div>'+
+          '<div class="lbl-mid"><span class="lbl-size">'+d.h+' × '+d.w+'</span></div>'+
+          '<div class="lbl-desc">'+(d.panels||1)+' panel'+((d.panels||1)!==1?'s':'')+' · '+esc(d.panelMat||'')+'</div>'+
+          '<div class="lbl-bot"><span style="flex:1"></span><span class="lbl-num">'+n+'/'+total+'</span></div>';
+        wrap.appendChild(lbl); totalLabels++;
+      }
+    });
+    group.appendChild(wrap); body.appendChild(group);
+  }
   document.getElementById('lmCount').textContent=totalLabels+' labels · '+_lastSheets.length+' sheets';
 }
 
@@ -3703,6 +3763,22 @@ function exportLabelsCSV(){
   }
 }
 
+
+function _shakerDoorForPanel(p){
+  const part=parts.find(pt=>pt.label===p.label&&pt.l===p.origL&&pt.w===p.origW);
+  return (part&&part.door&&/-(Panel|P1-Bot)$/.test(part.label))?part.door:null;
+}
+function printShakerDoorLabel(d){
+  if(!d) return;
+  const cust=d.company||projectName||'';
+  const xml='<?xml version="1.0" encoding="utf-8"?><DieCutLabel Version="8.0" Units="twips"><PaperOrientation>Landscape</PaperOrientation><Id>LW</Id><PaperName>57 mm x 32 mm</PaperName><DrawCommands><RoundRectangle X="0" Y="0" Width="3240" Height="1800" Rx="270" Ry="270"/></DrawCommands>'
+    +'<ObjectInfo><TextObject><n>T1</n><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/><BackColor Alpha="0"/><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Top</VerticalAlignment><TextFitMode>ShrinkToFit</TextFitMode><StyledText><Element><String>SHAKER DOOR '+(d.ref||'')+'</String><Attributes><Font Family="Arial" Size="11" Bold="True"/></Attributes></Element></StyledText></TextObject><Bounds X="100" Y="60" Width="3040" Height="260"/></ObjectInfo>'
+    +'<ObjectInfo><TextObject><n>T2</n><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/><BackColor Alpha="0"/><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Top</VerticalAlignment><TextFitMode>ShrinkToFit</TextFitMode><StyledText><Element><String>'+cust+'</String><Attributes><Font Family="Arial" Size="8" Bold="True"/></Attributes></Element></StyledText></TextObject><Bounds X="100" Y="360" Width="3040" Height="200"/></ObjectInfo>'
+    +'<ObjectInfo><TextObject><n>T3</n><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/><BackColor Alpha="0"/><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment><TextFitMode>ShrinkToFit</TextFitMode><StyledText><Element><String>'+d.h+' x '+d.w+'</String><Attributes><Font Family="Arial" Size="16" Bold="True"/></Attributes></Element></StyledText></TextObject><Bounds X="100" Y="620" Width="3040" Height="420"/></ObjectInfo>'
+    +'<ObjectInfo><TextObject><n>T4</n><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/><BackColor Alpha="0"/><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Bottom</VerticalAlignment><TextFitMode>ShrinkToFit</TextFitMode><StyledText><Element><String>'+(d.panels||1)+' panel  '+(d.frameMat||'')+'</String><Attributes><Font Family="Arial" Size="8" Bold="True"/></Attributes></Element></StyledText></TextObject><Bounds X="100" Y="1480" Width="3040" Height="240"/></ObjectInfo>'
+    +'</DieCutLabel>';
+  fetch('https://localhost:41951/DYMO/DLS/Printing/PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'printerName=&labelXml='+encodeURIComponent(xml)+'&printParamsXml=&labelSetXml='}).catch(()=>{});
+}
 
 function printLabelForPanel(p,sheetIdx){
   const sheet=_lastSheets[sheetIdx];if(!sheet)return;

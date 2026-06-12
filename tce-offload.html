@@ -201,6 +201,21 @@ function printLabel(p){
     body:'printerName=&labelXml='+encodeURIComponent(xml)+'&printParamsXml=&labelSetXml='})
     .then(r=>setPrintStat(r.ok?'sent to printer ✓':'printer error '+r.status))
     .catch(()=>setPrintStat('printer not reachable'));
+  if(p.door) printDoorLabel(p.door);
+}
+
+function printDoorLabel(d){
+  if(!d) return;
+  const cust=d.company||'';
+  const xml='<?xml version="1.0" encoding="utf-8"?><DieCutLabel Version="8.0" Units="twips"><PaperOrientation>Landscape</PaperOrientation><Id>LW</Id><PaperName>57 mm x 32 mm</PaperName><DrawCommands><RoundRectangle X="0" Y="0" Width="3240" Height="1800" Rx="270" Ry="270"/></DrawCommands>'
+    +'<ObjectInfo><TextObject><n>T1</n><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/><BackColor Alpha="0"/><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Top</VerticalAlignment><TextFitMode>ShrinkToFit</TextFitMode><StyledText><Element><String>SHAKER DOOR '+(d.ref||'')+'</String><Attributes><Font Family="Arial" Size="11" Bold="True"/></Attributes></Element></StyledText></TextObject><Bounds X="100" Y="60" Width="3040" Height="260"/></ObjectInfo>'
+    +'<ObjectInfo><TextObject><n>T2</n><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/><BackColor Alpha="0"/><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Top</VerticalAlignment><TextFitMode>ShrinkToFit</TextFitMode><StyledText><Element><String>'+cust+'</String><Attributes><Font Family="Arial" Size="8" Bold="True"/></Attributes></Element></StyledText></TextObject><Bounds X="100" Y="360" Width="3040" Height="200"/></ObjectInfo>'
+    +'<ObjectInfo><TextObject><n>T3</n><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/><BackColor Alpha="0"/><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment><TextFitMode>ShrinkToFit</TextFitMode><StyledText><Element><String>'+d.h+' x '+d.w+'</String><Attributes><Font Family="Arial" Size="16" Bold="True"/></Attributes></Element></StyledText></TextObject><Bounds X="100" Y="620" Width="3040" Height="420"/></ObjectInfo>'
+    +'<ObjectInfo><TextObject><n>T4</n><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/><BackColor Alpha="0"/><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Bottom</VerticalAlignment><TextFitMode>ShrinkToFit</TextFitMode><StyledText><Element><String>'+(d.panels||1)+' panel  '+(d.frameMat||'')+'</String><Attributes><Font Family="Arial" Size="8" Bold="True"/></Attributes></Element></StyledText></TextObject><Bounds X="100" Y="1480" Width="3040" Height="240"/></ObjectInfo>'
+    +'</DieCutLabel>';
+  fetch(DYMO_PRINT,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'printerName=&labelXml='+encodeURIComponent(xml)+'&printParamsXml=&labelSetXml='})
+    .then(r=>setPrintStat(r.ok?'door label sent ✓':'printer error '+r.status))
+    .catch(()=>setPrintStat('printer not reachable'));
 }
 
 (async function(){
