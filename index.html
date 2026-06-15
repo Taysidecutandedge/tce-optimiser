@@ -392,7 +392,6 @@ select option{background:var(--surf2)}
     <button class="btn btn-ghost btn-sm" onclick="openPrintLayout()">🖨 Print / Preview</button>
     <button class="btn btn-sm" id="cutModeBtn" style="background:var(--ok);color:#000;font-weight:700;display:none" onclick="openCuttingMode()">✂ Cutting Mode</button>
     <button class="btn btn-sm" id="labelBtn" style="background:#9c27b0;color:#fff;font-weight:700;display:none" onclick="openLabelPrint()">🏷 Print Labels</button>
-      <button id="adminBtn" onclick="openAdminPanel()" style="background:#1a3a2a;color:#f0a500;border:1px solid #2b4a40;border-radius:6px;padding:7px 14px;cursor:pointer;font-size:12px;display:none;align-items:center;gap:6px;font-weight:bold">⚙ Pricing</button>
       <a href="tce-admin.html" target="_blank" style="background:#1a2a3a;color:#8ab;border:1px solid #2b4a40;border-radius:6px;padding:7px 14px;cursor:pointer;font-size:12px;text-decoration:none;display:inline-flex;align-items:center;gap:5px">🔒 Admin</a>
   </div>
 </header>
@@ -1895,25 +1894,9 @@ function _calculateInner(){
     }
   }
   debugInfo.push({name:'rand-iterations',sheets:best?best.sheets.length:'-',util:best?(100-best.score%1000/10).toFixed(1)+' (best)':'-',unplaced:0});
-  // Expose for iPad/laptop debug comparison + render a visible banner
+  // Winner exposed on window for console inspection only (no visible UI)
   if(typeof window!=='undefined'){
-    const summary=debugInfo.map(d=>d.name+':'+d.sheets+'sh/'+d.util+'%'+(d.unplaced?' U'+d.unplaced:'')).join(' | ');
-    const winner=best?best.strategy:'none';
-    window.TCE_DEBUG={strategies:debugInfo,winner,ua:navigator.userAgent,summary};
-    try{console.log('TCE_DEBUG:',summary,'→ winner:',winner);}catch(e){}
-    // Render visible banner via direct DOM (bypasses template-literal issues)
-    try{
-      let bar=document.getElementById('tceDebugBar');
-      if(!bar){
-        bar=document.createElement('div');
-        bar.id='tceDebugBar';
-        bar.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:#ff6a00;color:#000;font-family:monospace;font-size:11px;padding:6px 10px;text-align:center;font-weight:700;border-bottom:2px solid #000;word-break:break-all';
-        bar.onclick=function(){bar.style.display='none';};
-        document.body.insertBefore(bar,document.body.firstChild);
-      }
-      bar.textContent='v19c DEBUG (tap to hide) · '+(window._lastKerfMode||'SAW')+' kerf '+(window._lastKerfValue||'?')+'mm · '+summary+' · winner: '+winner;
-      bar.style.display='block';
-    }catch(e){try{alert('Debug: '+summary+' winner: '+winner);}catch(e2){}}
+    window.TCE_DEBUG={strategies:debugInfo,winner:best?best.strategy:'none'};
   }
   // If every strategy had unplaced pieces (shouldn't happen), use the first
   if(!best){
@@ -1991,7 +1974,6 @@ function renderResults(sheets,unplaced){
       <div class="stat"><div class="stat-lbl">Parts Placed</div><div class="stat-val cv-ok">${placed}</div></div>
       <div class="stat"><div class="stat-lbl">Efficiency</div><div class="stat-val ${eP>=80?'cv-ok':eP>=60?'cv-acc':'cv-err'}">${eP}%</div></div>
       <div class="stat"><div class="stat-lbl">Waste</div><div class="stat-val ${wP<=20?'cv-ok':wP<=40?'cv-acc':'cv-err'}">${wP}%</div></div>
-      <div class="stat"><div class="stat-lbl">Material Cost</div><div class="stat-val cv-acc">£${tC.toFixed(2)}</div></div>
       ${ebGT>0?`<div class="stat"><div class="stat-lbl">EB Total</div><div class="stat-val cv-eb">${(ebGT/1000).toFixed(1)}m</div></div>`:''}
       ${unplaced.length?`<div class="stat" style="border-color:var(--err);cursor:pointer" onclick="document.getElementById('upSec').scrollIntoView({behavior:'smooth'})"><div class="stat-lbl" style="color:var(--err)">⚠ Unplaced — tap</div><div class="stat-val cv-err">${unplaced.length}</div></div>`:''}
     </div>
