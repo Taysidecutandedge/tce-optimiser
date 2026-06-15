@@ -1812,10 +1812,21 @@ function _calculateInner(){
 
   const scoreResult=res=>{
     if(res.unplaced.length) return Infinity;
-    const totalArea=res.sheets.reduce((a,s)=>a+s.placements.reduce((b,p)=>b+p.w*p.h,0),0);
-    const sheetArea=res.sheets.reduce((a,s)=>a+s.uw*s.fullL,0);
-    const avgUtil=sheetArea>0?totalArea/sheetArea:0;
-    return res.sheets.length*1000 - avgUtil*10;
+    // Objective: fewest sheets first (dominant term), then concentrate the
+    // leftover. For a fixed sheet count the TOTAL waste is identical however
+    // parts are arranged, so total utilisation can't separate good from bad
+    // layouts. Instead we maximise the free area of the EMPTIEST sheet: pushing
+    // slack onto one sheet necessarily packs the others denser, leaving a single
+    // large reusable offcut rather than slivers scattered across every sheet.
+    let maxFree=0;
+    for(const s of res.sheets){
+      const placed=s.placements.reduce((b,p)=>b+p.w*p.h,0);
+      const free=(s.uw*s.fullL)-placed;
+      if(free>maxFree) maxFree=free;
+    }
+    // sheets*1e9 dominates (sheet area < 6e6 << 1e9); among equal sheet counts,
+    // a larger emptiest-sheet free area gives a lower (better) score.
+    return res.sheets.length*1e9 - maxFree;
   };
 
   let best=null;
@@ -1829,7 +1840,7 @@ function _calculateInner(){
     const avgUtil=sheetArea>0?totalArea/sheetArea:0;
     debugInfo.push({name:strat.name,sheets:res.sheets.length,util:(avgUtil*100).toFixed(1),unplaced:res.unplaced.length});
     if(res.unplaced.length) continue;
-    const score=res.sheets.length*1000 - avgUtil*10;
+    const score=scoreResult(res);
     if(!best||score<best.score){
       best={score,sheets:res.sheets,unplaced:res.unplaced,strategy:strat.name};
     }
@@ -1893,7 +1904,7 @@ function _calculateInner(){
       }
     }
   }
-  debugInfo.push({name:'rand-iterations',sheets:best?best.sheets.length:'-',util:best?(100-best.score%1000/10).toFixed(1)+' (best)':'-',unplaced:0});
+  debugInfo.push({name:'rand-iterations',sheets:best?best.sheets.length:'-',util:'best',unplaced:0});
   // Winner exposed on window for console inspection only (no visible UI)
   if(typeof window!=='undefined'){
     window.TCE_DEBUG={strategies:debugInfo,winner:best?best.strategy:'none'};
