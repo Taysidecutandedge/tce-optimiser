@@ -3302,6 +3302,12 @@ function cmEmitCutEvent(p){
   // Fully wrapped so it can NEVER affect cutting if anything fails (offline, error).
   try{
     if(!_sbToken) return;            // only when signed in
+    // Per-part numbering: which copy of THIS exact part, out of how many in the job
+    // (so identical parts stack in one pile and the full set is easy to check off).
+    const _myIdx=(_cmPanels.indexOf(p)>=0)?_cmPanels.indexOf(p):_cmIdx;
+    let _pTotal=0,_pNum=0;
+    _cmPanels.forEach((x,i)=>{ if(!x._isCrosscut&&!x._isPickupStrip&&x.label===p.label&&x.origL===p.origL&&x.origW===p.origW){ _pTotal++; if(i<=_myIdx) _pNum=_pTotal; } });
+    if(_pTotal===0){ _pTotal=1; _pNum=1; }
     const body={
       session_id:_cmSession||(projectName||'job'),
       action:'confirm',
@@ -3309,7 +3315,7 @@ function cmEmitCutEvent(p){
         label:p.label, origL:p.origL, origW:p.origW,
         eb:p.eb, grain:p.grain, company:p.company||projectName||'',
         sheetName:p.sheetName, sheetIdx:p.sheetIdx,
-        panelNum:_cmIdx+1, panelTotal:_cmPanels.length,
+        panelNum:_pNum, panelTotal:_pTotal,
         door:_shakerDoorForPanel(p)
       }
     };
