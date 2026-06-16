@@ -851,6 +851,11 @@ function openCloudJobs(){
           sel.innerHTML = '<option value="">— No customer (retail rates) —</option>' +
             cd.map(c=>`<option value="${c.company_name||''}" data-tier="${c.tier||'retail'}">${c.company_name||'Unknown'} (${c.tier||'retail'})</option>`).join('');
           if (existing) sel.value = existing;
+          else if (window._pendingImportCustomer) {
+            const want = String(window._pendingImportCustomer).toLowerCase();
+            const opt = [...sel.options].find(o=>o.value.toLowerCase()===want);
+            if (opt) sel.value = opt.value;
+          }
         }
       }).catch(()=>{});
   } catch(e) {}
@@ -2188,6 +2193,8 @@ let importWorkbook = null; // holds parsed XLSX workbook for sheet switching
 
 function handleImport(e){
   const file=e.target.files[0];if(!file)return;
+  // Remember the file name (minus extension) as a fallback job name on import
+  window._lastImportName=file.name.replace(/\.[^.]+$/,'').replace(/[_]+/g,' ').trim();
   const rd=new FileReader();
   if(file.name.toLowerCase().endsWith('.csv')){
     rd.onload=ev=>parseCSVImport(ev.target.result);rd.readAsText(file);
@@ -2821,11 +2828,13 @@ function applyImport(){
     });
     if(!projectName){
       const topCompany=Object.entries(companyCounts).sort((a,b)=>b[1]-a[1])[0];
-      if(topCompany){
-        projectName=topCompany[0];
-        const ni=document.getElementById('projectNameInput');
-        if(ni) ni.value=projectName;
-      }
+      // Prefer the customer/company from the sheet; fall back to the file name
+      // so a manual import never lands in cloud-save with a blank job name.
+      projectName=(topCompany&&topCompany[0])||(window._lastImportName||'')||'';
+      if(topCompany&&topCompany[0]) window._pendingImportCustomer=topCompany[0];
+      const ni=document.getElementById('projectNameInput');
+      if(ni) ni.value=projectName;
+      try{ save(); }catch(_){}
     }
     return normalAdded;
   };
@@ -3298,7 +3307,7 @@ function cmEmitCutEvent(p){
       action:'confirm',
       panel:{
         label:p.label, origL:p.origL, origW:p.origW,
-        eb:p.eb, grain:p.grain,
+        eb:p.eb, grain:p.grain, company:p.company||'',
         sheetName:p.sheetName, sheetIdx:p.sheetIdx,
         panelNum:_cmIdx+1, panelTotal:_cmPanels.length,
         door:_shakerDoorForPanel(p)
