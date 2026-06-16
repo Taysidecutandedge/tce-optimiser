@@ -3307,7 +3307,7 @@ function cmEmitCutEvent(p){
       action:'confirm',
       panel:{
         label:p.label, origL:p.origL, origW:p.origW,
-        eb:p.eb, grain:p.grain, company:p.company||'',
+        eb:p.eb, grain:p.grain, company:p.company||projectName||'',
         sheetName:p.sheetName, sheetIdx:p.sheetIdx,
         panelNum:_cmIdx+1, panelTotal:_cmPanels.length,
         door:_shakerDoorForPanel(p)
