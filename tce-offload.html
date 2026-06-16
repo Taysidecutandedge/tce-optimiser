@@ -76,7 +76,34 @@
 <script>
 const SB_URL='https://mxjduublgtlpqtdgutzi.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im14amR1dWJsZ3RscHF0ZGd1dHppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwOTg2MjMsImV4cCI6MjA5MTY3NDYyM30.wfG9a91Udp7KQ7ywda6aNS9k-n79qtrGSe-epuCuk34';
-const DYMO_PRINT='https://localhost:41951/DYMO/DLS/Printing/PrintLabel';
+// DYMO Connect's web service grabs the first FREE port in 41951–41960, so we
+// probe the whole range and use whichever one answers, instead of assuming 41951.
+const DYMO_HOST='https://127.0.0.1';
+const DYMO_PORTS=[41951,41952,41953,41954,41955,41956,41957,41958,41959,41960];
+let _dymoBase=null;
+async function _probeDymo(base,ms){
+  const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),ms);
+  try{
+    const r=await fetch(base+'StatusConnected',{method:'GET',signal:ctrl.signal});
+    clearTimeout(t);
+    return r.ok && (await r.text()).trim().toLowerCase().indexOf('true')>=0;
+  }catch(e){ clearTimeout(t); return false; }
+}
+async function findDymo(){
+  for(const port of DYMO_PORTS){
+    const base=DYMO_HOST+':'+port+'/DYMO/DLS/Printing/';
+    if(await _probeDymo(base,1500)){ _dymoBase=base; return base; }
+  }
+  _dymoBase=null; return null;
+}
+async function ensureDymo(){ return _dymoBase || await findDymo(); }
+async function checkDymo(){
+  setPrintStat('finding printer…');
+  const base=await findDymo();
+  if(base){ const port=(base.match(/:(\d+)\//)||[])[1]; setPrintStat('printer ready (port '+port+') ✓'); }
+  else setPrintStat('printer not found — open DYMO Connect & accept certificate');
+  return base;
+}
 const sb = supabase.createClient(SB_URL, SB_KEY, { auth:{ persistSession:true, autoRefreshToken:true } });
 
 function esc(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
@@ -97,6 +124,7 @@ async function startApp(){
   document.getElementById('login').style.display='none';
   document.getElementById('app').style.display='flex';
   updateAutoBtn();
+  checkDymo();
   try{
     const {data}=await sb.from('tce_cut_events').select('*').eq('action','confirm').order('created_at',{ascending:false}).limit(10);
     if(data&&data.length){
@@ -180,7 +208,7 @@ function reprintIndex(btn){
 function reprintCurrent(){ if(_current) printLabel(_current); }
 
 function ebCodeFor(tk){ return tk==='2'?'O':(tk==='0.6'?'P':'Y'); }
-function printLabel(p){
+async function printLabel(p){
   if(!p){ return; }
   setPrintStat('printing…');
   const grain=p.grain==='W'?'W':p.grain==='N'?'N':'Y';
@@ -197,14 +225,16 @@ function printLabel(p){
     +'<ObjectInfo><TextObject><n>T4</n><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/><BackColor Alpha="0"/><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment><TextFitMode>ShrinkToFit</TextFitMode><StyledText><Element><String>'+label+'</String><Attributes><Font Family="Arial" Size="14" Bold="True"/></Attributes></Element></StyledText></TextObject><Bounds X="100" Y="700" Width="3040" Height="340"/></ObjectInfo>'
     +'<ObjectInfo><TextObject><n>T5</n><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/><BackColor Alpha="0"/><HorizontalAlignment>Right</HorizontalAlignment><VerticalAlignment>Bottom</VerticalAlignment><TextFitMode>ShrinkToFit</TextFitMode><StyledText><Element><String>['+grain+']  '+ebSides+'  '+pnum+'</String><Attributes><Font Family="Arial" Size="8" Bold="True"/></Attributes></Element></StyledText></TextObject><Bounds X="100" Y="1520" Width="3040" Height="220"/></ObjectInfo>'
     +'</DieCutLabel>';
-  fetch(DYMO_PRINT,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+  const base=await ensureDymo();
+  if(!base){ setPrintStat('printer not reachable — open DYMO Connect & accept certificate'); return; }
+  fetch(base+'PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
     body:'printerName=&labelXml='+encodeURIComponent(xml)+'&printParamsXml=&labelSetXml='})
     .then(r=>setPrintStat(r.ok?'sent to printer ✓':'printer error '+r.status))
-    .catch(()=>setPrintStat('printer not reachable'));
+    .catch(()=>{ _dymoBase=null; setPrintStat('printer not reachable'); });
   if(p.door) printDoorLabel(p.door);
 }
 
-function printDoorLabel(d){
+async function printDoorLabel(d){
   if(!d) return;
   const cust=d.company||'';
   const xml='<?xml version="1.0" encoding="utf-8"?><DieCutLabel Version="8.0" Units="twips"><PaperOrientation>Landscape</PaperOrientation><Id>LW</Id><PaperName>57 mm x 32 mm</PaperName><DrawCommands><RoundRectangle X="0" Y="0" Width="3240" Height="1800" Rx="270" Ry="270"/></DrawCommands>'
@@ -213,9 +243,11 @@ function printDoorLabel(d){
     +'<ObjectInfo><TextObject><n>T3</n><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/><BackColor Alpha="0"/><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment><TextFitMode>ShrinkToFit</TextFitMode><StyledText><Element><String>'+d.h+' x '+d.w+'</String><Attributes><Font Family="Arial" Size="16" Bold="True"/></Attributes></Element></StyledText></TextObject><Bounds X="100" Y="620" Width="3040" Height="420"/></ObjectInfo>'
     +'<ObjectInfo><TextObject><n>T4</n><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/><BackColor Alpha="0"/><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Bottom</VerticalAlignment><TextFitMode>ShrinkToFit</TextFitMode><StyledText><Element><String>'+(d.panels||1)+' panel  '+(d.frameMat||'')+'</String><Attributes><Font Family="Arial" Size="8" Bold="True"/></Attributes></Element></StyledText></TextObject><Bounds X="100" Y="1480" Width="3040" Height="240"/></ObjectInfo>'
     +'</DieCutLabel>';
-  fetch(DYMO_PRINT,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'printerName=&labelXml='+encodeURIComponent(xml)+'&printParamsXml=&labelSetXml='})
+  const base=await ensureDymo();
+  if(!base){ setPrintStat('printer not reachable — open DYMO Connect & accept certificate'); return; }
+  fetch(base+'PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'printerName=&labelXml='+encodeURIComponent(xml)+'&printParamsXml=&labelSetXml='})
     .then(r=>setPrintStat(r.ok?'door label sent ✓':'printer error '+r.status))
-    .catch(()=>setPrintStat('printer not reachable'));
+    .catch(()=>{ _dymoBase=null; setPrintStat('printer not reachable'); });
 }
 
 (async function(){
