@@ -1817,12 +1817,12 @@ function _calculateInner(){
 
   const scoreResult=res=>{
     if(res.unplaced.length) return Infinity;
-    // Objective: fewest sheets first (dominant term), then concentrate the
-    // leftover. For a fixed sheet count the TOTAL waste is identical however
-    // parts are arranged, so total utilisation can't separate good from bad
-    // layouts. Instead we maximise the free area of the EMPTIEST sheet: pushing
-    // slack onto one sheet necessarily packs the others denser, leaving a single
-    // large reusable offcut rather than slivers scattered across every sheet.
+    // Objective: fewest sheets first (dominant term), then spread the spare
+    // material EVENLY so no single sheet ends up half-empty. For a fixed sheet
+    // count the TOTAL waste is identical however parts are arranged, so we
+    // balance it by MINIMISING the free area of the emptiest sheet — pulling
+    // parts across sheets so every sheet looks tidy, rather than pooling all the
+    // slack (and stray small parts) onto one ugly half-used sheet.
     let maxFree=0;
     for(const s of res.sheets){
       const placed=s.placements.reduce((b,p)=>b+p.w*p.h,0);
@@ -1830,8 +1830,8 @@ function _calculateInner(){
       if(free>maxFree) maxFree=free;
     }
     // sheets*1e9 dominates (sheet area < 6e6 << 1e9); among equal sheet counts,
-    // a larger emptiest-sheet free area gives a lower (better) score.
-    return res.sheets.length*1e9 - maxFree;
+    // a SMALLER emptiest-sheet free area (more even fill) gives a better score.
+    return res.sheets.length*1e9 + maxFree;
   };
 
   let best=null;
@@ -1919,6 +1919,7 @@ function _calculateInner(){
     const res=runStrategy(strategies[0].sort);
     best={sheets:res.sheets,unplaced:res.unplaced,strategy:strategies[0].name};
   }
+  best.sheets.forEach(s=>compactSheet(s,kerf));   // cosmetic tidy-up: stack parts, close isolated gaps
   renderResults(best.sheets,best.unplaced);
 }
 
@@ -1926,6 +1927,26 @@ function guillotinePlace(){} // kept for compatibility — not used
 
 function overlaps(a,b){
   return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;
+}
+// Cosmetic tidy-pass: after packing, slide each panel up then left into its
+// neighbours so identical parts stack and isolated gaps close. Overlap-safe and
+// same-sheet only — it can never change sheet count or material used, only the look.
+function compactSheet(sh,kerf){
+  const ps=sh.placements; if(!ps||ps.length<2) return; const E=0.001;
+  for(let it=0;it<12;it++){ let moved=false;
+    ps.sort((a,b)=>(a.y-b.y)||(a.x-b.x));
+    for(const p of ps){
+      let ny=0;
+      for(const q of ps){ if(q===p) continue;
+        if(q.x<p.x+p.w-E&&q.x+q.w>p.x+E&&q.y+q.h<=p.y+E){ const c=q.y+q.h+kerf; if(c>ny) ny=c; } }
+      if(ny<p.y-E){ p.y=ny; moved=true; }
+      let nx=0;
+      for(const q of ps){ if(q===p) continue;
+        if(q.y<p.y+p.h-E&&q.y+q.h>p.y+E&&q.x+q.w<=p.x+E){ const c=q.x+q.w+kerf; if(c>nx) nx=c; } }
+      if(nx<p.x-E){ p.x=nx; moved=true; }
+    }
+    if(!moved) break;
+  }
 }
 function fits(pw,ph,r){return pw<=r.w+.001&&ph<=r.h+.001;}
 function scoreMAXR(pw,ph,r){return Math.min(r.w-pw,r.h-ph);}
