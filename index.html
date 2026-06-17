@@ -1919,7 +1919,6 @@ function _calculateInner(){
     const res=runStrategy(strategies[0].sort);
     best={sheets:res.sheets,unplaced:res.unplaced,strategy:strategies[0].name};
   }
-  best.sheets.forEach(s=>compactSheet(s,kerf));   // cosmetic tidy-up: stack parts, close isolated gaps
   renderResults(best.sheets,best.unplaced);
 }
 
