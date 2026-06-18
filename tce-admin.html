@@ -798,6 +798,54 @@ function getDefaultCutRate(jobData, tier) {
   return rate ? (tier==='trade'?parseFloat(rate.rate_trade):parseFloat(rate.rate_retail)) : 70;
 }
 
+// ── Shaker door pricing — mirrors MDF_Shaker_Calculator_v9 (verified to £55.02) ──
+// Per-door TRADE PRICE = (frame + panel + edging + labour + overhead) ÷ (1 − margin).
+// Edit these to match the calculator's Rates tab.
+const SHAKER_RATES = {
+  frame22:19.76, frame25:14.35,        // £/m²  frame MR MDF
+  panel12:7.57,  panel9:5.54,          // £/m²  panel MDF
+  edge:0.392,                          // £/m   0.6mm ABS
+  wBoard:1.1, wPanel:1.1, wEdge:1.1, wDiv:1.15,   // waste factors
+  rail:70, oversize:10, tongue:10,     // mm
+  labBase:33, labDiv:3, labPanel:1, labRate:40,   // labour mins + £/hr
+  overhead:6, margin:0.40
+};
+function shakerDoorPrice(door){
+  const R=SHAKER_RATES;
+  const H=parseFloat(door.h)||0, W=parseFloat(door.w)||0;
+  if(!H||!W) return 0;
+  const panels=Math.max(parseInt(door.panels)||1,1);
+  const frameThk=parseInt((door.frameMat||'').match(/(\d+)\s*mm/i)?.[1])||22;
+  const panelThk=parseInt((door.panelMat||'').match(/(\d+)\s*mm/i)?.[1])||9;
+  const dividers=Math.max(panels-1,0);
+  const blankW=R.rail+R.oversize;
+  const outerLM=(2*H+2*(W-2*R.rail))/1000;
+  const divLM=dividers*((W-2*R.rail)/1000)*R.wDiv;
+  const frameLM=outerLM+divLM;
+  const frameArea=frameLM*(blankW/1000);
+  const frameCost=frameArea*((frameThk>=25)?R.frame25:R.frame22)*R.wBoard;
+  const pH=((H-2*R.rail)-(dividers*R.rail)+2*R.tongue)/panels;
+  const pW=(W-2*R.rail)+2*R.tongue;
+  const panelArea=panels*(pH/1000)*(pW/1000);
+  const panelCost=panelArea*((panelThk>=12)?R.panel12:R.panel9)*R.wPanel;
+  const edgeCost=(frameLM+(2*H+2*W)/1000)*R.edge*R.wEdge;
+  const labCost=((R.labBase+dividers*R.labDiv+(panels-1)*R.labPanel)/60)*R.labRate;
+  const trueCost=frameCost+panelCost+edgeCost+labCost+R.overhead;
+  return trueCost/(1-R.margin);
+}
+// Distinct shaker doors in a job + the MDF materials used ONLY by doors
+// (those are priced as doors instead of charged as sheets, to avoid double-counting).
+function getShakerInfo(jobData){
+  const parts=jobData?.parts||[];
+  const map={};
+  parts.forEach(p=>{ if(p.door&&p.door.ref&&!map[p.door.ref]) map[p.door.ref]=p.door; });
+  const doors=Object.values(map);
+  const doorMats=new Set(parts.filter(p=>p.door).map(p=>p.matName));
+  const nonDoorMats=new Set(parts.filter(p=>!p.door).map(p=>p.matName));
+  const pureDoorMats=new Set([...doorMats].filter(m=>!nonDoorMats.has(m)));
+  return {doors, pureDoorMats};
+}
+
 async function buildQuote() {
   if (!_currentJob) return;
   const tier = document.getElementById('qTier').value;
@@ -848,10 +896,12 @@ async function buildQuote() {
   }
 
   const defaultCutRate = getDefaultCutRate(jobData, tier);
+  const shaker = getShakerInfo(jobData);
   let rows = '';
   let grandEx = 0;
 
   Object.entries(matData).forEach(([mat, data]) => {
+    if (shaker.pureDoorMats.has(mat)) return;   // priced as shaker doors below
     if (!data.sheets && !data.ebMm) return;
     const ov = _quoteOverrides[mat] || {};
     const autoPrice = lookupBoardPrice(mat, tier);
@@ -914,6 +964,20 @@ async function buildQuote() {
       <td class="r">£${matTotal.toFixed(2)}</td>
     </tr>`;
   });
+
+  // Shaker doors — priced as finished units (material + labour + overhead, ÷ margin)
+  if(shaker.doors.length){
+    rows += `<tr class="mat-head"><td colspan="6">SHAKER DOORS</td></tr>`;
+    let doorTotal=0;
+    shaker.doors.forEach(d=>{
+      const each=shakerDoorPrice(d); const qty=parseInt(d.qty)||1; const line=each*qty;
+      grandEx+=line; doorTotal+=line;
+      const fm=(d.frameMat||'').replace(/\s*MR MDF/i,'');
+      const desc=`${d.h}×${d.w}mm${d.panels>1?', '+d.panels+'-panel':''}${fm?', '+fm+' frame':''}`;
+      rows += `<tr><td>${d.ref||'Door'}</td><td>${desc}</td><td></td><td></td><td class="r" style="font-size:11px;color:#6b8f7e">${qty} × £${each.toFixed(2)}</td><td class="r">£${line.toFixed(2)}</td></tr>`;
+    });
+    rows += `<tr class="subtotal"><td colspan="5">Shaker doors subtotal</td><td class="r">£${doorTotal.toFixed(2)}</td></tr>`;
+  }
 
   const grandInc = grandEx * 1.20;
   const vatAmt = grandEx * 0.20;
@@ -1001,9 +1065,11 @@ function printQuote() {
   });
 
   const defaultCutRate = getDefaultCutRate(jobData, tier);
+  const shaker = getShakerInfo(jobData);
   let rows=''; let grandEx=0;
 
   Object.entries(matData).forEach(([mat,data])=>{
+    if(shaker.pureDoorMats.has(mat)) return;
     if(!data.sheets&&!data.ebMm) return;
     const ov=_quoteOverrides[mat]||{};
     const autoPrice=lookupBoardPrice(mat,tier);
@@ -1030,6 +1096,16 @@ function printQuote() {
       ${ebM>0?`<tr><td>Edgebanding (${ebM.toFixed(2)}m × £${ebRateTotal.toFixed(2)}/lm)</td><td></td><td class="amt">£${ebTotal.toFixed(2)}</td></tr>`:''}
       <tr class="sub-row"><td colspan="2">Subtotal</td><td class="amt">£${matTotal.toFixed(2)}</td></tr>`;
   });
+
+  if(shaker.doors.length){
+    rows+=`<tr class="mat-row"><td colspan="3"><strong>Shaker Doors</strong></td></tr>`;
+    let doorTotal=0;
+    shaker.doors.forEach(d=>{
+      const each=shakerDoorPrice(d); const qty=parseInt(d.qty)||1; const line=each*qty; grandEx+=line; doorTotal+=line;
+      rows+=`<tr><td>${d.ref||'Door'} — ${d.h}×${d.w}mm${d.panels>1?', '+d.panels+'-panel':''} (${qty} × £${each.toFixed(2)})</td><td></td><td class="amt">£${line.toFixed(2)}</td></tr>`;
+    });
+    rows+=`<tr class="sub-row"><td colspan="2">Shaker doors subtotal</td><td class="amt">£${doorTotal.toFixed(2)}</td></tr>`;
+  }
 
   const vat=grandEx*0.20;
   const inc=grandEx*1.20;
