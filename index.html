@@ -1919,6 +1919,7 @@ function _calculateInner(){
     const res=runStrategy(strategies[0].sort);
     best={sheets:res.sheets,unplaced:res.unplaced,strategy:strategies[0].name};
   }
+  best.sheets.forEach(s=>tidySheetSafe(s,kerf));   // stack lone panels into same-width strips (self-validating, reverts if not rippable)
   renderResults(best.sheets,best.unplaced);
 }
 
@@ -1927,25 +1928,52 @@ function guillotinePlace(){} // kept for compatibility — not used
 function overlaps(a,b){
   return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;
 }
-// Cosmetic tidy-pass: after packing, slide each panel up then left into its
-// neighbours so identical parts stack and isolated gaps close. Overlap-safe and
-// same-sheet only — it can never change sheet count or material used, only the look.
-function compactSheet(sh,kerf){
-  const ps=sh.placements; if(!ps||ps.length<2) return; const E=0.001;
-  for(let it=0;it<12;it++){ let moved=false;
-    ps.sort((a,b)=>(a.y-b.y)||(a.x-b.x));
+// ── Safe strip tidy (cosmetic, self-validating) ─────────────────────────────
+// Moves a panel that sits ALONE in its own column up into an EXISTING strip of
+// the SAME width, so identical parts stack instead of stranding in an isolated
+// gap. It never creates a new strip position (so it can't stagger the rip cuts)
+// and is overlap-checked before every move. After tidying, the sheet is re-checked
+// for clean rippability; if anything is off for ANY reason the change is discarded
+// and the sheet reverts to the packer's exact layout. So it can never make a sheet
+// worse than the optimiser already produced.
+function _stripOv(a,b){ return a.x<b.x+b.w-0.5&&a.x+a.w>b.x+0.5&&a.y<b.y+b.h-0.5&&a.y+a.h>b.y+0.5; }
+function tidySheet(sh,kerf){
+  const ps=sh.placements; if(!ps||ps.length<3) return; const uh=sh.uh;
+  for(let it=0; it<20; it++){ let changed=false;
+    const cols={}; ps.forEach(p=>{ const k=Math.round(p.x/2)*2; (cols[k]=cols[k]||[]).push(p); });
     for(const p of ps){
-      let ny=0;
-      for(const q of ps){ if(q===p) continue;
-        if(q.x<p.x+p.w-E&&q.x+q.w>p.x+E&&q.y+q.h<=p.y+E){ const c=q.y+q.h+kerf; if(c>ny) ny=c; } }
-      if(ny<p.y-E){ p.y=ny; moved=true; }
-      let nx=0;
-      for(const q of ps){ if(q===p) continue;
-        if(q.y<p.y+p.h-E&&q.y+q.h>p.y+E&&q.x+q.w<=p.x+E){ const c=q.x+q.w+kerf; if(c>nx) nx=c; } }
-      if(nx<p.x-E){ p.x=nx; moved=true; }
+      if(p.h>uh-1) continue;                          // never move full-length rips
+      const mk=Math.round(p.x/2)*2;
+      if(cols[mk].length!==1) continue;               // only relocate truly lone panels
+      let best=null;
+      for(const k in cols){ if(+k===mk) continue; const arr=cols[k];
+        const sw=Math.max(...arr.map(q=>q.w)); if(Math.abs(sw-p.w)>2) continue;   // same width only
+        if(arr.some(q=>q.h>uh-1)) continue;           // don't stack onto a full-run strip
+        const cx=Math.min(...arr.map(q=>q.x)); const mb=Math.max(...arr.map(q=>q.y+q.h));
+        if(mb+kerf+p.h>uh+0.5) continue;              // must have vertical room
+        if(!best||mb>best.mb) best={cx,mb}; }
+      if(best){ const cand={x:best.cx,y:best.mb+kerf,w:p.w,h:p.h};
+        if(ps.some(q=>q!==p&&_stripOv(cand,q))) continue;   // destination must be clear
+        p.x=best.cx; p.y=best.mb+kerf; changed=true; break; }
     }
-    if(!moved) break;
+    if(!changed) break;
   }
+}
+// True only if every panel falls into clean vertical rip-strips (no staggering, no overlaps).
+function isSheetRippable(sh){
+  const ps=sh.placements||[]; const cols={};
+  ps.forEach(p=>{ const k=Math.round(p.x/2)*2; (cols[k]=cols[k]||[]).push(p); });
+  const cl=Object.values(cols).map(arr=>({x:Math.min(...arr.map(p=>p.x)),w:Math.max(...arr.map(p=>p.w))})).sort((a,b)=>a.x-b.x);
+  for(let i=0;i<cl.length-1;i++){ if(cl[i].x+cl[i].w>cl[i+1].x+1) return false; }
+  for(let i=0;i<ps.length;i++) for(let j=i+1;j<ps.length;j++){ if(_stripOv(ps[i],ps[j])) return false; }
+  return true;
+}
+// Tidy with a built-in safety net: revert the sheet if the result isn't rippable.
+function tidySheetSafe(sh,kerf){
+  if(!sh.placements||sh.placements.length<3) return;
+  const snap=sh.placements.map(p=>({...p}));
+  tidySheet(sh,kerf);
+  if(!isSheetRippable(sh)) sh.placements=snap;
 }
 function fits(pw,ph,r){return pw<=r.w+.001&&ph<=r.h+.001;}
 function scoreMAXR(pw,ph,r){return Math.min(r.w-pw,r.h-ph);}
