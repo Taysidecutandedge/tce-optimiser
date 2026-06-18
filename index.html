@@ -2715,6 +2715,10 @@ function confirmShakerDoors(){
   for(let di=0;di<_shakerDoors.length;di++){
     if(!parseInt(document.getElementById('sk-qty-'+di)?.value)){alert('Door D'+(di+1)+' needs a quantity.');return;}
   }
+  // Continue door numbering from any doors already in the job, so doors added
+  // one at a time get D1, D2, D3… instead of all being stamped "D1".
+  let maxN=0;
+  (parts||[]).forEach(p=>{ const m=p.door&&p.door.ref&&String(p.door.ref).match(/^D(\d+)/); if(m) maxN=Math.max(maxN,parseInt(m[1])); });
   let total=0;
   _shakerDoors.forEach((door,di)=>{
     const cfg=getShakerCfgFromUI(di);
@@ -2724,7 +2728,7 @@ function confirmShakerDoors(){
     // Resolve the actual library sheet names for THIS door's chosen thicknesses
     const frameMat=ensureShakerSheet((cfg.frameThk||22)+'mm MR MDF',cfg.frameThk||22);
     const panelMat=ensureShakerSheet((cfg.panelThk||9)+'mm MR MDF',cfg.panelThk||9);
-    explodeShakerDoor('D'+(di+1),door.h,door.w,qty,cfg,ebFrame,ebPanel,door.company||'').forEach(sp=>{
+    explodeShakerDoor('D'+(maxN+di+1),door.h,door.w,qty,cfg,ebFrame,ebPanel,door.company||'').forEach(sp=>{
       const resolvedMat=sp.kind==='panel'?panelMat:frameMat;
       addPart({label:sp.label,l:sp.l,w:sp.w,qty:sp.qty,grainOverride:sp.grainOverride,matName:resolvedMat,company:sp.company,eb:sp.eb,door:sp.door});
       total++;
