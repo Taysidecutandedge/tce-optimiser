@@ -811,25 +811,23 @@ const SHAKER_RATES = {
   overhead:6, margin:0.40
 };
 function shakerDoorPrice(door){
+  // Matches the calculator's "Door List" tab formula exactly (verified to £0.00).
   const R=SHAKER_RATES;
   const H=parseFloat(door.h)||0, W=parseFloat(door.w)||0;
   if(!H||!W) return 0;
   const panels=Math.max(parseInt(door.panels)||1,1);
   const frameThk=parseInt((door.frameMat||'').match(/(\d+)\s*mm/i)?.[1])||22;
   const panelThk=parseInt((door.panelMat||'').match(/(\d+)\s*mm/i)?.[1])||9;
-  const dividers=Math.max(panels-1,0);
-  const blankW=R.rail+R.oversize;
-  const outerLM=(2*H+2*(W-2*R.rail))/1000;
-  const divLM=dividers*((W-2*R.rail)/1000)*R.wDiv;
-  const frameLM=outerLM+divLM;
-  const frameArea=frameLM*(blankW/1000);
-  const frameCost=frameArea*((frameThk>=25)?R.frame25:R.frame22)*R.wBoard;
-  const pH=((H-2*R.rail)-(dividers*R.rail)+2*R.tongue)/panels;
-  const pW=(W-2*R.rail)+2*R.tongue;
-  const panelArea=panels*(pH/1000)*(pW/1000);
-  const panelCost=panelArea*((panelThk>=12)?R.panel12:R.panel9)*R.wPanel;
-  const edgeCost=(frameLM+(2*H+2*W)/1000)*R.edge*R.wEdge;
-  const labCost=((R.labBase+dividers*R.labDiv+(panels-1)*R.labPanel)/60)*R.labRate;
+  const OR=R.rail, MID=R.rail;            // outer rail width + mid/divider rail width
+  const div=Math.max(panels-1,0);
+  const frameRate=(frameThk>=25)?R.frame25:R.frame22;
+  const panelRate=(panelThk>=12)?R.panel12:R.panel9;
+  const outerPerimLM=(2*H+2*(W-2*OR))/1000;
+  const frameCost=( outerPerimLM*((OR+R.oversize)/1000)
+                  + (div*((W-2*OR)/1000)*R.wDiv)*(MID/1000) ) * frameRate * R.wBoard;
+  const panelCost=((H-2*OR-div*MID)/1000)*((W-2*OR+2*R.tongue)/1000) * panelRate * R.wPanel;
+  const edgeCost=( outerPerimLM + div*((W-2*OR)/1000) + (2*H+2*W)/1000 ) * R.edge * R.wEdge;
+  const labCost=((R.labBase+div*R.labDiv+(panels-1)*R.labPanel)/60)*R.labRate;
   const trueCost=frameCost+panelCost+edgeCost+labCost+R.overhead;
   return trueCost/(1-R.margin);
 }
@@ -838,7 +836,13 @@ function shakerDoorPrice(door){
 function getShakerInfo(jobData){
   const parts=jobData?.parts||[];
   const map={};
-  parts.forEach(p=>{ if(p.door&&p.door.ref&&!map[p.door.ref]) map[p.door.ref]=p.door; });
+  // Key by ref + size + panels + qty so distinct doors that share a ref
+  // (the optimiser can stamp the same "D1" on doors added one at a time) are
+  // each counted, rather than collapsed into one.
+  parts.forEach(p=>{ if(p.door){ const d=p.door;
+    const key=(d.ref||'D')+'|'+d.h+'x'+d.w+'|'+(d.panels||1)+'p|'+(d.qty||1);
+    if(!map[key]) map[key]=d;
+  }});
   const doors=Object.values(map);
   const doorMats=new Set(parts.filter(p=>p.door).map(p=>p.matName));
   const nonDoorMats=new Set(parts.filter(p=>!p.door).map(p=>p.matName));
@@ -969,12 +973,12 @@ async function buildQuote() {
   if(shaker.doors.length){
     rows += `<tr class="mat-head"><td colspan="6">SHAKER DOORS</td></tr>`;
     let doorTotal=0;
-    shaker.doors.forEach(d=>{
+    shaker.doors.forEach((d,i)=>{
       const each=shakerDoorPrice(d); const qty=parseInt(d.qty)||1; const line=each*qty;
       grandEx+=line; doorTotal+=line;
       const fm=(d.frameMat||'').replace(/\s*MR MDF/i,'');
       const desc=`${d.h}×${d.w}mm${d.panels>1?', '+d.panels+'-panel':''}${fm?', '+fm+' frame':''}`;
-      rows += `<tr><td>${d.ref||'Door'}</td><td>${desc}</td><td></td><td></td><td class="r" style="font-size:11px;color:#6b8f7e">${qty} × £${each.toFixed(2)}</td><td class="r">£${line.toFixed(2)}</td></tr>`;
+      rows += `<tr><td>Door ${i+1}</td><td>${desc}</td><td></td><td></td><td class="r" style="font-size:11px;color:#6b8f7e">${qty} × £${each.toFixed(2)}</td><td class="r">£${line.toFixed(2)}</td></tr>`;
     });
     rows += `<tr class="subtotal"><td colspan="5">Shaker doors subtotal</td><td class="r">£${doorTotal.toFixed(2)}</td></tr>`;
   }
@@ -1100,9 +1104,9 @@ function printQuote() {
   if(shaker.doors.length){
     rows+=`<tr class="mat-row"><td colspan="3"><strong>Shaker Doors</strong></td></tr>`;
     let doorTotal=0;
-    shaker.doors.forEach(d=>{
+    shaker.doors.forEach((d,i)=>{
       const each=shakerDoorPrice(d); const qty=parseInt(d.qty)||1; const line=each*qty; grandEx+=line; doorTotal+=line;
-      rows+=`<tr><td>${d.ref||'Door'} — ${d.h}×${d.w}mm${d.panels>1?', '+d.panels+'-panel':''} (${qty} × £${each.toFixed(2)})</td><td></td><td class="amt">£${line.toFixed(2)}</td></tr>`;
+      rows+=`<tr><td>Door ${i+1} — ${d.h}×${d.w}mm${d.panels>1?', '+d.panels+'-panel':''} (${qty} × £${each.toFixed(2)})</td><td></td><td class="amt">£${line.toFixed(2)}</td></tr>`;
     });
     rows+=`<tr class="sub-row"><td colspan="2">Shaker doors subtotal</td><td class="amt">£${doorTotal.toFixed(2)}</td></tr>`;
   }
