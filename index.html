@@ -3501,6 +3501,7 @@ function cmRender(){
       '<span style="font-family:var(--mono);font-size:11px;color:var(--txt2)">'+esc(p.sheetName)+'</span>'+
       '<span style="font-family:var(--mono);font-size:10px;color:var(--txt3)">'+p.sheet.fullL+'×'+p.sheet.fullW+'mm</span>'+
       (sheetChanged?'<span style="font-family:var(--mono);font-size:10px;font-weight:700;color:var(--acc);margin-left:auto">⚠ NEW SHEET</span>':'')+
+      '<button class="cm-nav-btn" onclick="cmResetCuts()" title="Clear all marked cuts and start fresh" style="'+(sheetChanged?'':'margin-left:auto;')+'font-size:11px;padding:5px 12px">↺ Reset cuts</button>'+
     '</div>';
 
   body.innerHTML=
@@ -3519,7 +3520,6 @@ function cmRender(){
           '<div class="cm-nav-btns">'+
             '<button class="cm-nav-btn" onclick="cmStep(-1)" title="Previous sheet">◀</button>'+
             '<button class="cm-nav-btn" onclick="cmStep(1)" title="Next sheet">▶</button>'+
-            '<button class="cm-nav-btn" onclick="cmResetCuts()" title="Clear all marked cuts and start fresh">↺</button>'+
           '</div>'+
         '</div>'+
         '<div class="cm-dots-row">'+dotsHTML+'</div>'+
