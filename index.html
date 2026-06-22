@@ -3296,6 +3296,30 @@ let _cmDone=new Set(); // indices of confirmed panels
 let _cmRecut=new Set(); // indices marked for recut
 let _cmPrevCount=-1; // detect recalculation
 
+function _cmSig(){
+  // content signature of the current layout — used to match saved progress to THIS exact job
+  let s=(projectName||'job')+'|'+_cmPanels.length;
+  for(let i=0;i<_cmPanels.length;i++){const p=_cmPanels[i];s+='|'+p.sheetIdx+','+(p.label||'')+','+Math.round(p.w)+'x'+Math.round(p.h);}
+  return s;
+}
+function _cmSave(){
+  try{ localStorage.setItem('tce_cm_state', JSON.stringify({sig:_cmSig(),done:[..._cmDone],recut:[..._cmRecut],idx:_cmIdx,session:_cmSession,t:Date.now()})); }catch(e){}
+}
+function _cmLoad(){
+  try{
+    const raw=localStorage.getItem('tce_cm_state'); if(!raw)return false;
+    const st=JSON.parse(raw); if(!st||st.sig!==_cmSig())return false;   // only restore if same layout
+    _cmDone=new Set(st.done||[]); _cmRecut=new Set(st.recut||[]);
+    _cmIdx=(typeof st.idx==='number')?st.idx:0; if(st.session)_cmSession=st.session;
+    return true;
+  }catch(e){return false;}
+}
+function cmResetCuts(){
+  if(!confirm('Clear all marked cuts for this job and start fresh?'))return;
+  _cmDone=new Set(); _cmRecut=new Set(); _cmIdx=0;
+  _cmSession=(projectName||'job')+'-'+Date.now();
+  _cmSave(); cmRender();
+}
 function openCuttingMode(){
   if(!_lastSheets.length){alert('Run Calculate first.');return;}
   _cmPanels=[];
@@ -3321,16 +3345,24 @@ function openCuttingMode(){
     });
   });
   const newCount=_cmPanels.length;
-  if(newCount!==_cmPrevCount){
-    // New calculation — reset everything
+  // Restore saved progress for THIS exact layout (survives leaving cut mode, page reloads, iPad tab refresh)
+  const restored=_cmLoad();
+  if(restored){
+    // resume at first unconfirmed panel
+    if(_cmIdx>=_cmPanels.length||_cmDone.has(_cmIdx)){
+      _cmIdx=0; for(let i=0;i<_cmPanels.length;i++){if(!_cmDone.has(i)){_cmIdx=i;break;}}
+    }
+  } else if(newCount!==_cmPrevCount){
+    // New / different calculation — start fresh
     _cmDone=new Set(); _cmRecut=new Set(); _cmIdx=0;
     _cmSession=(projectName||'job')+'-'+Date.now();
   } else {
-    // Re-entering — resume at first unconfirmed
+    // Re-entering same session — resume at first unconfirmed
     _cmIdx=0;
     for(let i=0;i<_cmPanels.length;i++){if(!_cmDone.has(i)){_cmIdx=i;break;}}
   }
   _cmPrevCount=newCount;
+  _cmSave();
   document.getElementById('cuttingMode').classList.add('active');
   document.body.style.overflow='hidden';
   cmRender();
@@ -3382,13 +3414,21 @@ function cmConfirm(){
   printLabelForPanel(p,p.sheetIdx);
   const _dd=_shakerDoorForPanel(p); if(_dd) printShakerDoorLabel(_dd);
   cmEmitCutEvent(p);
-  let next=_cmIdx+1;
-  while(next<_cmPanels.length&&_cmDone.has(next))next++;
-  _cmIdx=next<_cmPanels.length?next:_cmPanels.length;
+  // Stay on the CURRENT sheet until every panel on it is cut, then move to the next sheet.
+  const _curSheet=p.sheetIdx;
+  let next=-1;
+  // 1) next undone panel after this one, on the same sheet
+  for(let i=_cmIdx+1;i<_cmPanels.length;i++){ if(!_cmDone.has(i)&&_cmPanels[i].sheetIdx===_curSheet){next=i;break;} }
+  // 2) otherwise any earlier undone panel still left on this sheet
+  if(next<0){ for(let i=0;i<_cmIdx;i++){ if(!_cmDone.has(i)&&_cmPanels[i].sheetIdx===_curSheet){next=i;break;} } }
+  // 3) sheet finished -> first undone panel anywhere (the next sheet)
+  if(next<0){ for(let i=0;i<_cmPanels.length;i++){ if(!_cmDone.has(i)){next=i;break;} } }
+  _cmIdx=next<0?_cmPanels.length:next;
+  _cmSave();
   cmRender();
 }
 
-function cmJump(idx){_cmIdx=idx;cmRender();}
+function cmJump(idx){_cmIdx=idx;_cmSave();cmRender();}
 function cmMarkRecut(){
   if(_cmIdx>=_cmPanels.length)return;
   if(_cmRecut.has(_cmIdx)){_cmRecut.delete(_cmIdx);}
@@ -3404,6 +3444,7 @@ function cmMarkRecut(){
     _cmRecut.add(_cmIdx);
     _cmDone.delete(_cmIdx);
   }
+  _cmSave();
   cmRender();
 }
 
@@ -3478,6 +3519,7 @@ function cmRender(){
           '<div class="cm-nav-btns">'+
             '<button class="cm-nav-btn" onclick="cmStep(-1)" title="Previous sheet">◀</button>'+
             '<button class="cm-nav-btn" onclick="cmStep(1)" title="Next sheet">▶</button>'+
+            '<button class="cm-nav-btn" onclick="cmResetCuts()" title="Clear all marked cuts and start fresh">↺</button>'+
           '</div>'+
         '</div>'+
         '<div class="cm-dots-row">'+dotsHTML+'</div>'+
