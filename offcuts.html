@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>TCE — Offcut Stock</title>
+<style>
+:root{--bg:#0a0b0f;--surf:#15171e;--surf2:#1e2128;--brd:#2a2e38;--txt:#f0eeea;--txt2:#a8b0bd;--txt3:#6b7280;--acc:#d4820a;--ok:#27ae60;--warn:#c0392b;--mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace}
+*{box-sizing:border-box;margin:0;padding:0;touch-action:manipulation}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--txt);font-size:15px;line-height:1.4;-webkit-text-size-adjust:100%}
+.wrap{max-width:760px;margin:0 auto;padding:0 0 90px}
+header{position:sticky;top:0;z-index:10;background:var(--surf);border-bottom:2px solid var(--acc);padding:12px 16px;display:flex;align-items:center;gap:10px}
+header h1{font-size:16px;font-weight:700;letter-spacing:.3px}
+header .sub{font-size:11px;color:var(--txt3);font-family:var(--mono)}
+header .right{margin-left:auto;display:flex;gap:8px;align-items:center}
+a.link,button{font-family:inherit}
+.btn{background:var(--surf2);border:1px solid var(--brd);color:var(--txt);border-radius:8px;padding:9px 14px;font-size:14px;cursor:pointer;font-weight:600}
+.btn:active{transform:scale(.97)}
+.btn-acc{background:var(--acc);color:#111;border-color:var(--acc)}
+.btn-sm{padding:6px 10px;font-size:13px;border-radius:6px}
+.btn-ghost{background:transparent}
+.btn-danger{color:#ff8a80;border-color:#5a2a2a}
+section{padding:14px 16px}
+.card{background:var(--surf);border:1px solid var(--brd);border-radius:12px;padding:14px;margin-bottom:14px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--acc);margin-bottom:10px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.field{display:flex;flex-direction:column;gap:4px}
+.field.full{grid-column:1/-1}
+.field label{font-size:11px;color:var(--txt2);font-weight:600}
+input,select{background:var(--surf2);border:1px solid var(--brd);color:var(--txt);border-radius:8px;padding:11px;font-size:16px;width:100%;font-family:inherit}
+input:focus,select:focus{outline:none;border-color:var(--acc)}
+.row-inline{display:flex;gap:8px;align-items:center}
+.chk{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--txt2)}
+.chk input{width:20px;height:20px}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.toolbar input[type=search]{flex:1;min-width:140px}
+.toolbar select{width:auto;min-width:110px}
+.count{font-size:12px;color:var(--txt3);font-family:var(--mono)}
+.oc{background:var(--surf);border:1px solid var(--brd);border-radius:10px;padding:12px;margin-bottom:10px;display:flex;gap:12px;align-items:flex-start}
+.oc .swatch{width:34px;height:34px;border-radius:7px;flex-shrink:0;border:1px solid rgba(255,255,255,.15)}
+.oc .body{flex:1;min-width:0}
+.oc .code{font-family:var(--mono);font-size:12px;color:var(--acc);font-weight:700;letter-spacing:.5px}
+.oc .decor{font-size:15px;font-weight:700;margin:1px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.oc .meta{font-size:13px;color:var(--txt2);font-family:var(--mono)}
+.oc .loc{display:inline-block;background:var(--surf2);border:1px solid var(--brd);border-radius:5px;padding:1px 7px;font-size:12px;color:var(--txt);margin-top:4px;font-family:var(--mono)}
+.oc .acts{display:flex;flex-direction:column;gap:6px;flex-shrink:0}
+.pill-qty{font-family:var(--mono);font-size:12px;color:var(--txt3)}
+.empty{text-align:center;color:var(--txt3);padding:40px 16px;font-size:14px}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#fff;color:#111;padding:10px 18px;border-radius:10px;font-weight:600;font-size:14px;box-shadow:0 8px 30px rgba(0,0,0,.5);z-index:100;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.show{opacity:1}
+.toast.err{background:#c0392b;color:#fff}
+/* login */
+#login{max-width:380px;margin:60px auto;padding:0 18px}
+#login .card{padding:22px}
+#login h1{font-size:20px;margin-bottom:4px}
+#login p{font-size:13px;color:var(--txt3);margin-bottom:18px}
+.hidden{display:none!important}
+/* sticky add button on mobile */
+.fab{position:fixed;bottom:16px;right:16px;z-index:20}
+/* print label */
+@media print{
+  body *{visibility:hidden}
+  #labelArea,#labelArea *{visibility:visible}
+  #labelArea{position:absolute;left:0;top:0;width:57mm;height:32mm;padding:2mm;color:#000;background:#fff}
+}
+#labelArea{display:none}
+.lbl-code{font-family:var(--mono);font-weight:700;font-size:20pt}
+.lbl-decor{font-size:10pt;font-weight:700}
+.lbl-meta{font-size:9pt}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login" class="hidden">
+  <div class="card">
+    <h1>Offcut Stock</h1>
+    <p>Sign in with your TCE optimiser account.</p>
+    <div class="field" style="margin-bottom:10px"><label>Email</label><input id="li-email" type="email" autocomplete="username"></div>
+    <div class="field" style="margin-bottom:16px"><label>Password</label><input id="li-pass" type="password" autocomplete="current-password"></div>
+    <button class="btn btn-acc" style="width:100%" onclick="doLogin()">Sign in</button>
+    <div id="li-err" style="color:#ff8a80;font-size:13px;margin-top:10px"></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" class="hidden">
+  <header>
+    <div>
+      <h1>Offcut Stock</h1>
+      <div class="sub" id="userline"></div>
+    </div>
+    <div class="right">
+      <a class="btn btn-sm btn-ghost" href="./index.html">◀ Optimiser</a>
+      <button class="btn btn-sm btn-ghost" onclick="signOut()">Sign out</button>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <!-- ADD -->
+    <section>
+      <div class="card">
+        <h2>Add offcut</h2>
+        <div class="grid">
+          <div class="field full">
+            <label>Decor / colour</label>
+            <input id="f-name" list="decorlist" placeholder="e.g. Egger H1385 Natural Castella Oak" oninput="onDecorInput()">
+            <datalist id="decorlist"></datalist>
+          </div>
+          <div class="field"><label>Length (mm)</label><input id="f-l" type="number" inputmode="numeric" placeholder="1200"></div>
+          <div class="field"><label>Width (mm)</label><input id="f-w" type="number" inputmode="numeric" placeholder="480"></div>
+          <div class="field"><label>Thickness (mm)</label><input id="f-thick" type="number" inputmode="decimal" step="0.1" placeholder="18"></div>
+          <div class="field"><label>Quantity</label><input id="f-qty" type="number" inputmode="numeric" value="1" min="1"></div>
+          <div class="field"><label>Bay / location</label><input id="f-loc" placeholder="e.g. Rack B3"></div>
+          <div class="field"><label>Colour swatch</label><input id="f-color" type="color" value="#4e9af1" style="height:46px;padding:4px"></div>
+          <div class="field full">
+            <div class="chk"><input id="f-grain" type="checkbox" checked><label for="f-grain" style="font-size:14px">Grain runs along the length</label></div>
+          </div>
+        </div>
+        <button class="btn btn-acc" style="width:100%;margin-top:12px" onclick="addOffcut()">+ Add to stock</button>
+      </div>
+    </section>
+
+    <!-- LIST -->
+    <section style="padding-top:0">
+      <div class="toolbar">
+        <input id="q" type="search" placeholder="Search decor, code, bay…" oninput="renderList()">
+        <select id="fthick" onchange="renderList()"><option value="">All thickness</option></select>
+        <span class="count" id="count"></span>
+      </div>
+      <div id="list"></div>
+    </section>
+  </div>
+</div>
+
+<!-- hidden print label -->
+<div id="labelArea">
+  <div class="lbl-code" id="lbl-code"></div>
+  <div class="lbl-decor" id="lbl-decor"></div>
+  <div class="lbl-meta" id="lbl-meta"></div>
+  <div class="lbl-meta" id="lbl-loc"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SB_URL='https://mxjduublgtlpqtdgutzi.supabase.co';
+const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im14amR1dWJsZ3RscHF0ZGd1dHppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwOTg2MjMsImV4cCI6MjA5MTY3NDYyM30.wfG9a91Udp7KQ7ywda6aNS9k-n79qtrGSe-epuCuk34';
+let _token=null,_user=null;
+let _offcuts=[],_decors=[];
+
+const H=()=>({'apikey':SB_KEY,'Authorization':'Bearer '+(_token||SB_KEY),'Content-Type':'application/json'});
+const Hrep=()=>({...H(),'Prefer':'return=representation'});
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const $=id=>document.getElementById(id);
+
+function toast(msg,err){const t=$('toast');t.textContent=msg;t.className='toast show'+(err?' err':'');setTimeout(()=>t.className='toast',1900);}
+
+// ---- auth ----
+async function init(){
+  const tok=localStorage.getItem('tce_token');
+  if(tok){
+    try{
+      const r=await fetch(SB_URL+'/auth/v1/user',{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+tok}});
+      if(r.ok){const d=await r.json();_token=tok;_user={id:d.id,email:d.email};return showApp();}
+    }catch(e){}
+  }
+  showLogin();
+}
+function showLogin(){$('login').classList.remove('hidden');$('app').classList.add('hidden');}
+async function showApp(){
+  $('login').classList.add('hidden');$('app').classList.remove('hidden');
+  $('userline').textContent=_user.email;
+  await loadDecors();
+  await loadOffcuts();
+}
+async function doLogin(){
+  $('li-err').textContent='';
+  const email=$('li-email').value.trim(),password=$('li-pass').value;
+  if(!email||!password){$('li-err').textContent='Enter email and password.';return;}
+  try{
+    const r=await fetch(SB_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{'apikey':SB_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,password})});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.error_description||d.msg||'Sign in failed');
+    _token=d.access_token;_user={id:d.user.id,email:d.user.email};
+    localStorage.setItem('tce_token',_token);localStorage.setItem('tce_user',JSON.stringify(_user));
+    showApp();
+  }catch(e){$('li-err').textContent=e.message;}
+}
+function signOut(){localStorage.removeItem('tce_token');localStorage.removeItem('tce_user');_token=null;_user=null;showLogin();}
+
+// ---- data ----
+async function loadDecors(){
+  // existing boards (not offcuts) → decor suggestions + colour memory
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/tce_library?select=name,color,thick&is_offcut=eq.false&order=name',{headers:H()});
+    if(r.ok){
+      const rows=await r.json();
+      const seen={};_decors=[];
+      rows.forEach(x=>{if(x.name&&!seen[x.name]){seen[x.name]=1;_decors.push(x);}});
+      $('decorlist').innerHTML=_decors.map(d=>`<option value="${esc(d.name)}">`).join('');
+    }
+  }catch(e){}
+}
+async function loadOffcuts(){
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/tce_library?select=*&is_offcut=eq.true&status=eq.in_stock&order=name',{headers:H()});
+    if(!r.ok){toast('Could not load stock',true);return;}
+    _offcuts=await r.json();
+    // build thickness filter
+    const ths=[...new Set(_offcuts.map(o=>o.thick))].sort((a,b)=>a-b);
+    $('fthick').innerHTML='<option value="">All thickness</option>'+ths.map(t=>`<option value="${t}">${t}mm</option>`).join('');
+    renderList();
+  }catch(e){toast('Network error',true);}
+}
+
+function genCode(){const a='23456789ABCDEFGHJKLMNPQRSTUVWXYZ';return 'OC-'+Array.from({length:4},()=>a[Math.floor(Math.random()*a.length)]).join('');}
+
+function onDecorInput(){
+  const v=$('f-name').value.trim().toLowerCase();
+  const m=_decors.find(d=>d.name.toLowerCase()===v);
+  if(m){if(m.color)$('f-color').value=m.color;if(m.thick&&!$('f-thick').value)$('f-thick').value=m.thick;}
+}
+
+async function addOffcut(){
+  const name=$('f-name').value.trim();
+  const l=parseInt($('f-l').value),w=parseInt($('f-w').value),thick=parseFloat($('f-thick').value);
+  const qty=Math.max(1,parseInt($('f-qty').value)||1);
+  if(!name){toast('Enter a decor',true);return;}
+  if(!l||!w){toast('Enter length & width',true);return;}
+  const row={
+    name,l,w,thick:thick||0,cost:0,notes:'',
+    grain_len:$('f-grain').checked,color:$('f-color').value,
+    is_offcut:true,qty,location:$('f-loc').value.trim()||null,
+    status:'in_stock',code:genCode(),user_id:_user.id
+  };
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/tce_library',{method:'POST',headers:Hrep(),body:JSON.stringify(row)});
+    if(!r.ok){const e=await r.text();toast('Save failed',true);console.warn(e);return;}
+    const saved=(await r.json())[0];
+    toast('Added '+saved.code);
+    // reset size fields, keep decor/colour/thickness for fast repeat entry
+    $('f-l').value='';$('f-w').value='';$('f-qty').value='1';$('f-loc').value='';
+    $('f-l').focus();
+    await loadOffcuts();
+  }catch(e){toast('Network error',true);}
+}
+
+function renderList(){
+  const q=$('q').value.trim().toLowerCase();
+  const ft=$('fthick').value;
+  let items=_offcuts.slice();
+  if(ft!=='')items=items.filter(o=>String(o.thick)===ft);
+  if(q)items=items.filter(o=>(o.name+' '+(o.code||'')+' '+(o.location||'')).toLowerCase().includes(q));
+  items.sort((a,b)=>(a.name||'').localeCompare(b.name||'')||(b.l*b.w)-(a.l*a.w));
+  $('count').textContent=items.length+' offcut'+(items.length===1?'':'s')+(ft?(' · '+ft+'mm'):'');
+  if(!items.length){$('list').innerHTML='<div class="empty">No offcuts'+(q||ft?' match your filter':' logged yet — add one above')+'.</div>';return;}
+  $('list').innerHTML=items.map(o=>`
+    <div class="oc">
+      <div class="swatch" style="background:${esc(o.color||'#4e9af1')}"></div>
+      <div class="body">
+        <div class="code">${esc(o.code||'')}${o.qty>1?` <span class="pill-qty">×${o.qty}</span>`:''}</div>
+        <div class="decor">${esc(o.name)}</div>
+        <div class="meta">${o.l} × ${o.w} · ${o.thick}mm${o.grain_len?' · grain ↕':''}</div>
+        ${o.location?`<span class="loc">📍 ${esc(o.location)}</span>`:''}
+      </div>
+      <div class="acts">
+        <button class="btn btn-sm" onclick="printLabel(${o.id})">🏷 Label</button>
+        <button class="btn btn-sm" onclick="useOne(${o.id})">Use 1</button>
+        <button class="btn btn-sm btn-danger" onclick="delOffcut(${o.id})">Delete</button>
+      </div>
+    </div>`).join('');
+}
+
+async function useOne(id){
+  const o=_offcuts.find(x=>x.id===id);if(!o)return;
+  const newQty=(o.qty||1)-1;
+  const patch=newQty<=0?{qty:0,status:'used',used_at:new Date().toISOString()}:{qty:newQty};
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+id,{method:'PATCH',headers:H(),body:JSON.stringify(patch)});
+    if(!r.ok){toast('Update failed',true);return;}
+    toast(newQty<=0?'Marked used':'Used 1 ('+newQty+' left)');
+    await loadOffcuts();
+  }catch(e){toast('Network error',true);}
+}
+
+async function delOffcut(id){
+  const o=_offcuts.find(x=>x.id===id);if(!o)return;
+  if(!confirm('Delete '+(o.code||'this offcut')+'?'))return;
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+id,{method:'DELETE',headers:H()});
+    if(!r.ok){toast('Delete failed',true);return;}
+    toast('Deleted');
+    await loadOffcuts();
+  }catch(e){toast('Network error',true);}
+}
+
+function printLabel(id){
+  const o=_offcuts.find(x=>x.id===id);if(!o)return;
+  $('lbl-code').textContent=o.code||'';
+  $('lbl-decor').textContent=o.name||'';
+  $('lbl-meta').textContent=`${o.l} × ${o.w} · ${o.thick}mm`+(o.grain_len?' · grain along length':'');
+  $('lbl-loc').textContent=o.location?('Bay: '+o.location):'';
+  window.print();
+}
+
+init();
+</script>
+</body>
+</html>
