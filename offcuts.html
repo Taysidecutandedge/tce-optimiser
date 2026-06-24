@@ -107,6 +107,10 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
             <input id="f-name" list="decorlist" placeholder="e.g. Egger H1385 Natural Castella Oak" oninput="onDecorInput()">
             <datalist id="decorlist"></datalist>
           </div>
+          <div class="field full">
+            <label>Customer / job <span style="color:var(--txt3)">(optional)</span></label>
+            <input id="f-cust" placeholder="e.g. Deeside Timber Crafts">
+          </div>
           <div class="field"><label>Length (mm)</label><input id="f-l" type="number" inputmode="numeric" placeholder="1200"></div>
           <div class="field"><label>Width (mm)</label><input id="f-w" type="number" inputmode="numeric" placeholder="480"></div>
           <div class="field"><label>Thickness (mm)</label><input id="f-thick" type="number" inputmode="decimal" step="0.1" placeholder="18"></div>
@@ -117,7 +121,8 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
             <div class="chk"><input id="f-grain" type="checkbox" checked><label for="f-grain" style="font-size:14px">Grain runs along the length</label></div>
           </div>
         </div>
-        <button class="btn btn-acc" style="width:100%;margin-top:12px" onclick="addOffcut()">+ Add to stock</button>
+        <button class="btn btn-acc" id="addBtn" style="width:100%;margin-top:12px" onclick="addOffcut()">+ Add to stock</button>
+        <button class="btn btn-ghost" id="cancelEditBtn" style="display:none;width:100%;margin-top:8px" onclick="exitEditMode()">Cancel edit</button>
       </div>
     </section>
 
@@ -147,7 +152,7 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 const SB_URL='https://mxjduublgtlpqtdgutzi.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im14amR1dWJsZ3RscHF0ZGd1dHppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwOTg2MjMsImV4cCI6MjA5MTY3NDYyM30.wfG9a91Udp7KQ7ywda6aNS9k-n79qtrGSe-epuCuk34';
 let _token=null,_user=null;
-let _offcuts=[],_decors=[];
+let _offcuts=[],_decors=[],_editingId=null;
 
 const H=()=>({'apikey':SB_KEY,'Authorization':'Bearer '+(_token||SB_KEY),'Content-Type':'application/json'});
 const Hrep=()=>({...H(),'Prefer':'return=representation'});
@@ -229,21 +234,44 @@ async function addOffcut(){
   if(!name){toast('Enter a decor',true);return;}
   if(!l||!w){toast('Enter length & width',true);return;}
   const row={
-    name,l,w,thick:thick||0,cost:0,notes:'',
+    name,l,w,thick:thick||0,cost:0,notes:$('f-cust').value.trim(),
     grain_len:$('f-grain').checked,color:$('f-color').value,
-    is_offcut:true,qty,location:$('f-loc').value.trim()||null,
-    status:'in_stock',code:genCode(),user_id:_user.id
+    is_offcut:true,qty,location:$('f-loc').value.trim()||null
   };
   try{
-    const r=await fetch(SB_URL+'/rest/v1/tce_library',{method:'POST',headers:Hrep(),body:JSON.stringify(row)});
+    let r;
+    if(_editingId){
+      r=await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+_editingId,{method:'PATCH',headers:Hrep(),body:JSON.stringify(row)});
+    }else{
+      row.status='in_stock';row.code=genCode();row.user_id=_user.id;
+      r=await fetch(SB_URL+'/rest/v1/tce_library',{method:'POST',headers:Hrep(),body:JSON.stringify(row)});
+    }
     if(!r.ok){const e=await r.text();toast('Save failed',true);console.warn(e);return;}
-    const saved=(await r.json())[0];
-    toast('Added '+saved.code);
-    // reset size fields, keep decor/colour/thickness for fast repeat entry
-    $('f-l').value='';$('f-w').value='';$('f-qty').value='1';$('f-loc').value='';
-    $('f-l').focus();
+    const saved=(await r.json())[0]||{};
+    if(_editingId){ toast('Updated '+(saved.code||'')); exitEditMode(); }
+    else{ toast('Added '+(saved.code||'')); clearSizeFields(); $('f-l').focus(); }   // keep decor/thick/colour/bay/customer for fast repeat
     await loadOffcuts();
   }catch(e){toast('Network error',true);}
+}
+function clearSizeFields(){$('f-l').value='';$('f-w').value='';$('f-qty').value='1';}
+function exitEditMode(){
+  _editingId=null;
+  const b=$('addBtn'); if(b)b.textContent='+ Add to stock';
+  const c=$('cancelEditBtn'); if(c)c.style.display='none';
+  ['f-name','f-thick','f-l','f-w','f-loc','f-cust'].forEach(id=>$(id).value='');
+  $('f-qty').value='1';$('f-grain').checked=true;$('f-color').value='#4e9af1';
+}
+function editOffcut(id){
+  const o=_offcuts.find(x=>x.id===id);if(!o)return;
+  _editingId=id;
+  $('f-name').value=o.name||'';
+  $('f-l').value=o.l||'';$('f-w').value=o.w||'';$('f-thick').value=o.thick||'';
+  $('f-qty').value=o.qty||1;$('f-loc').value=o.location||'';$('f-cust').value=o.notes||'';
+  $('f-color').value=o.color||'#4e9af1';$('f-grain').checked=!!o.grain_len;
+  $('addBtn').textContent='Save changes';
+  $('cancelEditBtn').style.display='block';
+  window.scrollTo({top:0,behavior:'smooth'});
+  toast('Editing '+(o.code||'')+' — adjust the size if it was re-trimmed');
 }
 
 function renderList(){
@@ -251,7 +279,7 @@ function renderList(){
   const ft=$('fthick').value;
   let items=_offcuts.slice();
   if(ft!=='')items=items.filter(o=>String(o.thick)===ft);
-  if(q)items=items.filter(o=>(o.name+' '+(o.code||'')+' '+(o.location||'')).toLowerCase().includes(q));
+  if(q)items=items.filter(o=>(o.name+' '+(o.code||'')+' '+(o.location||'')+' '+(o.notes||'')).toLowerCase().includes(q));
   items.sort((a,b)=>(a.name||'').localeCompare(b.name||'')||(b.l*b.w)-(a.l*a.w));
   $('count').textContent=items.length+' offcut'+(items.length===1?'':'s')+(ft?(' · '+ft+'mm'):'');
   if(!items.length){$('list').innerHTML='<div class="empty">No offcuts'+(q||ft?' match your filter':' logged yet — add one above')+'.</div>';return;}
@@ -263,9 +291,11 @@ function renderList(){
         <div class="decor">${esc(o.name)}</div>
         <div class="meta">${o.l} × ${o.w} · ${o.thick}mm${o.grain_len?' · grain ↕':''}</div>
         ${o.location?`<span class="loc">📍 ${esc(o.location)}</span>`:''}
+        ${o.notes?`<div class="meta" style="color:var(--txt3);margin-top:3px">👤 ${esc(o.notes)}</div>`:''}
       </div>
       <div class="acts">
         <button class="btn btn-sm" onclick="printLabel(${o.id})">🏷 Label</button>
+        <button class="btn btn-sm" onclick="editOffcut(${o.id})">Edit</button>
         <button class="btn btn-sm" onclick="useOne(${o.id})">Use 1</button>
         <button class="btn btn-sm btn-danger" onclick="delOffcut(${o.id})">Delete</button>
       </div>
@@ -295,12 +325,67 @@ async function delOffcut(id){
   }catch(e){toast('Network error',true);}
 }
 
-function printLabel(id){
+// ---- DYMO label printing (same web service as the offload station) ----
+const DYMO_HOST='https://127.0.0.1';
+const DYMO_PORTS=[41951,41952,41953,41954,41955,41956,41957,41958,41959,41960];
+let _dymoBase=null,_dymoPrinter='';
+async function _probeDymo(base,ms){
+  const ctrl=new AbortController();const t=setTimeout(()=>ctrl.abort(),ms);
+  try{const r=await fetch(base+'StatusConnected',{method:'GET',signal:ctrl.signal});clearTimeout(t);
+    return r.ok&&(await r.text()).trim().toLowerCase().indexOf('true')>=0;}catch(e){clearTimeout(t);return false;}
+}
+async function findDymo(){
+  for(const port of DYMO_PORTS){
+    const base=DYMO_HOST+':'+port+'/DYMO/DLS/Printing/';
+    if(await _probeDymo(base,1500)){
+      _dymoBase=base;
+      try{const xml=await (await fetch(base+'GetPrinters')).text();
+        const names=[...xml.matchAll(/<Name>(.*?)<\/Name>/g)].map(m=>m[1]);
+        _dymoPrinter=names.find(n=>/labelwriter/i.test(n))||names[0]||'';}catch(e){_dymoPrinter='';}
+      return base;
+    }
+  }
+  _dymoBase=null;return null;
+}
+async function ensureDymo(){return _dymoBase||await findDymo();}
+
+// one text field in the DYMO DesktopLabel XML (proven structure from the cut labels)
+function _to(name,text,size,align,x,y,w,h){
+  return `<TextObject><Name>${name}</Name><Brushes><BackgroundBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></BackgroundBrush><BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush><StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush><FillBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush></Brushes><Rotation>Rotation0</Rotation><OutlineThickness>1</OutlineThickness><IsOutlined>False</IsOutlined><BorderStyle>SolidLine</BorderStyle><Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin><HorizontalAlignment>${align}</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment><FitMode>AlwaysFit</FitMode><IsVertical>False</IsVertical><FormattedText><FitMode>AlwaysFit</FitMode><HorizontalAlignment>${align}</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment><IsVertical>False</IsVertical><LineTextSpan><TextSpan><Text>${esc(text)}</Text><FontInfo><FontName>Segoe UI</FontName><FontSize>${size}</FontSize><IsBold>True</IsBold><IsItalic>False</IsItalic><IsUnderline>False</IsUnderline><FontBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FontBrush></FontInfo></TextSpan></LineTextSpan></FormattedText><ObjectLayout><DYMOPoint><X>${x}</X><Y>${y}</Y></DYMOPoint><Size><Width>${w}</Width><Height>${h}</Height></Size></ObjectLayout></TextObject>`;
+}
+function offcutLabelXml(o){
+  // CODE big at the top (this is the part that folds over the edge), then decor / size / bay
+  const size=`${o.l} x ${o.w}  -  ${o.thick}mm`;
+  const body=
+    _to('OcCode',o.code||'',20,'Center',0.06,0.05,2.05,0.30)+
+    _to('OcDecor',o.name||'',9,'Center',0.06,0.37,2.05,0.18)+
+    _to('OcSize',size,12,'Center',0.06,0.56,2.05,0.20)+
+    _to('OcCust',o.notes?('Cust: '+o.notes):'',8,'Center',0.06,0.77,2.05,0.15)+
+    _to('OcBay',o.location?('Bay: '+o.location):'',8,'Center',0.06,0.93,2.05,0.15);
+  return `<?xml version="1.0" encoding="utf-8"?><DesktopLabel Version="1"><DYMOLabel Version="4"><Description>DYMO Label</Description><Orientation>Portrait</Orientation><LabelName>S0722540 multipurpose</LabelName><InitialLength>0</InitialLength><BorderStyle>SolidLine</BorderStyle><DYMORect><DYMOPoint><X>0.04</X><Y>0.06</Y></DYMOPoint><Size><Width>2.17</Width><Height>1.13</Height></Size></DYMORect><BorderColor><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderColor><BorderThickness>1</BorderThickness><Show_Border>False</Show_Border><HasFixedLength>False</HasFixedLength><FixedLengthValue>0</FixedLengthValue><DynamicLayoutManager><RotationBehavior>ClearObjects</RotationBehavior><LabelObjects>${body}</LabelObjects></DynamicLayoutManager></DYMOLabel></DesktopLabel>`;
+}
+
+async function printLabel(id){
   const o=_offcuts.find(x=>x.id===id);if(!o)return;
+  toast('Finding printer…');
+  const base=await ensureDymo();
+  if(base){
+    try{
+      const r=await fetch(base+'PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body:'printerName='+encodeURIComponent(_dymoPrinter)+'&labelXml='+encodeURIComponent(offcutLabelXml(o))+'&printParamsXml=&labelSetXml='});
+      if(r.ok){toast('Label sent ✓ '+(o.code||''));return;}
+      toast('Printer error '+r.status,true);
+    }catch(e){_dymoBase=null;}
+  }
+  // fallback: browser print (e.g. DYMO web service not running)
+  toast('DYMO not found — browser print',true);
+  browserLabel(o);
+}
+function browserLabel(o){
   $('lbl-code').textContent=o.code||'';
   $('lbl-decor').textContent=o.name||'';
-  $('lbl-meta').textContent=`${o.l} × ${o.w} · ${o.thick}mm`+(o.grain_len?' · grain along length':'');
-  $('lbl-loc').textContent=o.location?('Bay: '+o.location):'';
+  $('lbl-meta').textContent=`${o.l} x ${o.w} - ${o.thick}mm`+(o.grain_len?' - grain along length':'');
+  $('lbl-loc').textContent=(o.location?('Bay: '+o.location):'')+(o.notes?('   ·   Cust: '+o.notes):'');
   window.print();
 }
 
