@@ -141,6 +141,7 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
         <select id="fdecor" onchange="renderList()"><option value="">All decors</option></select>
         <select id="fthick" onchange="renderList()"><option value="">All thickness</option></select>
         <select id="fsort" onchange="renderList()"><option value="size">Biggest first</option><option value="newest">Newest</option><option value="bay">By bay</option></select>
+        <select id="fgroup" onchange="renderList()"><option value="decor">Group: decor</option><option value="cust">Group: customer</option></select>
         <span class="count" id="count"></span>
       </div>
       <div id="list"></div>
@@ -295,6 +296,7 @@ function ocCard(o){
       <div class="swatch" style="background:${esc(o.color||'#4e9af1')}"></div>
       <div class="body">
         <div class="code">${esc(o.code||'')}${o.qty>1?` <span class="pill-qty">×${o.qty}</span>`:''}${o.label_printed===false?` <span style="color:#e6a23c;font-size:11px;font-family:var(--mono)">🕓 label queued</span>`:''}</div>
+        <div class="meta" style="color:var(--txt);font-weight:600">${esc(o.name)}</div>
         <div class="meta">${o.l} × ${o.w} · ${o.thick}mm${o.grain_len?' · grain ↕':''}</div>
         ${o.location?`<span class="loc">📍 ${esc(o.location)}</span>`:''}
         ${o.notes?`<div class="meta" style="color:var(--txt3);margin-top:3px">👤 ${esc(o.notes)}</div>`:''}
@@ -324,8 +326,10 @@ function renderList(){
   const totalPieces=items.reduce((s,o)=>s+(o.qty||1),0);
   $('count').textContent=totalPieces+' offcut'+(totalPieces===1?'':'s')+(ft?(' · '+ft+'mm'):'');
   if(!items.length){$('list').innerHTML='<div class="empty">No offcuts'+(q||ft||fd?' match your filter':' logged yet — add one above')+'.</div>';return;}
+  const groupBy=($('fgroup')&&$('fgroup').value)||'decor';
+  const keyOf=o=>groupBy==='cust'?(o.notes&&o.notes.trim()?o.notes.trim():'— no customer —'):(o.name||'—');
   const groups={};
-  items.forEach(o=>{ (groups[o.name]=groups[o.name]||[]).push(o); });
+  items.forEach(o=>{ const k=keyOf(o); (groups[k]=groups[k]||[]).push(o); });
   const names=Object.keys(groups).sort((a,b)=>String(a).localeCompare(String(b)));
   const searching=!!(q||fd);   // when narrowing, open matching groups automatically
   $('list').innerHTML=names.map(name=>{
