@@ -243,7 +243,7 @@ async function addOffcut(){
     if(_editingId){
       r=await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+_editingId,{method:'PATCH',headers:Hrep(),body:JSON.stringify(row)});
     }else{
-      row.status='in_stock';row.code=genCode();row.user_id=_user.id;
+      row.status='in_stock';row.code=genCode();row.user_id=_user.id;row.label_printed=false;  // queue for the workshop printer
       r=await fetch(SB_URL+'/rest/v1/tce_library',{method:'POST',headers:Hrep(),body:JSON.stringify(row)});
     }
     if(!r.ok){const e=await r.text();toast('Save failed',true);console.warn(e);return;}
@@ -287,7 +287,7 @@ function renderList(){
     <div class="oc">
       <div class="swatch" style="background:${esc(o.color||'#4e9af1')}"></div>
       <div class="body">
-        <div class="code">${esc(o.code||'')}${o.qty>1?` <span class="pill-qty">×${o.qty}</span>`:''}</div>
+        <div class="code">${esc(o.code||'')}${o.qty>1?` <span class="pill-qty">×${o.qty}</span>`:''}${o.label_printed===false?` <span style="color:#e6a23c;font-size:11px;font-family:var(--mono)">🕓 label queued</span>`:''}</div>
         <div class="decor">${esc(o.name)}</div>
         <div class="meta">${o.l} × ${o.w} · ${o.thick}mm${o.grain_len?' · grain ↕':''}</div>
         ${o.location?`<span class="loc">📍 ${esc(o.location)}</span>`:''}
@@ -359,6 +359,8 @@ function offcutLabelXml(o){
   // and laid along the long 57mm edge. Turn the printed label a quarter-turn and it reads TALL:
   // code in the wrap strip, fold guide at ~16.5mm, then code + details on the face.
   const size=`${o.l} x ${o.w}  -  ${o.thick}mm`;
+  let cust=o.notes?String(o.notes).replace(/\s*[-—]\s*Rev\s*\d+\s*$/i,'').trim():'';
+  if(cust.length>26) cust=cust.slice(0,25).replace(/\s+\S*$/,'').trim()+'…';
   const R='Rotation270', Y=0.06, H=1.01;
   const body=
     _to('OcCodeTop',o.code||'',20,'Center',0.08,Y,0.42,H,R)+
@@ -367,7 +369,7 @@ function offcutLabelXml(o){
     _to('OcDecor',o.name||'',11,'Center',1.12,Y,0.22,H,R)+
     _to('OcSize',size,13,'Center',1.36,Y,0.26,H,R)+
     _to('OcBay',o.location?('Bay: '+o.location):'',10,'Center',1.66,Y,0.18,H,R)+
-    _to('OcCust',o.notes?('Cust: '+o.notes):'',10,'Center',1.86,Y,0.18,H,R);
+    _to('OcCust',cust?('Cust: '+cust):'',10,'Center',1.86,Y,0.18,H,R);
   return `<?xml version="1.0" encoding="utf-8"?><DesktopLabel Version="1"><DYMOLabel Version="4"><Description>DYMO Label</Description><Orientation>Portrait</Orientation><LabelName>S0722540 multipurpose</LabelName><InitialLength>0</InitialLength><BorderStyle>SolidLine</BorderStyle><DYMORect><DYMOPoint><X>0.04</X><Y>0.06</Y></DYMOPoint><Size><Width>2.17</Width><Height>1.13</Height></Size></DYMORect><BorderColor><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderColor><BorderThickness>1</BorderThickness><Show_Border>False</Show_Border><HasFixedLength>False</HasFixedLength><FixedLengthValue>0</FixedLengthValue><DynamicLayoutManager><RotationBehavior>ClearObjects</RotationBehavior><LabelObjects>${body}</LabelObjects></DynamicLayoutManager></DYMOLabel></DesktopLabel>`;
 }
 
@@ -379,7 +381,10 @@ async function printLabel(id){
     try{
       const r=await fetch(base+'PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
         body:'printerName='+encodeURIComponent(_dymoPrinter)+'&labelXml='+encodeURIComponent(offcutLabelXml(o))+'&printParamsXml=&labelSetXml='});
-      if(r.ok){toast('Label sent ✓ '+(o.code||''));return;}
+      if(r.ok){
+        if(o.label_printed===false){ try{ await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+o.id,{method:'PATCH',headers:H(),body:JSON.stringify({label_printed:true})}); o.label_printed=true; renderList(); }catch(e){} }
+        toast('Label sent ✓ '+(o.code||''));return;
+      }
       toast('Printer error '+r.status,true);
     }catch(e){_dymoBase=null;}
   }

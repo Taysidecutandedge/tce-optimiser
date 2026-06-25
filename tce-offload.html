@@ -63,6 +63,7 @@
     <button class="toggle" id="autoBtn" onclick="toggleAuto()">Auto-print: OFF</button>
     <button class="toggle" onclick="openOffcutForm()" style="border-color:#2a8a5a;color:#7fe3a8">♻ Log offcut</button>
     <span class="printstat" id="printStat"></span>
+    <span class="printstat" id="pendStat" style="color:#e6a23c"></span>
   </div>
   <div class="now" id="now">
     <div class="waiting">Waiting for the next cut…</div>
@@ -169,6 +170,8 @@ async function startApp(){
     }
   }catch(e){}
   subscribe();
+  pollPendingOffcuts();
+  setInterval(pollPendingOffcuts, 12000);   // auto-print phone-queued offcut labels every ~12s
 }
 
 function setLive(on,txt){
@@ -289,6 +292,8 @@ function _to(name,text,size,align,x,y,w,h,rot){
 }
 function offcutLabelXml(o){
   const size=`${o.l} x ${o.w}  -  ${o.thick}mm`;
+  let cust=o.notes?String(o.notes).replace(/\s*[-—]\s*Rev\s*\d+\s*$/i,'').trim():'';
+  if(cust.length>26) cust=cust.slice(0,25).replace(/\s+\S*$/,'').trim()+'…';   // keep the customer line legible on long job names
   const R='Rotation270', Y=0.06, H=1.01;
   const body=
     _to('OcCodeTop',o.code||'',20,'Center',0.08,Y,0.42,H,R)+
@@ -297,7 +302,7 @@ function offcutLabelXml(o){
     _to('OcDecor',o.name||'',11,'Center',1.12,Y,0.22,H,R)+
     _to('OcSize',size,13,'Center',1.36,Y,0.26,H,R)+
     _to('OcBay',o.location?('Bay: '+o.location):'',10,'Center',1.66,Y,0.18,H,R)+
-    _to('OcCust',o.notes?('Cust: '+o.notes):'',10,'Center',1.86,Y,0.18,H,R);
+    _to('OcCust',cust?('Cust: '+cust):'',10,'Center',1.86,Y,0.18,H,R);
   return `<?xml version="1.0" encoding="utf-8"?><DesktopLabel Version="1"><DYMOLabel Version="4"><Description>DYMO Label</Description><Orientation>Portrait</Orientation><LabelName>S0722540 multipurpose</LabelName><InitialLength>0</InitialLength><BorderStyle>SolidLine</BorderStyle><DYMORect><DYMOPoint><X>0.06</X><Y>0.06</Y></DYMOPoint><Size><Width>1.13</Width><Height>2.17</Height></Size></DYMORect><BorderColor><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderColor><BorderThickness>1</BorderThickness><Show_Border>False</Show_Border><HasFixedLength>False</HasFixedLength><FixedLengthValue>0</FixedLengthValue><DynamicLayoutManager><RotationBehavior>ClearObjects</RotationBehavior><LabelObjects>${body}</LabelObjects></DynamicLayoutManager></DYMOLabel></DesktopLabel>`;
 }
 async function printOffcutLabel(o){
@@ -309,6 +314,30 @@ async function printOffcutLabel(o){
     setPrintStat(r.ok?('offcut label sent ✓ '+(o.code||'')):'printer error '+r.status);
     return r.ok;
   }catch(e){ _dymoBase=null; setPrintStat('printer not reachable'); return false; }
+}
+// Auto-print offcut labels queued from the phone/offcuts page (this laptop is the one wired to the DYMO)
+let _printingPending=false;
+async function pollPendingOffcuts(){
+  if(_printingPending) return; _printingPending=true;
+  const ps=document.getElementById('pendStat');
+  try{
+    const {data}=await sb.from('tce_library').select('*').eq('is_offcut',true).eq('label_printed',false).order('id').limit(20);
+    const n=data?data.length:0;
+    if(ps) ps.textContent = n?('🕓 '+n+' label'+(n>1?'s':'')+' queued'):'';
+    if(n){
+      const base=await ensureDymo();
+      if(base){
+        for(const o of data){
+          const ok=await printOffcutLabel(o);
+          if(ok){ try{ await sb.from('tce_library').update({label_printed:true}).eq('id',o.id); }catch(e){} }
+          else break;   // printer issue — leave the rest queued, retry next poll
+        }
+        const {data:after}=await sb.from('tce_library').select('id').eq('is_offcut',true).eq('label_printed',false).limit(20);
+        if(ps) ps.textContent=(after&&after.length)?('🕓 '+after.length+' queued — check printer'):'';
+      } else if(ps){ ps.textContent='🕓 '+n+' queued — printer not found'; }
+    }
+  }catch(e){}
+  _printingPending=false;
 }
 async function openOffcutForm(){
   const p=_current||{};
@@ -342,7 +371,7 @@ async function saveOffcut(){
   try{
     const {data:u}=await sb.auth.getUser();
     const uid=u&&u.user?u.user.id:null;
-    const row={name:decor,l,w,thick:thick||0,cost:0,notes:cust,grain_len:_ofBoard.grain_len,color:_ofBoard.color,is_offcut:true,qty,location:bay||null,status:'in_stock',code:genOffcutCode(),user_id:uid};
+    const row={name:decor,l,w,thick:thick||0,cost:0,notes:cust,grain_len:_ofBoard.grain_len,color:_ofBoard.color,is_offcut:true,qty,location:bay||null,status:'in_stock',code:genOffcutCode(),user_id:uid,label_printed:true};
     const {data,error}=await sb.from('tce_library').insert(row).select();
     if(error){ err.textContent='Save failed: '+error.message; if(btn){btn.disabled=false;btn.textContent='Save & print label';} return; }
     const saved=(data&&data[0])||row;
