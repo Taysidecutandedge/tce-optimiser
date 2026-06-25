@@ -61,6 +61,7 @@
     <span class="status" id="liveStatus">connecting…</span>
     <span class="spacer"></span>
     <button class="toggle" id="autoBtn" onclick="toggleAuto()">Auto-print: OFF</button>
+    <button class="toggle" onclick="openOffcutForm()" style="border-color:#2a8a5a;color:#7fe3a8">♻ Log offcut</button>
     <span class="printstat" id="printStat"></span>
   </div>
   <div class="now" id="now">
@@ -69,6 +70,32 @@
   <div class="recent">
     <h2>Recent — tap Reprint if a label is damaged</h2>
     <div id="recentList"></div>
+  </div>
+</div>
+
+<div id="offcutModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:1000;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#15171e;border:1px solid #2a2e38;border-radius:14px;max-width:460px;width:100%;padding:20px;color:#f0eeea;font-family:inherit">
+    <h2 style="font-size:18px;margin:0 0 3px">♻ Log offcut</h2>
+    <div style="font-size:12px;color:#6b8f7e;margin-bottom:14px">Measure the actual leftover in hand, then save &amp; print its label.</div>
+    <label style="font-size:12px;color:#a8b0bd">Decor</label>
+    <input id="of-decor" style="width:100%;background:#1e2128;border:1px solid #2a2e38;color:#f0eeea;border-radius:8px;padding:10px;font-size:15px;margin-bottom:8px">
+    <div style="display:flex;gap:10px">
+      <div style="flex:1"><label style="font-size:12px;color:#a8b0bd">Length (mm)</label><input id="of-l" type="number" inputmode="numeric" placeholder="measure" style="width:100%;background:#1e2128;border:1px solid #2a2e38;color:#f0eeea;border-radius:8px;padding:10px;font-size:16px"></div>
+      <div style="flex:1"><label style="font-size:12px;color:#a8b0bd">Width (mm)</label><input id="of-w" type="number" inputmode="numeric" placeholder="measure" style="width:100%;background:#1e2128;border:1px solid #2a2e38;color:#f0eeea;border-radius:8px;padding:10px;font-size:16px"></div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <div style="flex:1"><label style="font-size:12px;color:#a8b0bd">Thickness (mm)</label><input id="of-thick" type="number" inputmode="decimal" step="0.1" style="width:100%;background:#1e2128;border:1px solid #2a2e38;color:#f0eeea;border-radius:8px;padding:10px;font-size:16px"></div>
+      <div style="flex:1"><label style="font-size:12px;color:#a8b0bd">Qty</label><input id="of-qty" type="number" value="1" min="1" style="width:100%;background:#1e2128;border:1px solid #2a2e38;color:#f0eeea;border-radius:8px;padding:10px;font-size:16px"></div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <div style="flex:1"><label style="font-size:12px;color:#a8b0bd">Bay / location</label><input id="of-bay" placeholder="e.g. Rack B3" style="width:100%;background:#1e2128;border:1px solid #2a2e38;color:#f0eeea;border-radius:8px;padding:10px;font-size:15px"></div>
+      <div style="flex:1"><label style="font-size:12px;color:#a8b0bd">Customer / job</label><input id="of-cust" style="width:100%;background:#1e2128;border:1px solid #2a2e38;color:#f0eeea;border-radius:8px;padding:10px;font-size:15px"></div>
+    </div>
+    <div id="of-err" style="color:#ff8a80;font-size:13px;margin-top:8px"></div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button onclick="closeOffcutForm()" style="flex:1;background:transparent;border:1px solid #3a3f4a;color:#f0eeea;border-radius:9px;padding:12px;font-size:15px;cursor:pointer">Cancel</button>
+      <button id="of-save" onclick="saveOffcut()" style="flex:2;background:#27ae60;border:none;color:#fff;border-radius:9px;padding:12px;font-size:15px;font-weight:600;cursor:pointer">Save &amp; print label</button>
+    </div>
   </div>
 </div>
 
@@ -251,6 +278,79 @@ async function printDoorLabel(d){
   fetch(base+'PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'printerName='+encodeURIComponent(_dymoPrinter)+'&labelXml='+encodeURIComponent(xml)+'&printParamsXml=&labelSetXml='})
     .then(r=>setPrintStat(r.ok?'door label sent ✓':'printer error '+r.status))
     .catch(()=>{ _dymoBase=null; setPrintStat('printer not reachable'); });
+}
+
+// ── Offcut capture (Phase 3) ───────────────────────────────────────────────
+let _ofBoard={color:'#4e9af1',grain_len:true};
+function genOffcutCode(){const a='23456789ABCDEFGHJKLMNPQRSTUVWXYZ';return 'OC-'+Array.from({length:4},()=>a[Math.floor(Math.random()*a.length)]).join('');}
+function _to(name,text,size,align,x,y,w,h,rot){
+  rot=rot||'Rotation0';
+  return `<TextObject><Name>${name}</Name><Brushes><BackgroundBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></BackgroundBrush><BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush><StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush><FillBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush></Brushes><Rotation>${rot}</Rotation><OutlineThickness>1</OutlineThickness><IsOutlined>False</IsOutlined><BorderStyle>SolidLine</BorderStyle><Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin><HorizontalAlignment>${align}</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment><FitMode>AlwaysFit</FitMode><IsVertical>False</IsVertical><FormattedText><FitMode>AlwaysFit</FitMode><HorizontalAlignment>${align}</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment><IsVertical>False</IsVertical><LineTextSpan><TextSpan><Text>${esc(text)}</Text><FontInfo><FontName>Segoe UI</FontName><FontSize>${size}</FontSize><IsBold>True</IsBold><IsItalic>False</IsItalic><IsUnderline>False</IsUnderline><FontBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FontBrush></FontInfo></TextSpan></LineTextSpan></FormattedText><ObjectLayout><DYMOPoint><X>${x}</X><Y>${y}</Y></DYMOPoint><Size><Width>${w}</Width><Height>${h}</Height></Size></ObjectLayout></TextObject>`;
+}
+function offcutLabelXml(o){
+  const size=`${o.l} x ${o.w}  -  ${o.thick}mm`;
+  const R='Rotation270', Y=0.06, H=1.01;
+  const body=
+    _to('OcCodeTop',o.code||'',20,'Center',0.08,Y,0.42,H,R)+
+    _to('OcFold','— fold —',7,'Center',0.56,Y,0.10,H,R)+
+    _to('OcCode',o.code||'',18,'Center',0.70,Y,0.38,H,R)+
+    _to('OcDecor',o.name||'',11,'Center',1.12,Y,0.22,H,R)+
+    _to('OcSize',size,13,'Center',1.36,Y,0.26,H,R)+
+    _to('OcBay',o.location?('Bay: '+o.location):'',10,'Center',1.66,Y,0.18,H,R)+
+    _to('OcCust',o.notes?('Cust: '+o.notes):'',10,'Center',1.86,Y,0.18,H,R);
+  return `<?xml version="1.0" encoding="utf-8"?><DesktopLabel Version="1"><DYMOLabel Version="4"><Description>DYMO Label</Description><Orientation>Portrait</Orientation><LabelName>S0722540 multipurpose</LabelName><InitialLength>0</InitialLength><BorderStyle>SolidLine</BorderStyle><DYMORect><DYMOPoint><X>0.06</X><Y>0.06</Y></DYMOPoint><Size><Width>1.13</Width><Height>2.17</Height></Size></DYMORect><BorderColor><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderColor><BorderThickness>1</BorderThickness><Show_Border>False</Show_Border><HasFixedLength>False</HasFixedLength><FixedLengthValue>0</FixedLengthValue><DynamicLayoutManager><RotationBehavior>ClearObjects</RotationBehavior><LabelObjects>${body}</LabelObjects></DynamicLayoutManager></DYMOLabel></DesktopLabel>`;
+}
+async function printOffcutLabel(o){
+  setPrintStat('printing offcut label…');
+  const base=await ensureDymo();
+  if(!base){ setPrintStat('printer not reachable — open DYMO Connect & accept certificate'); return false; }
+  try{
+    const r=await fetch(base+'PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'printerName='+encodeURIComponent(_dymoPrinter)+'&labelXml='+encodeURIComponent(offcutLabelXml(o))+'&printParamsXml=&labelSetXml='});
+    setPrintStat(r.ok?('offcut label sent ✓ '+(o.code||'')):'printer error '+r.status);
+    return r.ok;
+  }catch(e){ _dymoBase=null; setPrintStat('printer not reachable'); return false; }
+}
+async function openOffcutForm(){
+  const p=_current||{};
+  document.getElementById('of-decor').value=p.sheetName||'';
+  document.getElementById('of-cust').value=(p.company||'').replace(/\s*[-—]\s*Rev\s*\d+\s*$/i,'');
+  document.getElementById('of-l').value=''; document.getElementById('of-w').value='';
+  document.getElementById('of-qty').value='1'; document.getElementById('of-bay').value='';
+  document.getElementById('of-thick').value=''; document.getElementById('of-err').textContent='';
+  document.getElementById('offcutModal').style.display='flex';
+  _ofBoard={color:'#4e9af1',grain_len:true};
+  if(p.sheetName){
+    try{
+      const {data}=await sb.from('tce_library').select('thick,color,grain_len').eq('name',p.sheetName).eq('is_offcut',false).limit(1);
+      if(data&&data[0]){ if(data[0].thick!=null)document.getElementById('of-thick').value=data[0].thick; _ofBoard.color=data[0].color||_ofBoard.color; _ofBoard.grain_len=data[0].grain_len!==false; }
+    }catch(e){}
+  }
+  document.getElementById('of-l').focus();
+}
+function closeOffcutForm(){ document.getElementById('offcutModal').style.display='none'; }
+async function saveOffcut(){
+  const decor=document.getElementById('of-decor').value.trim();
+  const l=parseInt(document.getElementById('of-l').value), w=parseInt(document.getElementById('of-w').value);
+  const thick=parseFloat(document.getElementById('of-thick').value);
+  const qty=Math.max(1,parseInt(document.getElementById('of-qty').value)||1);
+  const bay=document.getElementById('of-bay').value.trim();
+  const cust=document.getElementById('of-cust').value.trim();
+  const err=document.getElementById('of-err');
+  if(!decor){err.textContent='Enter a decor.';return;}
+  if(!l||!w){err.textContent='Enter the measured length & width.';return;}
+  const btn=document.getElementById('of-save'); if(btn){btn.disabled=true;btn.textContent='Saving…';}
+  try{
+    const {data:u}=await sb.auth.getUser();
+    const uid=u&&u.user?u.user.id:null;
+    const row={name:decor,l,w,thick:thick||0,cost:0,notes:cust,grain_len:_ofBoard.grain_len,color:_ofBoard.color,is_offcut:true,qty,location:bay||null,status:'in_stock',code:genOffcutCode(),user_id:uid};
+    const {data,error}=await sb.from('tce_library').insert(row).select();
+    if(error){ err.textContent='Save failed: '+error.message; if(btn){btn.disabled=false;btn.textContent='Save & print label';} return; }
+    const saved=(data&&data[0])||row;
+    closeOffcutForm();
+    setPrintStat('offcut '+saved.code+' saved ✓');
+    await printOffcutLabel(saved);
+  }catch(e){ err.textContent='Error: '+(e.message||e); }
+  if(btn){btn.disabled=false;btn.textContent='Save & print label';}
 }
 
 (async function(){
