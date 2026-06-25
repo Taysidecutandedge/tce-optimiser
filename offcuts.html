@@ -45,6 +45,14 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 .oc .loc{display:inline-block;background:var(--surf2);border:1px solid var(--brd);border-radius:5px;padding:1px 7px;font-size:12px;color:var(--txt);margin-top:4px;font-family:var(--mono)}
 .oc .acts{display:flex;flex-direction:column;gap:6px;flex-shrink:0}
 .pill-qty{font-family:var(--mono);font-size:12px;color:var(--txt3)}
+.grp{margin-bottom:8px;border:1px solid var(--brd);border-radius:10px;overflow:hidden;background:var(--surf)}
+.grp-hdr{display:flex;align-items:center;gap:10px;padding:12px;cursor:pointer}
+.grp-hdr:active{background:var(--surf2)}
+.grp-name{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.grp-sub{font-size:12px;color:var(--txt3);font-family:var(--mono)}
+.grp-chev{color:var(--txt2);font-size:13px;flex-shrink:0}
+.grp-body{padding:0 8px 8px}
+.grp-body .oc{background:var(--surf2)}
 .empty{text-align:center;color:var(--txt3);padding:40px 16px;font-size:14px}
 .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#fff;color:#111;padding:10px 18px;border-radius:10px;font-weight:600;font-size:14px;box-shadow:0 8px 30px rgba(0,0,0,.5);z-index:100;opacity:0;transition:opacity .2s;pointer-events:none}
 .toast.show{opacity:1}
@@ -130,7 +138,9 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
     <section style="padding-top:0">
       <div class="toolbar">
         <input id="q" type="search" placeholder="Search decor, code, bay…" oninput="renderList()">
+        <select id="fdecor" onchange="renderList()"><option value="">All decors</option></select>
         <select id="fthick" onchange="renderList()"><option value="">All thickness</option></select>
+        <select id="fsort" onchange="renderList()"><option value="size">Biggest first</option><option value="newest">Newest</option><option value="bay">By bay</option></select>
         <span class="count" id="count"></span>
       </div>
       <div id="list"></div>
@@ -215,6 +225,8 @@ async function loadOffcuts(){
     // build thickness filter
     const ths=[...new Set(_offcuts.map(o=>o.thick))].sort((a,b)=>a-b);
     $('fthick').innerHTML='<option value="">All thickness</option>'+ths.map(t=>`<option value="${t}">${t}mm</option>`).join('');
+    const decorsInStock=[...new Set(_offcuts.map(o=>o.name))].sort((a,b)=>String(a).localeCompare(String(b)));
+    $('fdecor').innerHTML='<option value="">All decors</option>'+decorsInStock.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
     renderList();
   }catch(e){toast('Network error',true);}
 }
@@ -274,21 +286,15 @@ function editOffcut(id){
   toast('Editing '+(o.code||'')+' — adjust the size if it was re-trimmed');
 }
 
-function renderList(){
-  const q=$('q').value.trim().toLowerCase();
-  const ft=$('fthick').value;
-  let items=_offcuts.slice();
-  if(ft!=='')items=items.filter(o=>String(o.thick)===ft);
-  if(q)items=items.filter(o=>(o.name+' '+(o.code||'')+' '+(o.location||'')+' '+(o.notes||'')).toLowerCase().includes(q));
-  items.sort((a,b)=>(a.name||'').localeCompare(b.name||'')||(b.l*b.w)-(a.l*a.w));
-  $('count').textContent=items.length+' offcut'+(items.length===1?'':'s')+(ft?(' · '+ft+'mm'):'');
-  if(!items.length){$('list').innerHTML='<div class="empty">No offcuts'+(q||ft?' match your filter':' logged yet — add one above')+'.</div>';return;}
-  $('list').innerHTML=items.map(o=>`
+let _expandedDecors=new Set();
+const _jsAttr=s=>String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');
+function toggleDecor(name){ if(_expandedDecors.has(name))_expandedDecors.delete(name); else _expandedDecors.add(name); renderList(); }
+function ocCard(o){
+  return `
     <div class="oc">
       <div class="swatch" style="background:${esc(o.color||'#4e9af1')}"></div>
       <div class="body">
         <div class="code">${esc(o.code||'')}${o.qty>1?` <span class="pill-qty">×${o.qty}</span>`:''}${o.label_printed===false?` <span style="color:#e6a23c;font-size:11px;font-family:var(--mono)">🕓 label queued</span>`:''}</div>
-        <div class="decor">${esc(o.name)}</div>
         <div class="meta">${o.l} × ${o.w} · ${o.thick}mm${o.grain_len?' · grain ↕':''}</div>
         ${o.location?`<span class="loc">📍 ${esc(o.location)}</span>`:''}
         ${o.notes?`<div class="meta" style="color:var(--txt3);margin-top:3px">👤 ${esc(o.notes)}</div>`:''}
@@ -299,7 +305,47 @@ function renderList(){
         <button class="btn btn-sm" onclick="useOne(${o.id})">Use 1</button>
         <button class="btn btn-sm btn-danger" onclick="delOffcut(${o.id})">Delete</button>
       </div>
-    </div>`).join('');
+    </div>`;
+}
+function renderList(){
+  const q=$('q').value.trim().toLowerCase();
+  const ft=$('fthick').value;
+  const fd=$('fdecor')?$('fdecor').value:'';
+  const sortMode=($('fsort')&&$('fsort').value)||'size';
+  let items=_offcuts.slice();
+  if(ft!=='')items=items.filter(o=>String(o.thick)===ft);
+  if(fd!=='')items=items.filter(o=>o.name===fd);
+  if(q)items=items.filter(o=>(o.name+' '+(o.code||'')+' '+(o.location||'')+' '+(o.notes||'')).toLowerCase().includes(q));
+  const cmp=({
+    size:(a,b)=>(b.l*b.w)-(a.l*a.w),
+    newest:(a,b)=>(b.id||0)-(a.id||0),
+    bay:(a,b)=>String(a.location||'~~').localeCompare(String(b.location||'~~'))
+  })[sortMode]||((a,b)=>(b.l*b.w)-(a.l*a.w));
+  const totalPieces=items.reduce((s,o)=>s+(o.qty||1),0);
+  $('count').textContent=totalPieces+' offcut'+(totalPieces===1?'':'s')+(ft?(' · '+ft+'mm'):'');
+  if(!items.length){$('list').innerHTML='<div class="empty">No offcuts'+(q||ft||fd?' match your filter':' logged yet — add one above')+'.</div>';return;}
+  const groups={};
+  items.forEach(o=>{ (groups[o.name]=groups[o.name]||[]).push(o); });
+  const names=Object.keys(groups).sort((a,b)=>String(a).localeCompare(String(b)));
+  const searching=!!(q||fd);   // when narrowing, open matching groups automatically
+  $('list').innerHTML=names.map(name=>{
+    const arr=groups[name].slice().sort(cmp);
+    const pcs=arr.reduce((s,o)=>s+(o.qty||1),0);
+    const m2=arr.reduce((s,o)=>s+(o.l*o.w*(o.qty||1)),0)/1e6;
+    const open=searching||_expandedDecors.has(name);
+    const sw=arr[0].color||'#4e9af1';
+    return `<div class="grp">
+      <div class="grp-hdr" onclick="toggleDecor('${_jsAttr(name)}')">
+        <div class="swatch" style="background:${esc(sw)};width:22px;height:22px"></div>
+        <div style="flex:1;min-width:0">
+          <div class="grp-name">${esc(name)}</div>
+          <div class="grp-sub">${pcs} piece${pcs===1?'':'s'} · ${m2.toFixed(2)} m²${ft?(' · '+ft+'mm'):''}</div>
+        </div>
+        <div class="grp-chev">${open?'▾':'▸'}</div>
+      </div>
+      ${open?`<div class="grp-body">${arr.map(ocCard).join('')}</div>`:''}
+    </div>`;
+  }).join('');
 }
 
 async function useOne(id){
