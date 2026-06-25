@@ -536,6 +536,10 @@ select option{background:var(--surf2)}
         <input type="checkbox" id="optRot" checked>
         <label style="font-size:13px;color:var(--txt2);cursor:pointer" for="optRot">Allow rotation (non-grain parts only)</label>
       </div>
+      <div style="display:flex;gap:8px;align-items:center;padding:7px 10px;background:rgba(40,170,90,.08);border:1px solid rgba(40,170,90,.3);border-radius:5px">
+        <input type="checkbox" id="useOffcuts" checked>
+        <label style="font-size:13px;color:var(--txt2);cursor:pointer;flex:1" for="useOffcuts">♻ <strong>Use my offcut stock</strong> — fit parts onto matching offcuts before opening fresh boards</label>
+      </div>
       <div style="font-size:11px;color:var(--txt3);padding:6px 8px;background:var(--surf2);border-radius:5px;border-left:2px solid var(--acc)">
         💡 Full-length panels (e.g. 2800mm on a 2800×2070 sheet) can be entered at their exact size — they are cut first from the raw sheet before the bottom trim is taken.
       </div>
@@ -630,6 +634,7 @@ select option{background:var(--surf2)}
 // STATE
 // ═══════════════════════════════════════════════
 let library=[], jobSheets=[], parts=[];
+let _offcutStock=[]; // in-stock offcuts for the nester (Phase 2)
 let projectName='';
 let libId=1, jsid=1, pid=1, ci=0;
 let importHeaders=[], importRows=[], libEditingId=null;
@@ -805,6 +810,14 @@ async function sbLoadLibrary(){
   }catch(e){return false;}
 }
 
+async function sbLoadOffcuts(){
+  if(!_sbToken){_offcutStock=[];return;}
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/tce_library?select=*&is_offcut=eq.true&status=eq.in_stock&order=id',{headers:sbAuthH()});
+    _offcutStock = r.ok ? (await r.json()) : [];
+  }catch(e){ _offcutStock=[]; }
+}
+
 async function sbSaveSheet(e){
   if(!_sbToken||!_sbUser)return;
   const row={name:e.name,l:e.l,w:e.w,thick:e.thick,cost:e.cost,notes:e.notes||'',grain_len:e.grainLen,color:e.color,user_id:_sbUser.id};
@@ -826,6 +839,7 @@ async function sbDeleteSheet(sbid){
 
 async function initCloudLibrary(){
   const loaded=await sbLoadLibrary();
+  await sbLoadOffcuts();
   if(!loaded){
     // No cloud library yet — offer to migrate local library
     const local=localStorage.getItem('clp_lib');
@@ -1402,6 +1416,15 @@ function _calculateInner(){
     return null;
   };
 
+  // ── Offcut stock matched to this job's materials (Phase 2) ─────────────
+  const useOffcuts = !!((document.getElementById('useOffcuts')||{}).checked);
+  const _matchedOffcuts = (useOffcuts && _offcutStock.length) ? _offcutStock.map(oc=>{
+    const js=matchSheet(oc.name);
+    if(!js) return null;
+    if(Math.abs((+oc.thick||0)-(+js.thick||0))>0.6) return null;  // thickness must match the board
+    return {oc, jsid:js.id};
+  }).filter(Boolean) : [];
+
   // Build base pieces array (same for all strategies)
   const allNoGrain=jobSheets.every(s=>s.grainLen===false);
   const basePieces=[];
@@ -1451,6 +1474,18 @@ function _calculateInner(){
     const pool=[];
     const addToPool=sh=>{sh._poolIdx=pool.length;pool.push(sh);return sh;};
     jobSheets.forEach(s=>addToPool(makeSheet(s)));
+    // Seed finite offcut "mini-sheets" (Phase 2) — preferred over fresh boards in findSheet()
+    const makeOffcutSheet=(oc,js)=>({
+      jsid:js.id,name:js.name,color:oc.color||js.color,cost:0,
+      fullL:oc.l,fullW:oc.w,uw:oc.w,uh:oc.l,
+      placements:[],cols:[],usedW:0,_poolIdx:0,
+      _isOffcut:true,_offcutId:oc.id,_offcutCode:oc.code,_offL:oc.l,_offW:oc.w
+    });
+    _matchedOffcuts.forEach(({oc,jsid})=>{
+      const js=jobSheets.find(s=>s.id===jsid); if(!js) return;
+      const n=Math.max(1,parseInt(oc.qty)||1);
+      for(let i=0;i<n;i++) addToPool(makeOffcutSheet(oc,js));
+    });
 
     const placeInSheet=(sh,piece,w,h,rot)=>{
       const isFullRun=h>sh.uh-1&&h<=sh.fullL+.001;
@@ -1532,15 +1567,21 @@ function _calculateInner(){
       return false;
     };
     const findSheet=piece=>{
-      const candidates=pool
-        .filter(sh=>!piece._msid||sh.jsid===piece._msid)
+      const matching=pool.filter(sh=>!piece._msid||sh.jsid===piece._msid);
+      // 1) Offcuts first — smallest that fits, so small offcuts get used up and big ones preserved
+      const ocCands=matching.filter(sh=>sh._isOffcut)
+        .sort((a,b)=>(a.uw*a.uh)-(b.uw*b.uh)||a._poolIdx-b._poolIdx);
+      for(const sh of ocCands) if(tryPlace(sh,piece)) return true;
+      // 2) Existing fresh boards — fullest first (original behaviour)
+      const fullCands=matching.filter(sh=>!sh._isOffcut)
         .sort((a,b)=>{
           const ua=a.placements.reduce((s,p)=>s+p.w*p.h,0)/(a.uw*a.fullL);
           const ub=b.placements.reduce((s,p)=>s+p.w*p.h,0)/(b.uw*b.fullL);
           if(ub!==ua) return ub-ua;
           return a._poolIdx-b._poolIdx; // stable tie-break
         });
-      for(const sh of candidates) if(tryPlace(sh,piece)) return true;
+      for(const sh of fullCands) if(tryPlace(sh,piece)) return true;
+      // 3) Open a fresh full board
       const src=jobSheets.find(s=>!piece._msid||s.id===piece._msid);
       if(!src) return false;
       const newSh=addToPool(makeSheet(src));
@@ -1557,6 +1598,7 @@ function _calculateInner(){
       const filled=pool.filter(s=>s.placements.length>0);
       filled.sort((a,b)=>{const d=utilisation(a)-utilisation(b);return d!==0?d:a._poolIdx-b._poolIdx;});
       for(const sparse of filled){
+        if(sparse._isOffcut) continue;          // keep offcuts filled — never drain them
         if(utilisation(sparse)>0.75) continue;
         const toMove=[...sparse.placements];
         for(const pl of toMove){
@@ -1687,6 +1729,7 @@ function _calculateInner(){
       let anyMoved=false;
 
       for(const sparseSh of sparse){
+        if(sparseSh._isOffcut) continue;         // keep offcuts filled — never drain them
         if(!pool.includes(sparseSh)||sparseSh.placements.length===0) continue;
         const targets=filledNow.filter(s=>s!==sparseSh&&s.jsid===sparseSh.jsid&&s.placements.length>0)
           .sort((a,b)=>{const d=utilFinal(b)-utilFinal(a);return d!==0?d:a._poolIdx-b._poolIdx;});
@@ -1826,15 +1869,16 @@ function _calculateInner(){
     // balance it by MINIMISING the free area of the emptiest sheet — pulling
     // parts across sheets so every sheet looks tidy, rather than pooling all the
     // slack (and stray small parts) onto one ugly half-used sheet.
-    let maxFree=0;
+    let maxFree=0, fullBoards=0, offcutsUsed=0;
     for(const s of res.sheets){
+      if(s._isOffcut){ offcutsUsed++; continue; }   // offcuts are free stock — never count as a board
       const placed=s.placements.reduce((b,p)=>b+p.w*p.h,0);
       const free=(s.uw*s.fullL)-placed;
       if(free>maxFree) maxFree=free;
+      fullBoards++;
     }
-    // sheets*1e9 dominates (sheet area < 6e6 << 1e9); among equal sheet counts,
-    // a SMALLER emptiest-sheet free area (more even fill) gives a better score.
-    return res.sheets.length*1e9 + maxFree;
+    // Primary: fewest FRESH BOARDS. Then consume more offcuts. Then spread the spare evenly.
+    return fullBoards*1e9 - offcutsUsed*1e7 + maxFree;
   };
 
   let best=null;
@@ -1923,6 +1967,10 @@ function _calculateInner(){
     best={sheets:res.sheets,unplaced:res.unplaced,strategy:strategies[0].name};
   }
   best.sheets.forEach(s=>tidySheetSafe(s,kerf));   // stack lone panels into same-width strips (self-validating, reverts if not rippable)
+  // Tally offcuts this result consumed (Phase 2) for the "mark used" prompt
+  const _usedOff={};
+  best.sheets.forEach(s=>{ if(s._isOffcut&&s.placements.length){ const k=s._offcutId; if(!_usedOff[k])_usedOff[k]={id:s._offcutId,code:s._offcutCode,l:s._offL,w:s._offW,count:0}; _usedOff[k].count++; } });
+  window._lastUsedOffcuts=Object.values(_usedOff);
   renderResults(best.sheets,best.unplaced);
 }
 
@@ -1992,6 +2040,21 @@ function fitsT(pw,ph,r,tol){return pw<=r.w+.001+tol&&ph<=r.h+.001+tol;}
 // ═══════════════════════════════════════════════
 // RENDER RESULTS
 // ═══════════════════════════════════════════════
+async function markOffcutsUsed(btn){
+  const list=window._lastUsedOffcuts||[]; if(!list.length)return;
+  if(btn){btn.disabled=true;btn.textContent='Marking…';}
+  for(const u of list){
+    try{
+      const cur=await (await fetch(SB_URL+'/rest/v1/tce_library?select=qty&id=eq.'+u.id,{headers:sbAuthH()})).json();
+      const q=((cur&&cur[0]?(+cur[0].qty||1):1)-u.count);
+      const patch = q>0 ? {qty:q} : {qty:0,status:'used',used_at:new Date().toISOString()};
+      await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+u.id,{method:'PATCH',headers:sbAuthH(),body:JSON.stringify(patch)});
+    }catch(e){}
+  }
+  await sbLoadOffcuts();
+  window._lastUsedOffcuts=[];
+  if(btn){btn.textContent='✓ Marked used';btn.style.background='#555';}
+}
 function renderResults(sheets,unplaced){
   // Store for print
   _lastSheets=sheets; _lastUnplaced=unplaced;
@@ -2035,9 +2098,18 @@ function renderResults(sheets,unplaced){
   }));
   _lastEbMap=ebMap; _lastEbGT=ebGT;
 
+  const _uo=window._lastUsedOffcuts||[];
+  const _freshBoards=sheets.filter(s=>!s._isOffcut).length;
+  const _offcutsN=sheets.filter(s=>s._isOffcut).length;
+  const _offcutBanner=_uo.length?`<div style="margin:0 0 12px;padding:10px 14px;background:rgba(40,170,90,.12);border:1px solid rgba(40,170,90,.45);border-radius:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <span style="font-size:13px">♻ This job used <strong>${_uo.reduce((a,x)=>a+x.count,0)}</strong> offcut(s): ${_uo.map(x=>esc(x.code)+' ('+x.l+'×'+x.w+(x.count>1?' ×'+x.count:'')+')').join(', ')}</span>
+      <button class="btn btn-sm" style="margin-left:auto;background:#27ae60;color:#fff;border:none" onclick="markOffcutsUsed(this)">Mark them used</button>
+    </div>`:'';
   main.innerHTML=`
+    ${_offcutBanner}
     <div class="stats-bar">
-      <div class="stat"><div class="stat-lbl">Sheets Used</div><div class="stat-val cv-acc">${sheets.length}</div></div>
+      <div class="stat"><div class="stat-lbl">${_offcutsN?'Fresh Boards':'Sheets Used'}</div><div class="stat-val cv-acc">${_offcutsN?_freshBoards:sheets.length}</div></div>
+      ${_offcutsN?`<div class="stat"><div class="stat-lbl">Offcuts Used</div><div class="stat-val cv-ok">♻ ${_offcutsN}</div></div>`:''}
       <div class="stat"><div class="stat-lbl">Parts Placed</div><div class="stat-val cv-ok">${placed}</div></div>
       <div class="stat"><div class="stat-lbl">Efficiency</div><div class="stat-val ${eP>=80?'cv-ok':eP>=60?'cv-acc':'cv-err'}">${eP}%</div></div>
       <div class="stat"><div class="stat-lbl">Waste</div><div class="stat-val ${wP<=20?'cv-ok':wP<=40?'cv-acc':'cv-err'}">${wP}%</div></div>
@@ -2055,8 +2127,8 @@ function renderResults(sheets,unplaced){
     card.innerHTML=`
       <div class="sc-hdr">
         <div>
-          <div class="sc-title">${esc(s.name)} <span style="color:var(--txt3)">#${idx+1}</span></div>
-          <div class="sc-meta">Full ${s.fullL}×${s.fullW}mm · Usable ${s.uw}×${s.uh}mm${s.cost>0?' · £'+s.cost.toFixed(2):''}</div>
+          <div class="sc-title">${esc(s.name)} <span style="color:var(--txt3)">#${idx+1}</span>${s._isOffcut?` <span style="background:#27ae60;color:#fff;font-size:10px;padding:1px 6px;border-radius:4px;font-family:var(--mono)">♻ ${esc(s._offcutCode||'OFFCUT')}</span>`:''}</div>
+          <div class="sc-meta">${s._isOffcut?'Offcut ':'Full '}${s.fullL}×${s.fullW}mm · Usable ${s.uw}×${s.uh}mm${s.cost>0?' · £'+s.cost.toFixed(2):''}</div>
         </div>
         <span class="wb ${wc}">${wp}% waste</span>
       </div>
