@@ -63,7 +63,7 @@
     <button class="toggle" id="autoBtn" onclick="toggleAuto()">Auto-print: OFF</button>
     <button class="toggle" onclick="openOffcutForm()" style="border-color:#2a8a5a;color:#7fe3a8">♻ Log offcut</button>
     <span class="printstat" id="printStat"></span>
-    <span class="printstat" id="pendStat" style="color:#e6a23c"></span>
+    <span class="printstat" id="pendStat" style="color:#e6a23c;cursor:pointer" onclick="pollPendingOffcuts()" title="Print queued offcut labels now"></span>
   </div>
   <div class="now" id="now">
     <div class="waiting">Waiting for the next cut…</div>
@@ -171,7 +171,10 @@ async function startApp(){
   }catch(e){}
   subscribe();
   pollPendingOffcuts();
-  setInterval(pollPendingOffcuts, 12000);   // auto-print phone-queued offcut labels every ~12s
+  setInterval(pollPendingOffcuts, 12000);   // auto-print phone-queued offcut labels every ~12s (runs while the tab is visible)
+  // Background tabs throttle timers, so ALSO print the queue the moment this window is brought to the front:
+  document.addEventListener('visibilitychange',()=>{ if(!document.hidden) pollPendingOffcuts(); });
+  window.addEventListener('focus',()=>pollPendingOffcuts());
 }
 
 function setLive(on,txt){
@@ -330,7 +333,7 @@ async function pollPendingOffcuts(){
         for(const o of data){
           const ok=await printOffcutLabel(o);
           if(ok){ try{ await sb.from('tce_library').update({label_printed:true}).eq('id',o.id); }catch(e){} }
-          else break;   // printer issue — leave the rest queued, retry next poll
+          await new Promise(r=>setTimeout(r,600));   // let the DYMO finish each one; any that fail stay queued for the next pass
         }
         const {data:after}=await sb.from('tce_library').select('id').eq('is_offcut',true).eq('label_printed',false).limit(20);
         if(ps) ps.textContent=(after&&after.length)?('🕓 '+after.length+' queued — check printer'):'';

@@ -388,9 +388,12 @@ async function printLabel(id){
       toast('Printer error '+r.status,true);
     }catch(e){_dymoBase=null;}
   }
-  // fallback: browser print (e.g. DYMO web service not running)
-  toast('DYMO not found — browser print',true);
-  browserLabel(o);
+  // No local printer (e.g. you're on your phone) → queue it for the workshop station
+  try{
+    await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+o.id,{method:'PATCH',headers:H(),body:JSON.stringify({label_printed:false})});
+    o.label_printed=false; renderList();
+    toast('Queued for the workshop printer ✓');
+  }catch(e){ toast('Could not queue label',true); }
 }
 function browserLabel(o){
   $('lbl-code').textContent=o.code||'';
