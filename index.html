@@ -536,9 +536,16 @@ select option{background:var(--surf2)}
         <input type="checkbox" id="optRot" checked>
         <label style="font-size:13px;color:var(--txt2);cursor:pointer" for="optRot">Allow rotation (non-grain parts only)</label>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;padding:7px 10px;background:rgba(40,170,90,.08);border:1px solid rgba(40,170,90,.3);border-radius:5px">
-        <input type="checkbox" id="useOffcuts" checked>
-        <label style="font-size:13px;color:var(--txt2);cursor:pointer;flex:1" for="useOffcuts">♻ <strong>Use my offcut stock</strong> — fit parts onto matching offcuts before opening fresh boards</label>
+      <div style="padding:7px 10px;background:rgba(40,170,90,.08);border:1px solid rgba(40,170,90,.3);border-radius:5px">
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="checkbox" id="useOffcuts" checked>
+          <label style="font-size:13px;color:var(--txt2);cursor:pointer;flex:1" for="useOffcuts">♻ <strong>Use my offcut stock</strong> — fit parts onto matching offcuts before opening fresh boards</label>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:6px;padding-left:26px;flex-wrap:wrap">
+          <label style="font-size:12px;color:var(--txt3)" for="offcutGuard">Use offcuts up to</label>
+          <input type="number" id="offcutGuard" value="800" min="0" step="50" style="width:70px">
+          <span style="font-size:12px;color:var(--txt3)">mm (long edge) freely — bigger ones only when they save a board</span>
+        </div>
       </div>
       <div style="font-size:11px;color:var(--txt3);padding:6px 8px;background:var(--surf2);border-radius:5px;border-left:2px solid var(--acc)">
         💡 Full-length panels (e.g. 2800mm on a 2800×2070 sheet) can be entered at their exact size — they are cut first from the raw sheet before the bottom trim is taken.
@@ -1418,6 +1425,7 @@ function _calculateInner(){
 
   // ── Offcut stock matched to this job's materials (Phase 2) ─────────────
   const useOffcuts = !!((document.getElementById('useOffcuts')||{}).checked);
+  const offcutGuard = parseFloat((document.getElementById('offcutGuard')||{}).value) || 800;  // long edge (mm): offcuts up to this are used freely; bigger ones only when they save a board
   const _matchedOffcuts = (useOffcuts && _offcutStock.length) ? _offcutStock.map(oc=>{
     const js=matchSheet(oc.name);
     if(!js) return null;
@@ -1568,10 +1576,10 @@ function _calculateInner(){
     };
     const findSheet=piece=>{
       const matching=pool.filter(sh=>!piece._msid||sh.jsid===piece._msid);
-      // 1) Offcuts first — smallest that fits, so small offcuts get used up and big ones preserved
-      const ocCands=matching.filter(sh=>sh._isOffcut)
-        .sort((a,b)=>(a.uw*a.uh)-(b.uw*b.uh)||a._poolIdx-b._poolIdx);
-      for(const sh of ocCands) if(tryPlace(sh,piece)) return true;
+      const ocSmall=sh=>Math.max(sh._offL||0,sh._offW||0)<=offcutGuard;
+      const bySize=(a,b)=>(a.uw*a.uh)-(b.uw*b.uh)||a._poolIdx-b._poolIdx;
+      // 1) SMALL offcuts first — use freely (smallest that fits)
+      for(const sh of matching.filter(s=>s._isOffcut&&ocSmall(s)).sort(bySize)) if(tryPlace(sh,piece)) return true;
       // 2) Existing fresh boards — fullest first (original behaviour)
       const fullCands=matching.filter(sh=>!sh._isOffcut)
         .sort((a,b)=>{
@@ -1581,7 +1589,9 @@ function _calculateInner(){
           return a._poolIdx-b._poolIdx; // stable tie-break
         });
       for(const sh of fullCands) if(tryPlace(sh,piece)) return true;
-      // 3) Open a fresh full board
+      // 3) BIG offcuts — only now, i.e. only to avoid opening a NEW board (so they only get used when they actually save a board)
+      for(const sh of matching.filter(s=>s._isOffcut&&!ocSmall(s)).sort(bySize)) if(tryPlace(sh,piece)) return true;
+      // 4) Open a fresh full board
       const src=jobSheets.find(s=>!piece._msid||s.id===piece._msid);
       if(!src) return false;
       const newSh=addToPool(makeSheet(src));
@@ -1869,16 +1879,17 @@ function _calculateInner(){
     // balance it by MINIMISING the free area of the emptiest sheet — pulling
     // parts across sheets so every sheet looks tidy, rather than pooling all the
     // slack (and stray small parts) onto one ugly half-used sheet.
-    let maxFree=0, fullBoards=0, offcutsUsed=0;
+    let maxFree=0, fullBoards=0, smallOff=0, bigOff=0;
     for(const s of res.sheets){
-      if(s._isOffcut){ offcutsUsed++; continue; }   // offcuts are free stock — never count as a board
+      if(s._isOffcut){ (Math.max(s._offL||0,s._offW||0)<=offcutGuard ? smallOff++ : bigOff++); continue; }
       const placed=s.placements.reduce((b,p)=>b+p.w*p.h,0);
       const free=(s.uw*s.fullL)-placed;
       if(free>maxFree) maxFree=free;
       fullBoards++;
     }
-    // Primary: fewest FRESH BOARDS. Then consume more offcuts. Then spread the spare evenly.
-    return fullBoards*1e9 - offcutsUsed*1e7 + maxFree;
+    // Primary: fewest FRESH BOARDS (big offcuts help only by reducing this). Then: consume
+    // more SMALL offcuts (clears the nuisance, consolidates board waste). Then: even fill.
+    return fullBoards*1e9 - smallOff*1e7 + maxFree;
   };
 
   let best=null;
