@@ -350,22 +350,25 @@ async function findDymo(){
 async function ensureDymo(){return _dymoBase||await findDymo();}
 
 // one text field in the DYMO DesktopLabel XML (proven structure from the cut labels)
-function _to(name,text,size,align,x,y,w,h){
-  return `<TextObject><Name>${name}</Name><Brushes><BackgroundBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></BackgroundBrush><BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush><StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush><FillBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush></Brushes><Rotation>Rotation0</Rotation><OutlineThickness>1</OutlineThickness><IsOutlined>False</IsOutlined><BorderStyle>SolidLine</BorderStyle><Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin><HorizontalAlignment>${align}</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment><FitMode>AlwaysFit</FitMode><IsVertical>False</IsVertical><FormattedText><FitMode>AlwaysFit</FitMode><HorizontalAlignment>${align}</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment><IsVertical>False</IsVertical><LineTextSpan><TextSpan><Text>${esc(text)}</Text><FontInfo><FontName>Segoe UI</FontName><FontSize>${size}</FontSize><IsBold>True</IsBold><IsItalic>False</IsItalic><IsUnderline>False</IsUnderline><FontBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FontBrush></FontInfo></TextSpan></LineTextSpan></FormattedText><ObjectLayout><DYMOPoint><X>${x}</X><Y>${y}</Y></DYMOPoint><Size><Width>${w}</Width><Height>${h}</Height></Size></ObjectLayout></TextObject>`;
+function _to(name,text,size,align,x,y,w,h,rot){
+  rot=rot||'Rotation0';
+  return `<TextObject><Name>${name}</Name><Brushes><BackgroundBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></BackgroundBrush><BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush><StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush><FillBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush></Brushes><Rotation>${rot}</Rotation><OutlineThickness>1</OutlineThickness><IsOutlined>False</IsOutlined><BorderStyle>SolidLine</BorderStyle><Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin><HorizontalAlignment>${align}</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment><FitMode>AlwaysFit</FitMode><IsVertical>False</IsVertical><FormattedText><FitMode>AlwaysFit</FitMode><HorizontalAlignment>${align}</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment><IsVertical>False</IsVertical><LineTextSpan><TextSpan><Text>${esc(text)}</Text><FontInfo><FontName>Segoe UI</FontName><FontSize>${size}</FontSize><IsBold>True</IsBold><IsItalic>False</IsItalic><IsUnderline>False</IsUnderline><FontBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FontBrush></FontInfo></TextSpan></LineTextSpan></FormattedText><ObjectLayout><DYMOPoint><X>${x}</X><Y>${y}</Y></DYMOPoint><Size><Width>${w}</Width><Height>${h}</Height></Size></ObjectLayout></TextObject>`;
 }
 function offcutLabelXml(o){
-  // TALL layout: code in the top ~16.5mm wrap strip, a fold guide, then code + details on the face.
+  // Printed landscape (the orientation the DYMO is happy with), but every field is rotated 90°
+  // and laid along the long 57mm edge. Turn the printed label a quarter-turn and it reads TALL:
+  // code in the wrap strip, fold guide at ~16.5mm, then code + details on the face.
   const size=`${o.l} x ${o.w}  -  ${o.thick}mm`;
-  const X=0.07, W=0.99;   // narrow axis (across the 32mm) — label is printed tall
+  const R='Rotation270', Y=0.06, H=1.01;
   const body=
-    _to('OcCodeTop',o.code||'',15,'Center',X,0.10,W,0.44)+
-    _to('OcFold','— — — fold — — —',7,'Center',X,0.58,W,0.12)+
-    _to('OcCode',o.code||'',17,'Center',X,0.76,W,0.40)+
-    _to('OcDecor',o.name||'',10,'Center',X,1.18,W,0.26)+
-    _to('OcSize',size,12,'Center',X,1.46,W,0.28)+
-    _to('OcBay',o.location?('Bay: '+o.location):'',9,'Center',X,1.78,W,0.20)+
-    _to('OcCust',o.notes?('Cust: '+o.notes):'',9,'Center',X,2.00,W,0.16);
-  return `<?xml version="1.0" encoding="utf-8"?><DesktopLabel Version="1"><DYMOLabel Version="4"><Description>DYMO Label</Description><Orientation>Portrait</Orientation><LabelName>S0722540 multipurpose</LabelName><InitialLength>0</InitialLength><BorderStyle>SolidLine</BorderStyle><DYMORect><DYMOPoint><X>0.06</X><Y>0.06</Y></DYMOPoint><Size><Width>1.13</Width><Height>2.17</Height></Size></DYMORect><BorderColor><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderColor><BorderThickness>1</BorderThickness><Show_Border>False</Show_Border><HasFixedLength>False</HasFixedLength><FixedLengthValue>0</FixedLengthValue><DynamicLayoutManager><RotationBehavior>ClearObjects</RotationBehavior><LabelObjects>${body}</LabelObjects></DynamicLayoutManager></DYMOLabel></DesktopLabel>`;
+    _to('OcCodeTop',o.code||'',20,'Center',0.08,Y,0.42,H,R)+
+    _to('OcFold','— fold —',7,'Center',0.56,Y,0.10,H,R)+
+    _to('OcCode',o.code||'',18,'Center',0.70,Y,0.38,H,R)+
+    _to('OcDecor',o.name||'',11,'Center',1.12,Y,0.22,H,R)+
+    _to('OcSize',size,13,'Center',1.36,Y,0.26,H,R)+
+    _to('OcBay',o.location?('Bay: '+o.location):'',10,'Center',1.66,Y,0.18,H,R)+
+    _to('OcCust',o.notes?('Cust: '+o.notes):'',10,'Center',1.86,Y,0.18,H,R);
+  return `<?xml version="1.0" encoding="utf-8"?><DesktopLabel Version="1"><DYMOLabel Version="4"><Description>DYMO Label</Description><Orientation>Portrait</Orientation><LabelName>S0722540 multipurpose</LabelName><InitialLength>0</InitialLength><BorderStyle>SolidLine</BorderStyle><DYMORect><DYMOPoint><X>0.04</X><Y>0.06</Y></DYMOPoint><Size><Width>2.17</Width><Height>1.13</Height></Size></DYMORect><BorderColor><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderColor><BorderThickness>1</BorderThickness><Show_Border>False</Show_Border><HasFixedLength>False</HasFixedLength><FixedLengthValue>0</FixedLengthValue><DynamicLayoutManager><RotationBehavior>ClearObjects</RotationBehavior><LabelObjects>${body}</LabelObjects></DynamicLayoutManager></DYMOLabel></DesktopLabel>`;
 }
 
 async function printLabel(id){
