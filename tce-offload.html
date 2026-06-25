@@ -313,7 +313,7 @@ async function printOffcutLabel(o){
   const base=await ensureDymo();
   if(!base){ setPrintStat('printer not reachable — open DYMO Connect & accept certificate'); return false; }
   try{
-    const r=await fetch(base+'PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'printerName='+encodeURIComponent(_dymoPrinter)+'&labelXml='+encodeURIComponent(offcutLabelXml(o))+'&printParamsXml=&labelSetXml='});
+    const r=await fetch(base+'PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'printerName='+encodeURIComponent(_dymoPrinter)+'&labelXml='+encodeURIComponent(offcutLabelXml(o))+'&printParamsXml='+encodeURIComponent('<LabelWriterPrintParams><Copies>2</Copies></LabelWriterPrintParams>')+'&labelSetXml='});
     setPrintStat(r.ok?('offcut label sent ✓ '+(o.code||'')):'printer error '+r.status);
     return r.ok;
   }catch(e){ _dymoBase=null; setPrintStat('printer not reachable'); return false; }

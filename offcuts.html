@@ -426,7 +426,7 @@ async function printLabel(id){
   if(base){
     try{
       const r=await fetch(base+'PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
-        body:'printerName='+encodeURIComponent(_dymoPrinter)+'&labelXml='+encodeURIComponent(offcutLabelXml(o))+'&printParamsXml=&labelSetXml='});
+        body:'printerName='+encodeURIComponent(_dymoPrinter)+'&labelXml='+encodeURIComponent(offcutLabelXml(o))+'&printParamsXml='+encodeURIComponent('<LabelWriterPrintParams><Copies>2</Copies></LabelWriterPrintParams>')+'&labelSetXml='});
       if(r.ok){
         if(o.label_printed===false){ try{ await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+o.id,{method:'PATCH',headers:H(),body:JSON.stringify({label_printed:true})}); o.label_printed=true; renderList(); }catch(e){} }
         toast('Label sent ✓ '+(o.code||''));return;
