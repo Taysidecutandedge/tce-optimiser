@@ -825,6 +825,13 @@ async function sbLoadOffcuts(){
     _offcutStock = r.ok ? (await r.json()) : [];
   }catch(e){ _offcutStock=[]; }
 }
+async function sbLoadEbRolls(){
+  if(!_sbToken){_ebRolls=[];return;}
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/tce_eb_rolls?select=*&status=eq.in_stock&order=decor',{headers:sbAuthH()});
+    _ebRolls = r.ok ? (await r.json()) : [];
+  }catch(e){ _ebRolls=[]; }
+}
 
 async function sbSaveSheet(e){
   if(!_sbToken||!_sbUser)return;
@@ -848,6 +855,7 @@ async function sbDeleteSheet(sbid){
 async function initCloudLibrary(){
   const loaded=await sbLoadLibrary();
   await sbLoadOffcuts();
+  await sbLoadEbRolls();
   if(!loaded){
     // No cloud library yet — offer to migrate local library
     const local=localStorage.getItem('clp_lib');
@@ -2097,7 +2105,7 @@ function renderResults(sheets,unplaced){
     s=s.replace(/^(egger|kronospan|pfleiderer|sonae|swiss)\s+/i,'').trim();
     return s;
   };
-  const ebMap={};let ebGT=0;
+  const ebMap={};let ebGT=0; const ebDet={};
   sheets.forEach(s=>s.placements.forEach(p=>{
     ['L1','L2','W1','W2'].forEach(side=>{
       if(!p.eb[side])return;
@@ -2106,9 +2114,12 @@ function renderResults(sheets,unplaced){
       const tk=p.eb.tk[side]||'1';
       const key=`${tk}mm · ${ebSheetCode(s.name)}`;
       ebMap[key]=(ebMap[key]||0)+len;ebGT+=len;
+      const dk=tk+'|'+s.name;
+      if(!ebDet[dk]) ebDet[dk]={decor:s.name,tk,lenMm:0,count:0};
+      ebDet[dk].lenMm+=len; ebDet[dk].count++;
     });
   }));
-  _lastEbMap=ebMap; _lastEbGT=ebGT;
+  _lastEbMap=ebMap; _lastEbGT=ebGT; _lastEbDetail=Object.values(ebDet);
 
   const _uo=window._lastUsedOffcuts||[];
   const _freshBoards=sheets.filter(s=>!s._isOffcut).length;
@@ -2206,7 +2217,7 @@ function renderResults(sheets,unplaced){
       </div>`;}).join('');
     document.getElementById('ebSec').innerHTML=`
       <div class="eb-sum">
-        <div class="cut-hdr"><span class="sec-ttl" style="color:var(--txt2)">Edgebanding Required</span></div>
+        <div class="cut-hdr"><span class="sec-ttl" style="color:var(--txt2)">Edgebanding Required</span><button class="btn btn-sm" style="margin-left:auto;background:#1f7a4d;color:#fff;border:none" onclick="openEbDeduct()">📏 Deduct from rolls</button></div>
         <div class="eb-sum-grid">${cards}
           <div class="eb-sum-card" style="border-color:var(--eb)">
             <div class="eb-sum-lbl">TOTAL</div>
@@ -2225,6 +2236,77 @@ function renderResults(sheets,unplaced){
         <div style="margin-top:7px;font-size:11px;color:var(--txt3)">Add more sheets or increase sheet quantity.</div>
       </div>`;
   }
+}
+
+// ═══════════════════════════════════════════════
+// EDGEBANDING — Phase 2: deduct used tape from rolls
+// per decor: edge metres + 30mm/edge trim + confirmable setup
+// ═══════════════════════════════════════════════
+function closeEbDeduct(){ const m=document.getElementById('ebDeductModal'); if(m)m.remove(); }
+function ebRowRecalc(input){
+  const row=input.closest('.ebd-row'); if(!row)return;
+  const edge=parseFloat(row.dataset.edge)||0, trim=parseFloat(row.dataset.trim)||0;
+  const setup=parseFloat(input.value)||0;
+  const t=row.querySelector('.ebd-total'); if(t) t.textContent=(edge+trim+setup).toFixed(1);
+}
+async function openEbDeduct(){
+  closeEbDeduct();
+  if(!_lastEbDetail.length){ alert('No edgebanding on this job to deduct.'); return; }
+  await sbLoadEbRolls();
+  const setupDefault=parseFloat(localStorage.getItem('tce_eb_setup')||'2.25');
+  const norm=s=>String(s||'').toLowerCase().replace(/\s+/g,' ').trim();
+  const rowsHtml=_lastEbDetail.map((d,i)=>{
+    const edgeM=d.lenMm/1000, trimM=d.count*30/1000, need=edgeM+trimM+setupDefault;
+    const matches=_ebRolls.filter(r=>norm(r.decor)===norm(d.decor));
+    const covering=matches.filter(r=>Number(r.remaining_m)>=need).sort((a,b)=>a.remaining_m-b.remaining_m);
+    const def = covering.length ? covering[0].id : (matches.length ? matches.slice().sort((a,b)=>b.remaining_m-a.remaining_m)[0].id : '');
+    const opts='<option value="">— skip —</option>'+matches.map(r=>`<option value="${r.id}"${r.id===def?' selected':''}>${esc(r.code||'roll')} · ${Number(r.remaining_m).toFixed(1)}m left${r.tape_thick?(' · '+r.tape_thick+'mm'):''}</option>`).join('');
+    return `<div class="ebd-row" data-edge="${edgeM}" data-trim="${trimM}" style="border:1px solid var(--brd);border-radius:8px;padding:10px;margin-bottom:8px">
+      <div style="font-weight:700">${esc(d.decor)} <span style="color:var(--txt3);font-weight:400">· ${d.tk}mm tape</span></div>
+      <div style="font-size:12px;color:var(--txt2);margin:3px 0 7px">${edgeM.toFixed(1)}m edges + ${trimM.toFixed(2)}m trim (${d.count} edge${d.count!==1?'s':''} × 30mm)${matches.length?'':' · <span style="color:#ff8a80">no matching roll in stock</span>'}</div>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+        <div><label style="font-size:11px;color:var(--txt3)">Setup (m)</label><br><input type="number" class="ebd-setup" value="${setupDefault}" step="0.25" min="0" style="width:78px" oninput="ebRowRecalc(this)"></div>
+        <div style="flex:1;min-width:170px"><label style="font-size:11px;color:var(--txt3)">Deduct from roll</label><br><select class="ebd-roll" style="width:100%">${opts}</select></div>
+        <div style="text-align:right"><label style="font-size:11px;color:var(--txt3)">Used</label><br><span class="ebd-total" style="font-weight:700;font-family:var(--mono)">${(edgeM+trimM+setupDefault).toFixed(1)}</span>m</div>
+      </div>
+    </div>`;
+  }).join('');
+  const div=document.createElement('div');
+  div.id='ebDeductModal';
+  div.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:5000;display:flex;align-items:center;justify-content:center;padding:14px';
+  div.innerHTML=`<div style="background:var(--surf,#1b1b1f);border:1px solid var(--brd);border-radius:14px;max-width:560px;width:100%;max-height:90vh;overflow:auto;padding:18px">
+    <div style="display:flex;align-items:center;margin-bottom:6px"><h2 style="font-size:18px;margin:0">Edgebanding — deduct from rolls</h2><button class="btn btn-sm" style="margin-left:auto;background:none;border:1px solid var(--brd);color:var(--txt2)" onclick="closeEbDeduct()">✕</button></div>
+    <div style="font-size:12px;color:var(--txt3);margin-bottom:12px">Setup defaults to ${setupDefault}m — adjust per tape, or set <b>0</b> if the edging was already loaded / good from last use. Pick which roll to count it off (smallest part-roll is suggested first).</div>
+    ${rowsHtml}
+    <div style="display:flex;gap:10px;margin-top:14px">
+      <button class="btn" style="flex:1;background:none;border:1px solid var(--brd);color:var(--txt2)" onclick="closeEbDeduct()">Cancel</button>
+      <button class="btn" style="flex:2;background:#1f7a4d;color:#fff;border:none" onclick="confirmEbDeduct()">Deduct from stock</button>
+    </div>
+  </div>`;
+  document.body.appendChild(div);
+}
+async function confirmEbDeduct(){
+  const rows=[...document.querySelectorAll('#ebDeductModal .ebd-row')];
+  let firstSetup=null, done=0, fail=0;
+  for(const row of rows){
+    const sel=row.querySelector('.ebd-roll'); const rollId=sel?sel.value:'';
+    const setup=parseFloat(row.querySelector('.ebd-setup').value)||0;
+    if(firstSetup===null) firstSetup=setup;
+    if(!rollId) continue;
+    const edge=parseFloat(row.dataset.edge)||0, trim=parseFloat(row.dataset.trim)||0;
+    const used=edge+trim+setup;
+    const roll=_ebRolls.find(r=>String(r.id)===String(rollId));
+    const newRem=Math.max(0,(Number(roll&&roll.remaining_m)||0)-used);
+    const patch = newRem<=0 ? {remaining_m:0,status:'empty',label_pending:false}
+                            : {remaining_m:Number(newRem.toFixed(2)),label_pending:true};
+    try{
+      const r=await fetch(SB_URL+'/rest/v1/tce_eb_rolls?id=eq.'+rollId,{method:'PATCH',headers:sbAuthH(),body:JSON.stringify(patch)});
+      if(r.ok){ done++; if(roll) roll.remaining_m=newRem; } else fail++;
+    }catch(e){ fail++; }
+  }
+  if(firstSetup!=null) localStorage.setItem('tce_eb_setup',String(firstSetup));
+  closeEbDeduct();
+  alert(done?(done+' roll'+(done!==1?'s':'')+' updated'+(fail?(' · '+fail+' failed'):'')+'. Fresh label'+(done!==1?'s':'')+' queued — print at the workshop station.'):(fail?'Update failed — check connection.':'Nothing deducted.'));
 }
 
 // ═══════════════════════════════════════════════
@@ -3015,7 +3097,7 @@ function applyImport(){
 // ═══════════════════════════════════════════════
 // PRINT LAYOUT
 // ═══════════════════════════════════════════════
-let _lastSheets = [], _lastUnplaced = [], _lastEbMap = {}, _lastEbGT = 0;
+let _lastSheets = [], _lastUnplaced = [], _lastEbMap = {}, _lastEbGT = 0, _lastEbDetail = [], _ebRolls = [];
 let _loadedCloudJobId = null; // tracks which cloud job is currently loaded
 
 function openPrintLayout(){
