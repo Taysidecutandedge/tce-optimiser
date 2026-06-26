@@ -92,6 +92,8 @@
       <div style="flex:1"><label style="font-size:12px;color:#a8b0bd">Bay / location</label><input id="of-bay" placeholder="e.g. Rack B3" style="width:100%;background:#1e2128;border:1px solid #2a2e38;color:#f0eeea;border-radius:8px;padding:10px;font-size:15px"></div>
       <div style="flex:1"><label style="font-size:12px;color:#a8b0bd">Customer / job</label><input id="of-cust" style="width:100%;background:#1e2128;border:1px solid #2a2e38;color:#f0eeea;border-radius:8px;padding:10px;font-size:15px"></div>
     </div>
+    <div style="margin-top:8px"><label style="font-size:12px;color:#a8b0bd">Description / notes <span style="color:#6b7280">(stored, not on label)</span></label><input id="of-descr" placeholder="e.g. chip on one corner" style="width:100%;background:#1e2128;border:1px solid #2a2e38;color:#f0eeea;border-radius:8px;padding:10px;font-size:15px"></div>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:14px;color:#a8b0bd;cursor:pointer"><input id="of-sep" type="checkbox" style="width:18px;height:18px">Separate code &amp; label for each board (when qty &gt; 1)</label>
     <div id="of-err" style="color:#ff8a80;font-size:13px;margin-top:8px"></div>
     <div style="display:flex;gap:10px;margin-top:16px">
       <button onclick="closeOffcutForm()" style="flex:1;background:transparent;border:1px solid #3a3f4a;color:#f0eeea;border-radius:9px;padding:12px;font-size:15px;cursor:pointer">Cancel</button>
@@ -349,6 +351,7 @@ async function openOffcutForm(){
   document.getElementById('of-l').value=''; document.getElementById('of-w').value='';
   document.getElementById('of-qty').value='1'; document.getElementById('of-bay').value='';
   document.getElementById('of-thick').value=''; document.getElementById('of-err').textContent='';
+  document.getElementById('of-descr').value=''; document.getElementById('of-sep').checked=false;
   document.getElementById('offcutModal').style.display='flex';
   _ofBoard={color:'#4e9af1',grain_len:true};
   if(p.sheetName){
@@ -374,13 +377,18 @@ async function saveOffcut(){
   try{
     const {data:u}=await sb.auth.getUser();
     const uid=u&&u.user?u.user.id:null;
-    const row={name:decor,l,w,thick:thick||0,cost:0,notes:cust,grain_len:_ofBoard.grain_len,color:_ofBoard.color,is_offcut:true,qty,location:bay||null,status:'in_stock',code:genOffcutCode(),user_id:uid,label_printed:true};
-    const {data,error}=await sb.from('tce_library').insert(row).select();
+    const descr=document.getElementById('of-descr').value.trim()||null;
+    const sep=document.getElementById('of-sep').checked;
+    const baseRow={name:decor,l,w,thick:thick||0,cost:0,notes:cust,descr,grain_len:_ofBoard.grain_len,color:_ofBoard.color,is_offcut:true,location:bay||null,status:'in_stock',user_id:uid,label_printed:true};
+    const rows = (sep && qty>1)
+      ? Array.from({length:qty},()=>({...baseRow,qty:1,code:genOffcutCode()}))
+      : [{...baseRow,qty,code:genOffcutCode()}];
+    const {data,error}=await sb.from('tce_library').insert(rows).select();
     if(error){ err.textContent='Save failed: '+error.message; if(btn){btn.disabled=false;btn.textContent='Save & print label';} return; }
-    const saved=(data&&data[0])||row;
+    const savedRows=data||rows;
     closeOffcutForm();
-    setPrintStat('offcut '+saved.code+' saved ✓');
-    await printOffcutLabel(saved);
+    setPrintStat('offcut'+(savedRows.length>1?'s':'')+' saved ✓');
+    for(const sr of savedRows){ await printOffcutLabel(sr); await new Promise(r=>setTimeout(r,600)); }
   }catch(e){ err.textContent='Error: '+(e.message||e); }
   if(btn){btn.disabled=false;btn.textContent='Save & print label';}
 }

@@ -119,6 +119,10 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
             <label>Customer / job <span style="color:var(--txt3)">(optional)</span></label>
             <input id="f-cust" placeholder="e.g. Deeside Timber Crafts">
           </div>
+          <div class="field full">
+            <label>Description / notes <span style="color:var(--txt3)">(optional · stored, not on label)</span></label>
+            <input id="f-descr" placeholder="e.g. chip on one corner, good face one side">
+          </div>
           <div class="field"><label>Length (mm)</label><input id="f-l" type="number" inputmode="numeric" placeholder="1200"></div>
           <div class="field"><label>Width (mm)</label><input id="f-w" type="number" inputmode="numeric" placeholder="480"></div>
           <div class="field"><label>Thickness (mm)</label><input id="f-thick" type="number" inputmode="decimal" step="0.1" placeholder="18"></div>
@@ -127,6 +131,9 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
           <div class="field"><label>Colour swatch</label><input id="f-color" type="color" value="#4e9af1" style="height:46px;padding:4px"></div>
           <div class="field full">
             <div class="chk"><input id="f-grain" type="checkbox" checked><label for="f-grain" style="font-size:14px">Grain runs along the length</label></div>
+          </div>
+          <div class="field full">
+            <div class="chk"><input id="f-sep" type="checkbox"><label for="f-sep" style="font-size:14px">Separate code &amp; label for each board (when qty &gt; 1)</label></div>
           </div>
         </div>
         <button class="btn btn-acc" id="addBtn" style="width:100%;margin-top:12px" onclick="addOffcut()">+ Add to stock</button>
@@ -246,32 +253,39 @@ async function addOffcut(){
   const qty=Math.max(1,parseInt($('f-qty').value)||1);
   if(!name){toast('Enter a decor',true);return;}
   if(!l||!w){toast('Enter length & width',true);return;}
-  const row={
-    name,l,w,thick:thick||0,cost:0,notes:$('f-cust').value.trim(),
+  const base={
+    name,l,w,thick:thick||0,cost:0,notes:$('f-cust').value.trim(),descr:$('f-descr').value.trim()||null,
     grain_len:$('f-grain').checked,color:$('f-color').value,
-    is_offcut:true,qty,location:$('f-loc').value.trim()||null
+    is_offcut:true,location:$('f-loc').value.trim()||null
   };
+  const sep=$('f-sep')&&$('f-sep').checked;
   try{
     let r;
     if(_editingId){
-      r=await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+_editingId,{method:'PATCH',headers:Hrep(),body:JSON.stringify(row)});
-    }else{
-      row.status='in_stock';row.code=genCode();row.user_id=_user.id;row.label_printed=false;  // queue for the workshop printer
-      r=await fetch(SB_URL+'/rest/v1/tce_library',{method:'POST',headers:Hrep(),body:JSON.stringify(row)});
+      r=await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+_editingId,{method:'PATCH',headers:Hrep(),body:JSON.stringify({...base,qty})});
+      if(!r.ok){const e=await r.text();toast('Save failed',true);console.warn(e);return;}
+      const saved=(await r.json())[0]||{}; toast('Updated '+(saved.code||'')); exitEditMode();
+    } else if(sep && qty>1){
+      // one entry (own code + own labels + own description) per physical board
+      const rows=Array.from({length:qty},()=>({...base,qty:1,status:'in_stock',code:genCode(),user_id:_user.id,label_printed:false}));
+      r=await fetch(SB_URL+'/rest/v1/tce_library',{method:'POST',headers:Hrep(),body:JSON.stringify(rows)});
+      if(!r.ok){const e=await r.text();toast('Save failed',true);console.warn(e);return;}
+      toast('Added '+qty+' boards (own codes)'); clearSizeFields(); $('f-l').focus();
+    } else {
+      r=await fetch(SB_URL+'/rest/v1/tce_library',{method:'POST',headers:Hrep(),body:JSON.stringify({...base,qty,status:'in_stock',code:genCode(),user_id:_user.id,label_printed:false})});
+      if(!r.ok){const e=await r.text();toast('Save failed',true);console.warn(e);return;}
+      const saved=(await r.json())[0]||{}; toast('Added '+(saved.code||'')); clearSizeFields(); $('f-l').focus();
     }
-    if(!r.ok){const e=await r.text();toast('Save failed',true);console.warn(e);return;}
-    const saved=(await r.json())[0]||{};
-    if(_editingId){ toast('Updated '+(saved.code||'')); exitEditMode(); }
-    else{ toast('Added '+(saved.code||'')); clearSizeFields(); $('f-l').focus(); }   // keep decor/thick/colour/bay/customer for fast repeat
     await loadOffcuts();
   }catch(e){toast('Network error',true);}
 }
-function clearSizeFields(){$('f-l').value='';$('f-w').value='';$('f-qty').value='1';}
+function clearSizeFields(){$('f-l').value='';$('f-w').value='';$('f-qty').value='1';$('f-descr').value='';}
 function exitEditMode(){
   _editingId=null;
   const b=$('addBtn'); if(b)b.textContent='+ Add to stock';
   const c=$('cancelEditBtn'); if(c)c.style.display='none';
-  ['f-name','f-thick','f-l','f-w','f-loc','f-cust'].forEach(id=>$(id).value='');
+  ['f-name','f-thick','f-l','f-w','f-loc','f-cust','f-descr'].forEach(id=>$(id).value='');
+  const sp=$('f-sep'); if(sp)sp.checked=false;
   $('f-qty').value='1';$('f-grain').checked=true;$('f-color').value='#4e9af1';
 }
 function editOffcut(id){
@@ -279,7 +293,7 @@ function editOffcut(id){
   _editingId=id;
   $('f-name').value=o.name||'';
   $('f-l').value=o.l||'';$('f-w').value=o.w||'';$('f-thick').value=o.thick||'';
-  $('f-qty').value=o.qty||1;$('f-loc').value=o.location||'';$('f-cust').value=o.notes||'';
+  $('f-qty').value=o.qty||1;$('f-loc').value=o.location||'';$('f-cust').value=o.notes||'';$('f-descr').value=o.descr||'';
   $('f-color').value=o.color||'#4e9af1';$('f-grain').checked=!!o.grain_len;
   $('addBtn').textContent='Save changes';
   $('cancelEditBtn').style.display='block';
@@ -300,6 +314,7 @@ function ocCard(o){
         <div class="meta">${o.l} × ${o.w} · ${o.thick}mm${o.grain_len?' · grain ↕':''}</div>
         ${o.location?`<span class="loc">📍 ${esc(o.location)}</span>`:''}
         ${o.notes?`<div class="meta" style="color:var(--txt3);margin-top:3px">👤 ${esc(o.notes)}</div>`:''}
+        ${o.descr?`<div class="meta" style="color:var(--txt3);margin-top:3px">📝 ${esc(o.descr)}</div>`:''}
       </div>
       <div class="acts">
         <button class="btn btn-sm" onclick="printLabel(${o.id})">🏷 Label</button>
@@ -317,7 +332,7 @@ function renderList(){
   let items=_offcuts.slice();
   if(ft!=='')items=items.filter(o=>String(o.thick)===ft);
   if(fd!=='')items=items.filter(o=>o.name===fd);
-  if(q)items=items.filter(o=>(o.name+' '+(o.code||'')+' '+(o.location||'')+' '+(o.notes||'')).toLowerCase().includes(q));
+  if(q)items=items.filter(o=>(o.name+' '+(o.code||'')+' '+(o.location||'')+' '+(o.notes||'')+' '+(o.descr||'')).toLowerCase().includes(q));
   const cmp=({
     size:(a,b)=>(b.l*b.w)-(a.l*a.w),
     newest:(a,b)=>(b.id||0)-(a.id||0),
