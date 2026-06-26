@@ -2139,8 +2139,9 @@ function renderResults(sheets,unplaced){
       ${ebGT>0?`<div class="stat"><div class="stat-lbl">EB Total</div><div class="stat-val cv-eb">${(ebGT/1000).toFixed(1)}m</div></div>`:''}
       ${unplaced.length?`<div class="stat" style="border-color:var(--err);cursor:pointer" onclick="document.getElementById('upSec').scrollIntoView({behavior:'smooth'})"><div class="stat-lbl" style="color:var(--err)">⚠ Unplaced — tap</div><div class="stat-val cv-err">${unplaced.length}</div></div>`:''}
     </div>
+    <div id="ebSec"></div>
     <div class="sheet-grid" id="sheetGrid"></div>
-    <div id="cutSec"></div><div id="ebSec"></div><div id="upSec"></div>`;
+    <div id="cutSec"></div><div id="upSec"></div>`;
 
   sheets.forEach((s,idx)=>{
     const sa=s.uw*s.fullL, pa=s.placements.reduce((a,p)=>a+p.w*p.h,0);
