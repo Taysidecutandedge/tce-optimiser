@@ -172,11 +172,11 @@ async function startApp(){
     }
   }catch(e){}
   subscribe();
-  pollPendingOffcuts();
-  setInterval(pollPendingOffcuts, 12000);   // auto-print phone-queued offcut labels every ~12s (runs while the tab is visible)
+  pollPendingOffcuts(); pollPendingEbLabels();
+  setInterval(()=>{ pollPendingOffcuts(); pollPendingEbLabels(); }, 12000);   // auto-print phone-queued labels (runs while the tab is visible)
   // Background tabs throttle timers, so ALSO print the queue the moment this window is brought to the front:
-  document.addEventListener('visibilitychange',()=>{ if(!document.hidden) pollPendingOffcuts(); });
-  window.addEventListener('focus',()=>pollPendingOffcuts());
+  document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ pollPendingOffcuts(); pollPendingEbLabels(); } });
+  window.addEventListener('focus',()=>{ pollPendingOffcuts(); pollPendingEbLabels(); });
 }
 
 function setLive(on,txt){
@@ -345,6 +345,42 @@ async function pollPendingOffcuts(){
     }
   }catch(e){}
   _printingPending=false;
+}
+// ── Edgebanding roll labels (queued from the phone, printed here with current metres) ──
+function ebRollLabelXml(o){
+  const rem=(o.remaining_m!=null?o.remaining_m+'m left':'');
+  const spec=[(o.tape_width?o.tape_width+'mm':'')+(o.tape_thick?(' x '+o.tape_thick+'mm'):''), o.supplier||''].filter(Boolean).join('  ·  ');
+  const body=
+    _to('EbCode',o.code||'',16,'Center',0.06,0.05,2.05,0.26)+
+    _to('EbDecor',o.decor||'',11,'Center',0.06,0.33,2.05,0.20)+
+    _to('EbRem',rem,17,'Center',0.06,0.55,2.05,0.28)+
+    _to('EbSpec',spec,8,'Center',0.06,0.86,2.05,0.20);
+  return `<?xml version="1.0" encoding="utf-8"?><DesktopLabel Version="1"><DYMOLabel Version="4"><Description>DYMO Label</Description><Orientation>Portrait</Orientation><LabelName>S0722540 multipurpose</LabelName><InitialLength>0</InitialLength><BorderStyle>SolidLine</BorderStyle><DYMORect><DYMOPoint><X>0.04</X><Y>0.06</Y></DYMOPoint><Size><Width>2.17</Width><Height>1.13</Height></Size></DYMORect><BorderColor><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderColor><BorderThickness>1</BorderThickness><Show_Border>False</Show_Border><HasFixedLength>False</HasFixedLength><FixedLengthValue>0</FixedLengthValue><DynamicLayoutManager><RotationBehavior>ClearObjects</RotationBehavior><LabelObjects>${body}</LabelObjects></DynamicLayoutManager></DYMOLabel></DesktopLabel>`;
+}
+async function printEbLabel(o){
+  const base=await ensureDymo(); if(!base) return false;
+  try{
+    const r=await fetch(base+'PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'printerName='+encodeURIComponent(_dymoPrinter)+'&labelXml='+encodeURIComponent(ebRollLabelXml(o))+'&printParamsXml=&labelSetXml='});
+    return r.ok;
+  }catch(e){ _dymoBase=null; return false; }
+}
+let _printingEb=false;
+async function pollPendingEbLabels(){
+  if(_printingEb) return; _printingEb=true;
+  try{
+    const {data}=await sb.from('tce_eb_rolls').select('*').eq('label_pending',true).order('id').limit(20);
+    if(data&&data.length){
+      const base=await ensureDymo();
+      if(base){
+        for(const o of data){
+          const ok=await printEbLabel(o);
+          if(ok){ try{ await sb.from('tce_eb_rolls').update({label_pending:false}).eq('id',o.id); }catch(e){} setPrintStat('edging label ✓ '+(o.code||'')); }
+          await new Promise(r=>setTimeout(r,600));
+        }
+      }
+    }
+  }catch(e){}
+  _printingEb=false;
 }
 function onOfDecorInput(){
   const v=document.getElementById('of-decor').value.trim().toLowerCase();

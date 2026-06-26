@@ -248,11 +248,19 @@ async function useRoll(id){
   const v=prompt('Metres used from '+(o.code||o.decor)+'? (remaining '+(o.remaining_m??'?')+'m)');
   if(v==null)return; const used=parseFloat(v); if(!(used>0)){toast('Enter a number',true);return;}
   const newRem=Math.max(0,(parseFloat(o.remaining_m)||0)-used);
-  const patch=newRem<=0?{remaining_m:0,status:'empty'}:{remaining_m:newRem};
+  const patch=newRem<=0?{remaining_m:0,status:'empty',label_pending:false}:{remaining_m:newRem,label_pending:true};  // queue a fresh label with the new metres
   try{
     const r=await fetch(SB_URL+'/rest/v1/tce_eb_rolls?id=eq.'+id,{method:'PATCH',headers:H(),body:JSON.stringify(patch)});
     if(!r.ok){toast('Update failed',true);return;}
-    toast(newRem<=0?'Roll finished':('Used '+used+'m · '+newRem.toFixed(1)+'m left')); await loadRolls();
+    toast(newRem<=0?'Roll finished':('Used '+used+'m · '+newRem.toFixed(1)+'m left — new label queued')); await loadRolls();
+  }catch(e){toast('Network error',true);}
+}
+async function queueEbLabel(id){
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/tce_eb_rolls?id=eq.'+id,{method:'PATCH',headers:H(),body:JSON.stringify({label_pending:true})});
+    if(!r.ok){toast('Could not queue',true);return;}
+    const o=_rolls.find(x=>x.id===id); if(o)o.label_pending=true; renderList();
+    toast('Label queued for the workshop printer ✓');
   }catch(e){toast('Network error',true);}
 }
 async function delRoll(id){
@@ -268,12 +276,13 @@ function rollCard(o){
   const pct=total>0?Math.max(0,Math.min(100,rem/total*100)):0;
   return `<div class="roll${isLow(o)?' low':''}">
     <div class="body">
-      <div class="rem">${o.remaining_m!=null?o.remaining_m+'m':'?'}${o.total_m?(' <span class="meta">/ '+o.total_m+'m</span>'):''}${isLow(o)?'<span class="lowtag">LOW</span>':''}</div>
+      <div class="rem">${o.remaining_m!=null?o.remaining_m+'m':'?'}${o.total_m?(' <span class="meta">/ '+o.total_m+'m</span>'):''}${isLow(o)?'<span class="lowtag">LOW</span>':''}${o.label_pending?' <span class="lowtag" style="background:#e6a23c">🕓 label</span>':''}</div>
       <div class="bar"><span style="width:${pct}%"></span></div>
       <div class="meta">${o.tape_width?o.tape_width+'mm':'?'} wide${o.tape_thick?(' · '+o.tape_thick+'mm'):''}${o.supplier?(' · '+esc(o.supplier)):''}${o.code?(' · '+esc(o.code)):''}</div>
       ${o.location?`<span class="loc">📍 ${esc(o.location)}</span>`:''}
     </div>
     <div class="acts">
+      <button class="btn btn-sm" onclick="queueEbLabel(${o.id})">🏷 Label</button>
       <button class="btn btn-sm" onclick="useRoll(${o.id})">Use…</button>
       <button class="btn btn-sm" onclick="editRoll(${o.id})">Edit</button>
       <button class="btn btn-sm btn-danger" onclick="delRoll(${o.id})">Delete</button>
