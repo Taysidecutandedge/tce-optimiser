@@ -2205,15 +2205,37 @@ function renderResults(sheets,unplaced){
       return a[0].localeCompare(b[0]);
     });
     const ROLL=50000; // 50m standard roll in mm
+    // Suggest which roll to grab per tape (smallest part-roll that covers first)
+    const _setupD=parseFloat(localStorage.getItem('tce_eb_setup')||'2.25');
+    const _norm=s=>String(s||'').toLowerCase().replace(/\s+/g,' ').trim();
+    const ebSugg={};
+    (_lastEbDetail||[]).forEach(d=>{
+      const key=`${d.tk}mm · ${ebSheetCode(d.decor)}`;
+      const need=d.lenMm/1000 + d.count*30/1000 + _setupD;
+      const matches=(_ebRolls||[]).filter(r=>_norm(r.decor)===_norm(d.decor));
+      let pick=null, covers=false;
+      if(matches.length){
+        const cov=matches.filter(r=>Number(r.remaining_m)>=need).sort((a,b)=>a.remaining_m-b.remaining_m);
+        pick = cov[0] || matches.slice().sort((a,b)=>b.remaining_m-a.remaining_m)[0];
+        covers = Number(pick.remaining_m)>=need;
+      }
+      ebSugg[key]={pick,covers,inStock:matches.length>0,need};
+    });
     const cards=sorted.map(([k,v])=>{
       const metres=(v/1000);
       const rolls=Math.ceil(v/ROLL);
       const rollTxt=rolls===1?'1 roll':`${rolls} rolls`;
+      const sg=ebSugg[k];
+      const pickLine = !sg ? ''
+        : sg.pick
+          ? `<div class="eb-sum-sub" style="color:${sg.covers?'#7fe3a8':'#ffcf8a'};font-weight:600">→ use ${esc(sg.pick.code||'roll')} · ${Number(sg.pick.remaining_m).toFixed(1)}m${sg.covers?'':' · load 2nd roll'}</div>`
+          : `<div class="eb-sum-sub" style="color:#ff8a80;font-weight:600">→ none in stock — order</div>`;
       return `
       <div class="eb-sum-card">
         <div class="eb-sum-lbl">${k}</div>
         <div class="eb-sum-val">${metres.toFixed(2)}m</div>
         <div class="eb-sum-sub">${Math.round(v)}mm &nbsp;·&nbsp; order: ${rollTxt}</div>
+        ${pickLine}
       </div>`;}).join('');
     document.getElementById('ebSec').innerHTML=`
       <div class="eb-sum">
