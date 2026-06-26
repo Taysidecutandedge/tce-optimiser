@@ -106,6 +106,15 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
           <div class="field"><label>Supplier</label><input id="f-supp" placeholder="Egger / Hranipex…"></div>
           <div class="field"><label>Bay / location</label><input id="f-loc" placeholder="e.g. EB rack 2"></div>
           <div class="field full"><label>Low-stock alert below (m)</label><input id="f-low" type="number" inputmode="decimal" value="5"></div>
+          <div class="field full" style="background:var(--surf2);border:1px solid var(--brd);border-radius:8px;padding:8px 10px">
+            <label style="margin-bottom:4px">📐 Don't know the metres left? Estimate from the roll size</label>
+            <div style="display:flex;gap:8px;align-items:flex-end">
+              <div style="flex:1"><label>Outer Ø (mm)</label><input id="f-od" type="number" inputmode="decimal" placeholder="e.g. 200"></div>
+              <div style="flex:1"><label>Core Ø (mm)</label><input id="f-cd" type="number" inputmode="decimal" placeholder="e.g. 60"></div>
+              <button class="btn btn-sm" type="button" onclick="estimateMetres()" style="height:46px">→ m</button>
+            </div>
+            <div id="estHint" style="font-size:11px;color:var(--txt3);margin-top:5px">Measure the coil's outer diameter and the empty core — uses the tape thickness above to work out the length.</div>
+          </div>
         </div>
         <button class="btn btn-acc" id="addBtn" style="width:100%;margin-top:12px" onclick="addRoll()">+ Add roll</button>
         <button class="btn btn-ghost" id="cancelEditBtn" style="display:none;width:100%;margin-top:8px" onclick="exitEditMode()">Cancel edit</button>
@@ -188,6 +197,15 @@ async function loadRolls(){
   }catch(e){toast('Network error',true);}
 }
 function genCode(){const a='23456789ABCDEFGHJKLMNPQRSTUVWXYZ';return 'EB-'+Array.from({length:4},()=>a[Math.floor(Math.random()*a.length)]).join('');}
+function estimateMetres(){
+  const D=parseFloat($('f-od').value), d=parseFloat($('f-cd').value), t=parseFloat($('f-thick').value);
+  const h=$('estHint');
+  if(!(t>0)){ h.textContent='Enter the tape thickness (mm) above first.'; return; }
+  if(!(D>0)||!(d>=0)||D<=d){ h.textContent='Enter outer Ø and core Ø (outer must be bigger than the core).'; return; }
+  const metres=Math.PI*(D*D-d*d)/(4*t)/1000;   // L = π(D²−d²)/(4·t), mm → m
+  $('f-rem').value=metres.toFixed(1);
+  h.textContent='≈ '+metres.toFixed(1)+'m — filled into Remaining (rough, but close)';
+}
 
 async function addRoll(){
   const decor=$('f-decor').value.trim();
@@ -215,7 +233,7 @@ async function addRoll(){
 }
 function exitEditMode(){
   _editingId=null; $('addBtn').textContent='+ Add roll'; $('cancelEditBtn').style.display='none';
-  ['f-decor','f-width','f-thick','f-total','f-rem','f-supp','f-loc'].forEach(id=>$(id).value=''); $('f-low').value='5';
+  ['f-decor','f-width','f-thick','f-total','f-rem','f-supp','f-loc','f-od','f-cd'].forEach(id=>$(id).value=''); $('f-low').value='5';
 }
 function editRoll(id){
   const o=_rolls.find(x=>x.id===id);if(!o)return; _editingId=id;
