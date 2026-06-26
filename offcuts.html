@@ -214,13 +214,19 @@ function signOut(){localStorage.removeItem('tce_token');localStorage.removeItem(
 
 // ---- data ----
 async function loadDecors(){
-  // existing boards (not offcuts) → decor suggestions + colour memory
+  // suggest EVERY material ever used (boards + offcuts), de-duplicated by name (case/space-insensitive)
   try{
-    const r=await fetch(SB_URL+'/rest/v1/tce_library?select=name,color,thick&is_offcut=eq.false&order=name',{headers:H()});
+    const r=await fetch(SB_URL+'/rest/v1/tce_library?select=name,color,thick,is_offcut',{headers:H()});
     if(r.ok){
       const rows=await r.json();
-      const seen={};_decors=[];
-      rows.forEach(x=>{if(x.name&&!seen[x.name]){seen[x.name]=1;_decors.push(x);}});
+      const norm=s=>String(s||'').toLowerCase().replace(/\s+/g,' ').trim();
+      const map={};
+      rows.forEach(x=>{
+        if(!x.name) return; const k=norm(x.name); if(!k) return;
+        if(!map[k]){ map[k]={name:x.name,color:x.color,thick:x.thick,isBoard:x.is_offcut===false}; }
+        else if(x.is_offcut===false && !map[k].isBoard){ map[k]={name:x.name,color:x.color,thick:x.thick,isBoard:true}; } // prefer a board's canonical spelling
+      });
+      _decors=Object.values(map).sort((a,b)=>String(a.name).localeCompare(String(b.name)));
       $('decorlist').innerHTML=_decors.map(d=>`<option value="${esc(d.name)}">`).join('');
     }
   }catch(e){}
