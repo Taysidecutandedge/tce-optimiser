@@ -105,6 +105,7 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
           <div class="field"><label>Remaining (m)</label><input id="f-rem" type="number" inputmode="decimal" placeholder="= roll length"></div>
           <div class="field"><label>Supplier</label><input id="f-supp" placeholder="Egger / Hranipex…"></div>
           <div class="field"><label>Bay / location</label><input id="f-loc" placeholder="e.g. EB rack 2"></div>
+          <div class="field full"><label>Order / product code <span style="color:var(--txt3)">(for reordering · not on label)</span></label><input id="f-order" placeholder="e.g. Hranipex 23×1 U763…"></div>
           <div class="field full"><label>Low-stock alert below (m)</label><input id="f-low" type="number" inputmode="decimal" value="5"></div>
           <div class="field full" style="background:var(--surf2);border:1px solid var(--brd);border-radius:8px;padding:8px 10px">
             <label style="margin-bottom:4px">📐 Don't know the metres left? Estimate from the roll size</label>
@@ -214,7 +215,7 @@ async function addRoll(){
   let rem=$('f-rem').value!==''?parseFloat($('f-rem').value):total;
   const row={
     decor, tape_width:parseFloat($('f-width').value)||null, tape_thick:parseFloat($('f-thick').value)||null,
-    supplier:$('f-supp').value.trim()||null, total_m:total, remaining_m:rem,
+    supplier:$('f-supp').value.trim()||null, order_code:$('f-order').value.trim()||null, total_m:total, remaining_m:rem,
     low_stock_m:parseFloat($('f-low').value)||5, location:$('f-loc').value.trim()||null
   };
   try{
@@ -233,13 +234,13 @@ async function addRoll(){
 }
 function exitEditMode(){
   _editingId=null; $('addBtn').textContent='+ Add roll'; $('cancelEditBtn').style.display='none';
-  ['f-decor','f-width','f-thick','f-total','f-rem','f-supp','f-loc','f-od','f-cd'].forEach(id=>$(id).value=''); $('f-low').value='5';
+  ['f-decor','f-width','f-thick','f-total','f-rem','f-supp','f-loc','f-od','f-cd','f-order'].forEach(id=>$(id).value=''); $('f-low').value='5';
 }
 function editRoll(id){
   const o=_rolls.find(x=>x.id===id);if(!o)return; _editingId=id;
   $('f-decor').value=o.decor||''; $('f-width').value=o.tape_width||''; $('f-thick').value=o.tape_thick||'';
   $('f-total').value=o.total_m||''; $('f-rem').value=o.remaining_m!=null?o.remaining_m:''; $('f-supp').value=o.supplier||'';
-  $('f-loc').value=o.location||''; $('f-low').value=o.low_stock_m!=null?o.low_stock_m:5;
+  $('f-loc').value=o.location||''; $('f-order').value=o.order_code||''; $('f-low').value=o.low_stock_m!=null?o.low_stock_m:5;
   $('addBtn').textContent='Save changes'; $('cancelEditBtn').style.display='block';
   window.scrollTo({top:0,behavior:'smooth'}); toast('Editing '+(o.code||''));
 }
@@ -280,6 +281,7 @@ function rollCard(o){
       <div class="bar"><span style="width:${pct}%"></span></div>
       <div class="meta">${o.tape_width?o.tape_width+'mm':'?'} wide${o.tape_thick?(' · '+o.tape_thick+'mm'):''}${o.supplier?(' · '+esc(o.supplier)):''}${o.code?(' · '+esc(o.code)):''}</div>
       ${o.location?`<span class="loc">📍 ${esc(o.location)}</span>`:''}
+      ${o.order_code?`<div class="meta" style="color:var(--txt3);margin-top:3px">🛒 ${esc(o.order_code)}</div>`:''}
     </div>
     <div class="acts">
       <button class="btn btn-sm" onclick="queueEbLabel(${o.id})">🏷 Label</button>
@@ -293,7 +295,7 @@ function renderList(){
   const q=$('q').value.trim().toLowerCase(); const sort=$('fsort').value; const lowOnly=$('flow').checked;
   let items=_rolls.slice();
   if(lowOnly)items=items.filter(isLow);
-  if(q)items=items.filter(o=>((o.decor||'')+' '+(o.supplier||'')+' '+(o.location||'')+' '+(o.code||'')).toLowerCase().includes(q));
+  if(q)items=items.filter(o=>((o.decor||'')+' '+(o.supplier||'')+' '+(o.location||'')+' '+(o.code||'')+' '+(o.order_code||'')).toLowerCase().includes(q));
   // summary (all in-stock)
   const totalRem=_rolls.reduce((s,o)=>s+(Number(o.remaining_m)||0),0);
   $('stat-total').textContent=totalRem.toFixed(0)+'m';
