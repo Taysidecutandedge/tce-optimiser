@@ -339,7 +339,8 @@ function renderList(){
     bay:(a,b)=>String(a.location||'~~').localeCompare(String(b.location||'~~'))
   })[sortMode]||((a,b)=>(b.l*b.w)-(a.l*a.w));
   const totalPieces=items.reduce((s,o)=>s+(o.qty||1),0);
-  $('count').textContent=totalPieces+' offcut'+(totalPieces===1?'':'s')+(ft?(' · '+ft+'mm'):'');
+  const totalM2=items.reduce((s,o)=>s+(o.l*o.w*(o.qty||1)),0)/1e6;
+  $('count').textContent=totalPieces+' offcut'+(totalPieces===1?'':'s')+' · '+totalM2.toFixed(2)+' m²'+(ft?(' · '+ft+'mm'):'');
   if(!items.length){$('list').innerHTML='<div class="empty">No offcuts'+(q||ft||fd?' match your filter':' logged yet — add one above')+'.</div>';return;}
   const groupBy=($('fgroup')&&$('fgroup').value)||'decor';
   const keyOf=o=>groupBy==='cust'?(o.notes&&o.notes.trim()?o.notes.trim():'— no customer —'):(o.name||'—');
