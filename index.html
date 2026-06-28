@@ -435,7 +435,7 @@ select option{background:var(--surf2)}
       <button class="login-tab-btn" id="tabRegister" onclick="switchLoginTab('register')">Register</button>
     </div>
     <div id="loginForm">
-      <div class="login-field"><label>Email</label><input type="email" id="loginEmail" placeholder="you@example.com" autocomplete="email"></div>
+      <div class="login-field"><label>Email</label><input type="email" id="loginEmail" placeholder="you@example.com" autocomplete="email" value="cutlist@taysidecutandedge.co.uk"></div>
       <div class="login-field"><label>Password</label><input type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password"></div>
       <button class="login-btn" id="loginBtn" onclick="doLogin()">Sign In</button>
     </div>
@@ -833,6 +833,13 @@ async function sbLoadEbRolls(){
     _ebRolls = r.ok ? (await r.json()) : [];
   }catch(e){ _ebRolls=[]; }
 }
+async function sbLoadBoardStock(){
+  if(!_sbToken){_boardStock=[];return;}
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/tce_library?select=id,name,thick,location,stock_qty&is_offcut=eq.false',{headers:sbAuthH()});
+    _boardStock = r.ok ? (await r.json()) : [];
+  }catch(e){ _boardStock=[]; }
+}
 
 async function sbSaveSheet(e){
   if(!_sbToken||!_sbUser)return;
@@ -857,6 +864,7 @@ async function initCloudLibrary(){
   const loaded=await sbLoadLibrary();
   await sbLoadOffcuts();
   await sbLoadEbRolls();
+  await sbLoadBoardStock();
   if(!loaded){
     // No cloud library yet — offer to migrate local library
     const local=localStorage.getItem('clp_lib');
@@ -2141,6 +2149,7 @@ function renderResults(sheets,unplaced){
       ${unplaced.length?`<div class="stat" style="border-color:var(--err);cursor:pointer" onclick="document.getElementById('upSec').scrollIntoView({behavior:'smooth'})"><div class="stat-lbl" style="color:var(--err)">⚠ Unplaced — tap</div><div class="stat-val cv-err">${unplaced.length}</div></div>`:''}
     </div>
     <div id="ebSec"></div>
+    <div id="bsSec"></div>
     <div class="sheet-grid" id="sheetGrid"></div>
     <div id="cutSec"></div><div id="upSec"></div>`;
 
@@ -2252,6 +2261,12 @@ function renderResults(sheets,unplaced){
       </div>`;
   }
 
+  // Board stock — full sheets needed per board type (non-offcut sheets)
+  const bneed={};
+  sheets.forEach(s=>{ if(s._isOffcut)return; const k=String(s.name||'').toLowerCase().trim()+'|'+(s.thick||''); if(!bneed[k])bneed[k]={name:s.name,thick:s.thick,count:0}; bneed[k].count++; });
+  _lastBoardNeed=Object.values(bneed);
+  renderBoardStock();
+
   if(unplaced.length){
     document.getElementById('upSec').innerHTML=`
       <div class="unplaced-box">
@@ -2331,6 +2346,92 @@ async function confirmEbDeduct(){
   if(firstSetup!=null) localStorage.setItem('tce_eb_setup',String(firstSetup));
   closeEbDeduct();
   alert(done?(done+' roll'+(done!==1?'s':'')+' updated'+(fail?(' · '+fail+' failed'):'')+'. Fresh label'+(done!==1?'s':'')+' queued — print at the workshop station.'):(fail?'Update failed — check connection.':'Nothing deducted.'));
+}
+
+// ═══════════════════════════════════════════════
+// BOARD STOCK — draw down full sheets you hold on hand
+// ═══════════════════════════════════════════════
+const _bsNorm=s=>String(s||'').toLowerCase().replace(/\s+/g,' ').trim();
+function _bsStockFor(name,thick){
+  const list=_boardStock||[];
+  return list.find(b=>_bsNorm(b.name)===_bsNorm(name) && (thick==null||String(b.thick)===String(thick)))
+      || list.find(b=>_bsNorm(b.name)===_bsNorm(name)) || null;
+}
+function renderBoardStock(){
+  const sec=document.getElementById('bsSec'); if(!sec)return;
+  const rows=(_lastBoardNeed||[]).map(n=>{
+    const st=_bsStockFor(n.name,n.thick); const onhand=st?(+st.stock_qty||0):0;
+    return {name:n.name,need:n.count,onhand,id:st?st.id:null};
+  }).filter(r=>r.onhand>0);
+  if(!rows.length){ sec.innerHTML=''; return; }
+  const cards=rows.map(r=>{
+    const use=Math.min(r.need,r.onhand), buy=Math.max(0,r.need-r.onhand);
+    return `<div class="eb-sum-card">
+      <div class="eb-sum-lbl">${esc(r.name)}</div>
+      <div class="eb-sum-val">${r.need} sheet${r.need!==1?'s':''}</div>
+      <div class="eb-sum-sub" style="color:#7fe3a8">have ${r.onhand} · use ${use}${buy>0?` &nbsp;·&nbsp; <span style="color:#ffcf8a">buy ${buy}</span>`:''}</div>
+    </div>`;
+  }).join('');
+  sec.innerHTML=`<div class="eb-sum">
+      <div class="cut-hdr"><span class="sec-ttl" style="color:var(--txt2)">Board Stock</span><button class="btn btn-sm" style="margin-left:auto;background:#1f5f7a;color:#fff;border:none" onclick="openBoardDeduct()">📦 Deduct from stock</button></div>
+      <div class="eb-sum-grid">${cards}</div>
+    </div>`;
+}
+function closeBoardDeduct(){ const m=document.getElementById('boardDeductModal'); if(m)m.remove(); }
+function bddRecalc(input){
+  const row=input.closest('.bdd-row'); if(!row)return;
+  const onhand=parseInt(row.dataset.onhand)||0;
+  let use=parseInt(input.value)||0; if(use<0)use=0; if(use>onhand){use=onhand;input.value=onhand;}
+  row.querySelector('.bdd-left').textContent=onhand-use;
+}
+async function openBoardDeduct(){
+  closeBoardDeduct();
+  await sbLoadBoardStock();
+  const rows=(_lastBoardNeed||[]).map(n=>{
+    const st=_bsStockFor(n.name,n.thick); const onhand=st?(+st.stock_qty||0):0;
+    return {name:n.name,need:n.count,onhand,id:st?st.id:null};
+  }).filter(r=>r.onhand>0 && r.id);
+  if(!rows.length){ alert('No board stock on hand for this job.'); return; }
+  const rowsHtml=rows.map(r=>{
+    const def=Math.min(r.need,r.onhand);
+    return `<div class="bdd-row" data-id="${r.id}" data-onhand="${r.onhand}" style="border:1px solid var(--brd);border-radius:8px;padding:10px;margin-bottom:8px">
+      <div style="font-weight:700">${esc(r.name)}</div>
+      <div style="font-size:12px;color:var(--txt2);margin:3px 0 7px">job needs ${r.need} · you hold ${r.onhand}</div>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+        <div><label style="font-size:11px;color:var(--txt3)">Use from stock</label><br><input type="number" class="bdd-use" value="${def}" min="0" max="${r.onhand}" step="1" style="width:84px" oninput="bddRecalc(this)"></div>
+        <div style="text-align:right;margin-left:auto"><label style="font-size:11px;color:var(--txt3)">Left after</label><br><span class="bdd-left" style="font-weight:700;font-family:var(--mono)">${r.onhand-def}</span></div>
+      </div>
+    </div>`;
+  }).join('');
+  const div=document.createElement('div'); div.id='boardDeductModal';
+  div.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:5000;display:flex;align-items:center;justify-content:center;padding:14px';
+  div.innerHTML=`<div style="background:var(--surf,#1b1b1f);border:1px solid var(--brd);border-radius:14px;max-width:520px;width:100%;max-height:90vh;overflow:auto;padding:18px">
+    <div style="display:flex;align-items:center;margin-bottom:6px"><h2 style="font-size:18px;margin:0">Board stock — deduct sheets</h2><button class="btn btn-sm" style="margin-left:auto;background:none;border:1px solid var(--brd);color:var(--txt2)" onclick="closeBoardDeduct()">✕</button></div>
+    <div style="font-size:12px;color:var(--txt3);margin-bottom:12px">Confirm how many full sheets to take off your on-hand stock for this job.</div>
+    ${rowsHtml}
+    <div style="display:flex;gap:10px;margin-top:14px">
+      <button class="btn" style="flex:1;background:none;border:1px solid var(--brd);color:var(--txt2)" onclick="closeBoardDeduct()">Cancel</button>
+      <button class="btn" style="flex:2;background:#1f5f7a;color:#fff;border:none" onclick="confirmBoardDeduct()">Deduct from stock</button>
+    </div>
+  </div>`;
+  document.body.appendChild(div);
+}
+async function confirmBoardDeduct(){
+  const rows=[...document.querySelectorAll('#boardDeductModal .bdd-row')];
+  let done=0,fail=0;
+  for(const row of rows){
+    const id=row.dataset.id, onhand=parseInt(row.dataset.onhand)||0;
+    let use=parseInt(row.querySelector('.bdd-use').value)||0; if(use<0)use=0; if(use>onhand)use=onhand;
+    if(use<=0) continue;
+    const newQ=Math.max(0,onhand-use);
+    try{
+      const r=await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+id,{method:'PATCH',headers:sbAuthH(),body:JSON.stringify({stock_qty:newQ})});
+      if(r.ok){ done++; const b=(_boardStock||[]).find(x=>String(x.id)===String(id)); if(b)b.stock_qty=newQ; } else fail++;
+    }catch(e){ fail++; }
+  }
+  closeBoardDeduct();
+  renderBoardStock();
+  alert(done?(done+' board'+(done!==1?'s':'')+' updated'+(fail?(' · '+fail+' failed'):'')+'.'):(fail?'Update failed — check connection.':'Nothing deducted.'));
 }
 
 // ═══════════════════════════════════════════════
@@ -3121,7 +3222,7 @@ function applyImport(){
 // ═══════════════════════════════════════════════
 // PRINT LAYOUT
 // ═══════════════════════════════════════════════
-let _lastSheets = [], _lastUnplaced = [], _lastEbMap = {}, _lastEbGT = 0, _lastEbDetail = [], _ebRolls = [];
+let _lastSheets = [], _lastUnplaced = [], _lastEbMap = {}, _lastEbGT = 0, _lastEbDetail = [], _ebRolls = [], _lastBoardNeed = [], _boardStock = [];
 let _loadedCloudJobId = null; // tracks which cloud job is currently loaded
 
 function openPrintLayout(){

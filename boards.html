@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>TCE — Board Stock</title>
+<style>
+:root{--bg:#0a0b0f;--surf:#15171e;--surf2:#1e2128;--brd:#2a2e38;--txt:#f0eeea;--txt2:#a8b0bd;--txt3:#6b7280;--acc:#d4820a;--ok:#27ae60;--low:#c0392b;--mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace}
+*{box-sizing:border-box;margin:0;padding:0;touch-action:manipulation}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--txt);font-size:15px;line-height:1.4;-webkit-text-size-adjust:100%}
+.wrap{max-width:760px;margin:0 auto;padding:0 0 90px}
+header{position:sticky;top:0;z-index:10;background:var(--surf);border-bottom:2px solid var(--acc);padding:12px 16px;display:flex;align-items:center;gap:10px}
+header h1{font-size:16px;font-weight:700}
+header .sub{font-size:11px;color:var(--txt3);font-family:var(--mono)}
+header .right{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn{background:var(--surf2);border:1px solid var(--brd);color:var(--txt);border-radius:8px;padding:9px 14px;font-size:14px;cursor:pointer;font-weight:600}
+.btn:active{transform:scale(.97)}
+.btn-acc{background:var(--acc);color:#111;border-color:var(--acc)}
+.btn-sm{padding:6px 10px;font-size:13px;border-radius:6px}
+.btn-ghost{background:transparent}
+a.btn{text-decoration:none}
+section{padding:14px 16px}
+.card{background:var(--surf);border:1px solid var(--brd);border-radius:12px;padding:14px;margin-bottom:14px}
+.note{font-size:13px;color:var(--txt2)}
+.note b{color:var(--txt)}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.toolbar input[type=search]{flex:1;min-width:150px}
+.toolbar select{width:auto;min-width:120px}
+input,select{background:var(--surf2);border:1px solid var(--brd);color:var(--txt);border-radius:8px;padding:11px;font-size:16px;width:100%;font-family:inherit}
+input:focus,select:focus{outline:none;border-color:var(--acc)}
+.count{font-size:12px;color:var(--txt3);font-family:var(--mono)}
+.chk{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt2)}
+.chk input{width:18px;height:18px}
+.stat{display:flex;gap:14px;margin-bottom:14px}
+.stat > div{flex:1;background:var(--surf2);border-radius:8px;padding:10px 12px}
+.stat .lbl{font-size:11px;color:var(--txt3)}
+.stat .val{font-size:22px;font-weight:700;font-family:var(--mono)}
+.brow{background:var(--surf);border:1px solid var(--brd);border-radius:10px;padding:12px;margin-bottom:10px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.brow.has{border-color:#2a5a3a;background:#15201a}
+.brow .bd{flex:1;min-width:160px}
+.brow .nm{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brow .mt{font-size:12px;color:var(--txt3);font-family:var(--mono);margin:2px 0 8px}
+.brow .bay{font-size:14px;padding:8px}
+.qctl{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.qctl button{width:40px;height:42px;font-size:22px;font-weight:700;background:var(--surf2);border:1px solid var(--brd);color:var(--txt);border-radius:8px;cursor:pointer;line-height:1}
+.qctl button:active{transform:scale(.94)}
+.qctl .qin{width:64px;text-align:center;font-size:18px;font-weight:700;font-family:var(--mono);padding:8px 4px}
+.empty{text-align:center;color:var(--txt3);padding:40px 16px;font-size:14px}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#fff;color:#111;padding:10px 18px;border-radius:10px;font-weight:600;font-size:14px;box-shadow:0 8px 30px rgba(0,0,0,.5);z-index:100;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.show{opacity:1}
+.toast.err{background:#c0392b;color:#fff}
+#login{max-width:380px;margin:60px auto;padding:0 18px}
+#login .card{padding:22px}
+#login h1{font-size:20px;margin-bottom:4px}
+#login p{font-size:13px;color:var(--txt3);margin-bottom:18px}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:11px;color:var(--txt2);font-weight:600}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+
+<div id="login" class="hidden">
+  <div class="card">
+    <h1>Board Stock</h1>
+    <p>Sign in with your TCE account.</p>
+    <div class="field" style="margin-bottom:10px"><label>Email</label><input id="li-email" type="email" autocomplete="username" value="cutlist@taysidecutandedge.co.uk"></div>
+    <div class="field" style="margin-bottom:16px"><label>Password</label><input id="li-pass" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
+    <button class="btn btn-acc" style="width:100%" onclick="doLogin()">Sign in</button>
+    <div id="li-err" style="color:#ff8a80;font-size:13px;margin-top:10px"></div>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <div><h1>Board Stock</h1><div class="sub" id="userline"></div></div>
+    <div class="right">
+      <a class="btn btn-sm btn-ghost" href="./hub.html" title="Workshop hub">🏠 Hub</a>
+      <a class="btn btn-sm btn-ghost" href="./index.html">◀ Optimiser</a>
+      <a class="btn btn-sm btn-ghost" href="./offcuts.html" title="Offcut stock">🧩 Offcuts</a>
+    </div>
+  </header>
+  <div class="wrap">
+    <section>
+      <div class="card">
+        <div class="note">Set how many <b>full sheets</b> you hold of each board. When you calculate a job, the optimiser counts these as owned and only flags the shortfall to buy. New board types are added in the <b>Optimiser</b>.</div>
+      </div>
+
+      <div class="stat">
+        <div><div class="lbl">Sheets on hand</div><div class="val" id="s-sheets">–</div></div>
+        <div><div class="lbl">Boards in stock</div><div class="val" id="s-boards">–</div></div>
+      </div>
+
+      <div class="toolbar">
+        <input type="search" id="q" placeholder="Search decor, bay…" oninput="render()">
+        <select id="fthick" onchange="render()"><option value="">All thickness</option></select>
+        <label class="chk"><input type="checkbox" id="instock" onchange="render()"> In stock only</label>
+      </div>
+      <div class="count" id="cnt"></div>
+      <div id="list"></div>
+    </section>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const SB_URL='https://mxjduublgtlpqtdgutzi.supabase.co';
+const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im14amR1dWJsZ3RscHF0ZGd1dHppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwOTg2MjMsImV4cCI6MjA5MTY3NDYyM30.wfG9a91Udp7KQ7ywda6aNS9k-n79qtrGSe-epuCuk34';
+let _token=null,_user=null,_boards=[];
+const H=()=>({'apikey':SB_KEY,'Authorization':'Bearer '+(_token||SB_KEY),'Content-Type':'application/json'});
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const $=id=>document.getElementById(id);
+function toast(m,err){const t=$('toast');t.textContent=m;t.className='toast show'+(err?' err':'');setTimeout(()=>t.className='toast',1700);}
+
+async function init(){
+  const tok=localStorage.getItem('tce_token');
+  if(tok){ try{ const r=await fetch(SB_URL+'/auth/v1/user',{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+tok}}); if(r.ok){const d=await r.json();_token=tok;_user={id:d.id,email:d.email};return showApp();} }catch(e){} }
+  showLogin();
+}
+function showLogin(){$('login').classList.remove('hidden');$('app').classList.add('hidden');}
+async function showApp(){ $('login').classList.add('hidden');$('app').classList.remove('hidden');$('userline').textContent=_user.email; await loadBoards(); }
+async function doLogin(){
+  $('li-err').textContent='';
+  const email=$('li-email').value.trim(),password=$('li-pass').value;
+  if(!email||!password){$('li-err').textContent='Enter email and password.';return;}
+  try{
+    const r=await fetch(SB_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{'apikey':SB_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,password})});
+    const d=await r.json(); if(!r.ok)throw new Error(d.error_description||d.msg||'Sign in failed');
+    _token=d.access_token;_user={id:d.user.id,email:d.user.email};
+    localStorage.setItem('tce_token',_token);localStorage.setItem('tce_user',JSON.stringify(_user));
+    showApp();
+  }catch(e){$('li-err').textContent=e.message;}
+}
+function signOut(){localStorage.removeItem('tce_token');localStorage.removeItem('tce_user');_token=null;_user=null;showLogin();}
+
+async function loadBoards(){
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/tce_library?select=id,name,l,w,thick,location,stock_qty&is_offcut=eq.false&order=name',{headers:H()});
+    _boards = r.ok ? (await r.json()) : [];
+  }catch(e){ _boards=[]; }
+  // thickness filter options
+  const ths=[...new Set(_boards.map(b=>b.thick).filter(x=>x!=null))].sort((a,b)=>a-b);
+  $('fthick').innerHTML='<option value="">All thickness</option>'+ths.map(t=>`<option value="${t}">${t}mm</option>`).join('');
+  render();
+}
+
+function render(){
+  const q=$('q').value.toLowerCase().trim();
+  const ft=$('fthick').value;
+  const inStockOnly=$('instock').checked;
+  let rows=_boards.slice();
+  if(ft!=='') rows=rows.filter(b=>String(b.thick)===String(ft));
+  if(inStockOnly) rows=rows.filter(b=>(+b.stock_qty||0)>0);
+  if(q) rows=rows.filter(b=>(`${b.name} ${b.location||''}`).toLowerCase().includes(q));
+  // summary across ALL boards (not just filtered)
+  const totSheets=_boards.reduce((a,b)=>a+(+b.stock_qty||0),0);
+  const totBoards=_boards.filter(b=>(+b.stock_qty||0)>0).length;
+  $('s-sheets').textContent=totSheets;
+  $('s-boards').textContent=totBoards;
+  $('cnt').textContent=`${rows.length} board${rows.length!==1?'s':''}`;
+  if(!rows.length){ $('list').innerHTML='<div class="empty">No boards match. Add board types in the Optimiser first.</div>'; return; }
+  $('list').innerHTML=rows.map(b=>{
+    const n=+b.stock_qty||0;
+    return `<div class="brow ${n>0?'has':''}" data-id="${b.id}">
+      <div class="bd">
+        <div class="nm">${esc(b.name)}</div>
+        <div class="mt">${b.l||'?'}×${b.w||'?'} · ${b.thick||'?'}mm</div>
+        <input class="bay" placeholder="Bay / location" value="${esc(b.location||'')}" onchange="saveBoard(${b.id})">
+      </div>
+      <div class="qctl">
+        <button type="button" onclick="bump(${b.id},-1)">−</button>
+        <input class="qin" type="number" inputmode="numeric" min="0" value="${n}" onchange="saveBoard(${b.id})">
+        <button type="button" onclick="bump(${b.id},1)">+</button>
+      </div>
+      <button class="btn btn-sm" onclick="saveBoard(${b.id})">Save</button>
+    </div>`;
+  }).join('');
+}
+
+function bump(id,d){
+  const row=document.querySelector(`.brow[data-id="${id}"]`); if(!row)return;
+  const inp=row.querySelector('.qin');
+  inp.value=Math.max(0,(parseInt(inp.value)||0)+d);
+  saveBoard(id);
+}
+
+async function saveBoard(id){
+  const row=document.querySelector(`.brow[data-id="${id}"]`); if(!row)return;
+  const qty=Math.max(0,parseInt(row.querySelector('.qin').value)||0);
+  const bay=row.querySelector('.bay').value.trim();
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+id,{method:'PATCH',headers:H(),body:JSON.stringify({stock_qty:qty,location:bay||null})});
+    if(!r.ok)throw new Error('save failed');
+    const b=_boards.find(x=>String(x.id)===String(id)); if(b){b.stock_qty=qty;b.location=bay||null;}
+    row.classList.toggle('has',qty>0);
+    // refresh summary numbers without full re-render (keeps focus)
+    $('s-sheets').textContent=_boards.reduce((a,b)=>a+(+b.stock_qty||0),0);
+    $('s-boards').textContent=_boards.filter(b=>(+b.stock_qty||0)>0).length;
+    toast('Saved');
+  }catch(e){ toast('Save failed',true); }
+}
+
+init();
+</script>
+</body>
+</html>

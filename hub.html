@@ -60,7 +60,7 @@ input:focus{outline:none;border-color:var(--acc)}
   <div class="card">
     <h1>Workshop Hub</h1>
     <p>Sign in with your TCE account.</p>
-    <div class="field"><label>Email</label><input id="li-email" type="email" autocomplete="username"></div>
+    <div class="field"><label>Email</label><input id="li-email" type="email" autocomplete="username" value="cutlist@taysidecutandedge.co.uk"></div>
     <div class="field"><label>Password</label><input id="li-pass" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
     <button class="btn btn-acc" style="width:100%;margin-top:6px" onclick="doLogin()">Sign in</button>
     <div id="li-err" style="color:#ff8a80;font-size:13px;margin-top:10px"></div>
@@ -83,6 +83,7 @@ input:focus{outline:none;border-color:var(--acc)}
       <a class="stat go" href="./tce-offload.html"><div class="v" id="s-labels">–</div><div class="l">labels waiting to print</div></a>
       <a class="stat" href="./edgebanding.html"><div class="v" id="s-eblow">–</div><div class="l">edgebanding rolls low</div></a>
       <a class="stat" href="./offcuts.html"><div class="v" id="s-offcuts">–</div><div class="l">offcuts in stock</div></a>
+      <a class="stat" href="./boards.html"><div class="v" id="s-sheets">–</div><div class="l">full sheets in stock</div></a>
     </div>
 
     <div class="tiles">
@@ -97,6 +98,10 @@ input:focus{outline:none;border-color:var(--acc)}
       <a class="tile" href="./offcuts.html">
         <div class="ico">🧩</div>
         <div><div class="ttl">Offcut Stock</div><div class="dsc">Browse &amp; manage offcuts</div></div>
+      </a>
+      <a class="tile" href="./boards.html">
+        <div class="ico">📦</div>
+        <div><div class="ttl">Board Stock</div><div class="dsc">Full sheets you hold on hand</div></div>
       </a>
       <a class="tile print" href="./tce-offload.html">
         <div class="ico">🏷️</div>
@@ -151,12 +156,15 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;',
 async function loadStats(){
   // best-effort — never block the buttons
   try{
-    const [offc, eb] = await Promise.all([
+    const [offc, eb, boards] = await Promise.all([
       fetch(SB_URL+'/rest/v1/tce_library?select=id,label_pending&is_offcut=eq.true&status=eq.in_stock',{headers:H()}).then(r=>r.ok?r.json():[]).catch(()=>[]),
-      fetch(SB_URL+'/rest/v1/tce_eb_rolls?select=remaining_m,low_stock_m,label_pending&status=eq.in_stock',{headers:H()}).then(r=>r.ok?r.json():[]).catch(()=>[])
+      fetch(SB_URL+'/rest/v1/tce_eb_rolls?select=remaining_m,low_stock_m,label_pending&status=eq.in_stock',{headers:H()}).then(r=>r.ok?r.json():[]).catch(()=>[]),
+      fetch(SB_URL+'/rest/v1/tce_library?select=stock_qty&is_offcut=eq.false',{headers:H()}).then(r=>r.ok?r.json():[]).catch(()=>[])
     ]);
     // offcuts in stock
     $('s-offcuts').textContent=offc.length;
+    // full sheets on hand
+    $('s-sheets').textContent=boards.reduce((a,b)=>a+(+b.stock_qty||0),0);
     // edgebanding low
     const low=eb.filter(r=>r.low_stock_m!=null && Number(r.remaining_m)<=Number(r.low_stock_m)).length;
     $('s-eblow').textContent=low;
@@ -168,7 +176,7 @@ async function loadStats(){
     const lblStat=$('s-labels').closest('.stat'); if(lblStat){lblStat.classList.toggle('alert',labels>0);lblStat.classList.toggle('go',labels===0);}
     if(labels>0){const b=$('b-print'); b.textContent=labels; b.classList.remove('hidden');}
   }catch(e){
-    $('s-offcuts').textContent='–';$('s-eblow').textContent='–';$('s-labels').textContent='–';
+    $('s-offcuts').textContent='–';$('s-eblow').textContent='–';$('s-labels').textContent='–';$('s-sheets').textContent='–';
   }
 }
 
