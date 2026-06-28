@@ -84,7 +84,7 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
   <div class="card">
     <h1>Offcut Stock</h1>
     <p>Sign in with your TCE optimiser account.</p>
-    <div class="field" style="margin-bottom:10px"><label>Email</label><input id="li-email" type="email" autocomplete="username"></div>
+    <div class="field" style="margin-bottom:10px"><label>Email</label><input id="li-email" type="email" autocomplete="username" value="cutlist@taysidecutandedge.co.uk"></div>
     <div class="field" style="margin-bottom:16px"><label>Password</label><input id="li-pass" type="password" autocomplete="current-password"></div>
     <button class="btn btn-acc" style="width:100%" onclick="doLogin()">Sign in</button>
     <div id="li-err" style="color:#ff8a80;font-size:13px;margin-top:10px"></div>
@@ -332,6 +332,7 @@ function ocCard(o){
         <button class="btn btn-sm" onclick="printLabel(${o.id})">🏷 Label</button>
         <button class="btn btn-sm" onclick="editOffcut(${o.id})">Edit</button>
         <button class="btn btn-sm" onclick="useOne(${o.id})">Use 1</button>
+        <button class="btn btn-sm" style="border-color:#2a5a6a;color:#7fd3e3" onclick="moveToStock(${o.id})" title="It's actually a full sheet — move to board stock">↗ To stock</button>
         <button class="btn btn-sm btn-danger" onclick="delOffcut(${o.id})">Delete</button>
       </div>
     </div>`;
@@ -399,6 +400,32 @@ async function delOffcut(id){
     const r=await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+id,{method:'DELETE',headers:H()});
     if(!r.ok){toast('Delete failed',true);return;}
     toast('Deleted');
+    await loadOffcuts();
+  }catch(e){toast('Network error',true);}
+}
+
+// Move a "full sheet" that was logged as an offcut into proper board stock
+async function moveToStock(id){
+  const o=_offcuts.find(x=>x.id===id); if(!o)return;
+  const qty=Math.max(1,parseInt(o.qty)||1);
+  if(!confirm(`Move ${qty>1?qty+' × ':''}"${o.name}" (${o.l}×${o.w}) into full-sheet board stock?`))return;
+  const norm=s=>String(s||'').toLowerCase().replace(/\s+/g,' ').trim();
+  try{
+    const br=await fetch(SB_URL+'/rest/v1/tce_library?select=id,name,thick,stock_qty&is_offcut=eq.false',{headers:H()});
+    const boards=br.ok?await br.json():[];
+    let board=boards.find(b=>norm(b.name)===norm(o.name)&&String(b.thick)===String(o.thick))||boards.find(b=>norm(b.name)===norm(o.name));
+    if(board){
+      const newQ=(parseInt(board.stock_qty)||0)+qty;
+      const pr=await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+board.id,{method:'PATCH',headers:H(),body:JSON.stringify({stock_qty:newQ})});
+      if(!pr.ok){toast('Stock update failed',true);return;}
+    } else {
+      if(!confirm(`"${o.name}" isn't in your board catalogue yet. Add it as a new board (${o.l}×${o.w}, ${o.thick}mm) with ${qty} in stock?`))return;
+      const newBoard={name:o.name,l:o.l,w:o.w,thick:o.thick||0,cost:0,color:o.color||'#4e9af1',grain_len:o.grain_len===true,is_offcut:false,stock_qty:qty,location:o.location||null,status:'in_stock',user_id:_user.id};
+      const cr=await fetch(SB_URL+'/rest/v1/tce_library',{method:'POST',headers:Hrep(),body:JSON.stringify(newBoard)});
+      if(!cr.ok){toast('Could not create board',true);return;}
+    }
+    const ur=await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+id,{method:'PATCH',headers:H(),body:JSON.stringify({status:'used',used_at:new Date().toISOString()})});
+    toast(ur.ok?'Moved to board stock ✓':'Moved, but offcut not cleared',!ur.ok);
     await loadOffcuts();
   }catch(e){toast('Network error',true);}
 }
