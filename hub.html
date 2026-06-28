@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TCE — Workshop Hub</title>
+<style>
+:root{--bg:#0a0b0f;--surf:#15171e;--surf2:#1e2128;--brd:#2a2e38;--txt:#f0eeea;--txt2:#a8b0bd;--txt3:#6b7280;--acc:#d4820a;--ok:#27ae60;--low:#c0392b;--eb:#2a8a5a;--mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace}
+*{box-sizing:border-box;margin:0;padding:0;touch-action:manipulation}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--txt);font-size:16px;line-height:1.4;-webkit-text-size-adjust:100%}
+.wrap{max-width:900px;margin:0 auto;padding:0 16px 60px}
+header{position:sticky;top:0;z-index:10;background:var(--surf);border-bottom:2px solid var(--acc);padding:14px 18px;display:flex;align-items:center;gap:12px}
+header h1{font-size:18px;font-weight:800;letter-spacing:.3px}
+header .sub{font-size:11px;color:var(--txt3);font-family:var(--mono)}
+header .right{margin-left:auto;display:flex;gap:8px;align-items:center}
+.btn{background:var(--surf2);border:1px solid var(--brd);color:var(--txt);border-radius:8px;padding:9px 14px;font-size:14px;cursor:pointer;font-weight:600}
+.btn:active{transform:scale(.97)}
+.btn-acc{background:var(--acc);color:#111;border-color:var(--acc)}
+.btn-sm{padding:6px 10px;font-size:13px;border-radius:6px}
+.btn-ghost{background:transparent}
+.hidden{display:none!important}
+.hello{padding:22px 2px 6px;font-size:15px;color:var(--txt2)}
+.hello b{color:var(--txt)}
+/* stat strip */
+.stats{display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 22px}
+.stat{flex:1;min-width:150px;background:var(--surf);border:1px solid var(--brd);border-radius:12px;padding:14px 16px;cursor:pointer;text-decoration:none;color:inherit;display:block}
+.stat:active{transform:scale(.98)}
+.stat .v{font-size:30px;font-weight:800;font-family:var(--mono);line-height:1}
+.stat .l{font-size:12px;color:var(--txt3);margin-top:6px}
+.stat.alert{border-color:#5a2a2a}
+.stat.alert .v{color:#ff8a80}
+.stat.go .v{color:var(--acc)}
+/* tiles */
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:620px){.tiles{grid-template-columns:1fr}}
+.tile{background:var(--surf);border:1px solid var(--brd);border-radius:16px;padding:26px 22px;text-decoration:none;color:inherit;display:flex;align-items:center;gap:18px;transition:border-color .12s,transform .08s}
+.tile:hover{border-color:var(--acc)}
+.tile:active{transform:scale(.98)}
+.tile .ico{font-size:44px;line-height:1;flex-shrink:0;width:58px;text-align:center}
+.tile .ttl{font-size:21px;font-weight:800}
+.tile .dsc{font-size:14px;color:var(--txt2);margin-top:3px}
+.tile.print{border-color:#2a3e5a}
+.tile.print:hover{border-color:#4a78c0}
+.badge{display:inline-block;background:var(--low);color:#fff;font-size:12px;font-weight:700;padding:1px 8px;border-radius:20px;margin-left:8px;font-family:var(--mono);vertical-align:middle}
+/* login */
+#login{max-width:380px;margin:70px auto;padding:0 18px}
+#login .card{background:var(--surf);border:1px solid var(--brd);border-radius:12px;padding:24px}
+#login h1{font-size:21px;margin-bottom:4px}
+#login p{font-size:13px;color:var(--txt3);margin-bottom:18px}
+#login .field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+#login label{font-size:11px;color:var(--txt2);font-weight:600}
+input{background:var(--surf2);border:1px solid var(--brd);color:var(--txt);border-radius:8px;padding:12px;font-size:16px;width:100%;font-family:inherit}
+input:focus{outline:none;border-color:var(--acc)}
+.foot{text-align:center;color:var(--txt3);font-size:12px;margin-top:34px;font-family:var(--mono)}
+</style>
+</head>
+<body>
+
+<div id="login" class="hidden">
+  <div class="card">
+    <h1>Workshop Hub</h1>
+    <p>Sign in with your TCE account.</p>
+    <div class="field"><label>Email</label><input id="li-email" type="email" autocomplete="username"></div>
+    <div class="field"><label>Password</label><input id="li-pass" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
+    <button class="btn btn-acc" style="width:100%;margin-top:6px" onclick="doLogin()">Sign in</button>
+    <div id="li-err" style="color:#ff8a80;font-size:13px;margin-top:10px"></div>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <div><h1>🪵 Tayside Cut &amp; Edge</h1><div class="sub">Workshop Hub</div></div>
+    <div class="right">
+      <span class="sub" id="userline"></span>
+      <button class="btn btn-sm btn-ghost" onclick="signOut()">Sign out</button>
+    </div>
+  </header>
+  <div class="wrap">
+
+    <div class="hello" id="hello">Welcome back.</div>
+
+    <div class="stats" id="stats">
+      <a class="stat go" href="./tce-offload.html"><div class="v" id="s-labels">–</div><div class="l">labels waiting to print</div></a>
+      <a class="stat" href="./edgebanding.html"><div class="v" id="s-eblow">–</div><div class="l">edgebanding rolls low</div></a>
+      <a class="stat" href="./offcuts.html"><div class="v" id="s-offcuts">–</div><div class="l">offcuts in stock</div></a>
+    </div>
+
+    <div class="tiles">
+      <a class="tile" href="./index.html">
+        <div class="ico">🪚</div>
+        <div><div class="ttl">Optimiser</div><div class="dsc">Plan a cut &amp; nest the sheets</div></div>
+      </a>
+      <a class="tile" href="./edgebanding.html">
+        <div class="ico">🎗️</div>
+        <div><div class="ttl">Edgebanding<span class="badge hidden" id="b-eb"></span></div><div class="dsc">Roll stock &amp; tape usage</div></div>
+      </a>
+      <a class="tile" href="./offcuts.html">
+        <div class="ico">🧩</div>
+        <div><div class="ttl">Offcut Stock</div><div class="dsc">Browse &amp; manage offcuts</div></div>
+      </a>
+      <a class="tile print" href="./tce-offload.html">
+        <div class="ico">🏷️</div>
+        <div><div class="ttl">Print Station<span class="badge hidden" id="b-print"></span></div><div class="dsc">Prints queued labels — keep this open</div></div>
+      </a>
+    </div>
+
+    <div class="foot">Tayside Cut &amp; Edge · workshop hub</div>
+  </div>
+</div>
+
+<script>
+const SB_URL='https://mxjduublgtlpqtdgutzi.supabase.co';
+const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im14amR1dWJsZ3RscHF0ZGd1dHppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwOTg2MjMsImV4cCI6MjA5MTY3NDYyM30.wfG9a91Udp7KQ7ywda6aNS9k-n79qtrGSe-epuCuk34';
+let _token=null,_user=null;
+const H=()=>({'apikey':SB_KEY,'Authorization':'Bearer '+(_token||SB_KEY)});
+const $=id=>document.getElementById(id);
+
+async function init(){
+  const tok=localStorage.getItem('tce_token');
+  if(tok){
+    try{
+      const r=await fetch(SB_URL+'/auth/v1/user',{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+tok}});
+      if(r.ok){const d=await r.json();_token=tok;_user={id:d.id,email:d.email};return showApp();}
+    }catch(e){}
+  }
+  showLogin();
+}
+function showLogin(){$('login').classList.remove('hidden');$('app').classList.add('hidden');}
+async function showApp(){
+  $('login').classList.add('hidden');$('app').classList.remove('hidden');
+  $('userline').textContent=_user.email;
+  const hr=new Date().getHours();
+  $('hello').innerHTML=(hr<12?'Good morning':hr<17?'Good afternoon':'Good evening')+', <b>'+esc((_user.email||'').split('@')[0])+'</b> — what are we doing?';
+  loadStats();
+}
+async function doLogin(){
+  $('li-err').textContent='';
+  const email=$('li-email').value.trim(),password=$('li-pass').value;
+  if(!email||!password){$('li-err').textContent='Enter email and password.';return;}
+  try{
+    const r=await fetch(SB_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{'apikey':SB_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,password})});
+    const d=await r.json(); if(!r.ok)throw new Error(d.error_description||d.msg||'Sign in failed');
+    _token=d.access_token;_user={id:d.user.id,email:d.user.email};
+    localStorage.setItem('tce_token',_token);localStorage.setItem('tce_user',JSON.stringify(_user));
+    showApp();
+  }catch(e){$('li-err').textContent=e.message;}
+}
+function signOut(){localStorage.removeItem('tce_token');localStorage.removeItem('tce_user');_token=null;_user=null;showLogin();}
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function loadStats(){
+  // best-effort — never block the buttons
+  try{
+    const [offc, eb] = await Promise.all([
+      fetch(SB_URL+'/rest/v1/tce_library?select=id,label_pending&is_offcut=eq.true&status=eq.in_stock',{headers:H()}).then(r=>r.ok?r.json():[]).catch(()=>[]),
+      fetch(SB_URL+'/rest/v1/tce_eb_rolls?select=remaining_m,low_stock_m,label_pending&status=eq.in_stock',{headers:H()}).then(r=>r.ok?r.json():[]).catch(()=>[])
+    ]);
+    // offcuts in stock
+    $('s-offcuts').textContent=offc.length;
+    // edgebanding low
+    const low=eb.filter(r=>r.low_stock_m!=null && Number(r.remaining_m)<=Number(r.low_stock_m)).length;
+    $('s-eblow').textContent=low;
+    const ebStat=$('s-eblow').closest('.stat'); if(ebStat) ebStat.classList.toggle('alert',low>0);
+    if(low>0){const b=$('b-eb'); b.textContent=low+' low'; b.classList.remove('hidden');}
+    // labels waiting (offcuts + rolls)
+    const labels=offc.filter(r=>r.label_pending).length + eb.filter(r=>r.label_pending).length;
+    $('s-labels').textContent=labels;
+    const lblStat=$('s-labels').closest('.stat'); if(lblStat){lblStat.classList.toggle('alert',labels>0);lblStat.classList.toggle('go',labels===0);}
+    if(labels>0){const b=$('b-print'); b.textContent=labels; b.classList.remove('hidden');}
+  }catch(e){
+    $('s-offcuts').textContent='–';$('s-eblow').textContent='–';$('s-labels').textContent='–';
+  }
+}
+
+init();
+</script>
+</body>
+</html>
