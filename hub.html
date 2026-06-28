@@ -135,7 +135,7 @@ async function showApp(){
   $('login').classList.add('hidden');$('app').classList.remove('hidden');
   $('userline').textContent=_user.email;
   const hr=new Date().getHours();
-  $('hello').innerHTML=(hr<12?'Good morning':hr<17?'Good afternoon':'Good evening')+', <b>'+esc((_user.email||'').split('@')[0])+'</b> — what are we doing?';
+  $('hello').innerHTML=(hr<12?'Good morning':hr<17?'Good afternoon':'Good evening')+' — what are we doing?';
   loadStats();
 }
 async function doLogin(){
@@ -157,7 +157,7 @@ async function loadStats(){
   // best-effort — never block the buttons
   try{
     const [offc, eb, boards] = await Promise.all([
-      fetch(SB_URL+'/rest/v1/tce_library?select=id,label_pending&is_offcut=eq.true&status=eq.in_stock',{headers:H()}).then(r=>r.ok?r.json():[]).catch(()=>[]),
+      fetch(SB_URL+'/rest/v1/tce_library?select=id,label_printed&is_offcut=eq.true&status=eq.in_stock',{headers:H()}).then(r=>r.ok?r.json():[]).catch(()=>[]),
       fetch(SB_URL+'/rest/v1/tce_eb_rolls?select=remaining_m,low_stock_m,label_pending&status=eq.in_stock',{headers:H()}).then(r=>r.ok?r.json():[]).catch(()=>[]),
       fetch(SB_URL+'/rest/v1/tce_library?select=stock_qty&is_offcut=eq.false',{headers:H()}).then(r=>r.ok?r.json():[]).catch(()=>[])
     ]);
@@ -171,7 +171,7 @@ async function loadStats(){
     const ebStat=$('s-eblow').closest('.stat'); if(ebStat) ebStat.classList.toggle('alert',low>0);
     if(low>0){const b=$('b-eb'); b.textContent=low+' low'; b.classList.remove('hidden');}
     // labels waiting (offcuts + rolls)
-    const labels=offc.filter(r=>r.label_pending).length + eb.filter(r=>r.label_pending).length;
+    const labels=offc.filter(r=>r.label_printed===false).length + eb.filter(r=>r.label_pending).length;
     $('s-labels').textContent=labels;
     const lblStat=$('s-labels').closest('.stat'); if(lblStat){lblStat.classList.toggle('alert',labels>0);lblStat.classList.toggle('go',labels===0);}
     if(labels>0){const b=$('b-print'); b.textContent=labels; b.classList.remove('hidden');}
