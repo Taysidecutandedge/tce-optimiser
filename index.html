@@ -1906,8 +1906,11 @@ function _calculateInner(){
       fullBoards++;
     }
     // Primary: fewest FRESH BOARDS (big offcuts help only by reducing this). Then: consume
-    // more SMALL offcuts (clears the nuisance, consolidates board waste). Then: even fill.
-    return fullBoards*1e9 - smallOff*1e7 + maxFree;
+    // more SMALL offcuts (clears the nuisance, consolidates board waste). Then: CONCENTRATE
+    // the leftover — pack the productive sheets dense and pool the slack onto as few sheets
+    // as possible (one big reusable offcut), rather than spreading slivers across every sheet.
+    // (-maxFree rewards a single near-empty sheet, which the consolidation pass can then drain.)
+    return fullBoards*1e9 - smallOff*1e7 - maxFree;
   };
 
   let best=null;
