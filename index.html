@@ -1791,49 +1791,6 @@ function _calculateInner(){
       if(!anyMoved) break;
     }
 
-    // ── Small-panel gather (shelf consolidation) ──────────────────────────────
-    // The little panels (cheeks, shelves) that fit under the tall parts get
-    // dribbled one-per-sheet, leaving every sheet with stray offcuts. Pull them
-    // together: fill one sheet's gaps full from the others before moving on, so
-    // the small parts bunch up and the sheets they leave keep ONE clean big offcut.
-    // Uses the same collision-free rect placement the consolidation pass uses, and
-    // only ever moves a panel after it's safely placed elsewhere (no parts lost).
-    const rebuildCols=(sh)=>{
-      sh.cols=[];
-      sh.placements.forEach(p=>{
-        let col=sh.cols.find(c=>Math.abs(c.x-p.x)<1);
-        if(!col){col={x:p.x,w:p.w,usedH:0,fullRun:p.h>sh.uh-1};sh.cols.push(col);}
-        col.usedH=Math.max(col.usedH,p.y+p.h+kerf);
-        if(p.w>col.w) col.w=p.w;
-      });
-    };
-    const isFiller=p=>p.h<=620 && p.w<=1000;   // fits a bottom-band shelf
-    for(let gp=0; gp<8; gp++){
-      let movedAny=false;
-      const fld=pool.filter(s=>s.placements.length>0 && !s._isOffcut);
-      for(const collector of fld){
-        if(!pool.includes(collector)) continue;
-        let progress=true;
-        while(progress){
-          progress=false;
-          for(const src of fld){
-            if(src===collector || src._isOffcut || !pool.includes(src)) continue;
-            const smalls=src.placements.filter(isFiller);
-            for(const pl of smalls){
-              if(src.placements.indexOf(pl)<0) continue;
-              if(collector.jsid!==src.jsid) continue;
-              if(tryPlaceInRect(pl,collector)){       // adds to collector first
-                const idx=src.placements.indexOf(pl); // then remove from source
-                if(idx>=0){ src.placements.splice(idx,1); rebuildCols(src); }
-                progress=true; movedAny=true;
-              }
-            }
-          }
-        }
-      }
-      if(!movedAny) break;
-    }
-
     const final=pool.filter(s=>s.placements.length>0);
     final.sort((a,b)=>a.jsid-b.jsid);
     return {sheets:final,unplaced};
