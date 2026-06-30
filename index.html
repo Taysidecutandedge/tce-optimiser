@@ -23,8 +23,9 @@ header{display:flex;align-items:center;justify-content:space-between;padding:11p
 .logo svg{width:24px;height:24px;flex-shrink:0}
 .hdr-r{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
 
-.app{display:grid;grid-template-columns:clamp(560px,58vw,860px) 1fr;height:calc(100vh - 51px)}
+.app{display:grid;grid-template-columns:clamp(580px,60vw,900px) 1fr;height:calc(100vh - 51px)}
 .app.results{grid-template-columns:430px 1fr}
+.app:not(.results) #partsTbody input[type="text"]{min-width:230px}
 .sidebar{background:var(--surf);border-right:1px solid var(--brd);overflow-y:auto;display:flex;flex-direction:column}
 .main{overflow-y:auto;padding:20px;background:var(--bg)}
 
