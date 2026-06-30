@@ -186,6 +186,11 @@ select option{background:var(--surf2)}
   box-shadow:0 2px 10px rgba(0,0,0,.25);
   box-sizing:border-box;
 }
+/* Customer approval sheet — A4, flows across pages, cards never split */
+.ap-doc{background:#fff;color:#000;font-family:Arial,Helvetica,sans-serif;font-size:9pt;
+  width:186mm;margin:0 auto 20px;padding:12mm 9mm;box-shadow:0 2px 10px rgba(0,0,0,.25);box-sizing:border-box}
+.ap-card{break-inside:avoid;page-break-inside:avoid}
+@media print{ .ap-doc{box-shadow:none!important;margin:0 auto!important} }
 
 /* Thin top header — exactly like PDF */
 .pl-hdr{
@@ -3332,26 +3337,27 @@ function _apDoorSvg(d){
     +'<text x="'+(x0-8)+'" y="'+(y0+h/2)+'" font-size="9" text-anchor="middle" fill="#444" transform="rotate(-90 '+(x0-8)+' '+(y0+h/2)+')">'+H+'</text></svg>';
 }
 function buildApprovalSheet(){
-  const sheets=_lastSheets;
   const pages=document.getElementById('printPages'); pages.innerHTML='';
   const dateStr=new Date().toLocaleDateString('en-GB');
   const jobName=projectName||(jobSheets.length?jobSheets[0].name:'Job');
-  const placements=[]; sheets.forEach(s=>s.placements.forEach(p=>placements.push(p)));
+  // Source from the PARTS list (not the cut placements) so a door shows as a door,
+  // not its separate frame/panel cut pieces — those carry the same .door spec.
+  const items=(typeof parts!=='undefined'&&parts)||[];
   const dmap={};
-  placements.forEach(p=>{ if(p.door){ const d=p.door; const k=(d.ref||'D')+'|'+d.h+'x'+d.w+'|'+(d.panels||1)+'|'+(d.qty||1); if(!dmap[k]) dmap[k]=d; }});
+  items.forEach(p=>{ if(p.door){ const d=p.door; const k=(d.ref||'D')+'|'+d.h+'x'+d.w+'|'+(d.panels||1); if(!dmap[k]) dmap[k]={d,qty:(parseInt(d.qty)||1)}; }});
   const doors=Object.values(dmap);
   const pmap={};
-  placements.forEach(p=>{ if(p.door) return; const eb=p.eb||{}; const sig=['L1','L2','W1','W2'].map(s=>eb[s]?s+(eb.tk&&eb.tk[s]||'1'):'').filter(Boolean).join(','); const k=(p.label||'')+'|'+p.origL+'x'+p.origW+'|'+(p.grain||'L')+'|'+sig; if(!pmap[k]) pmap[k]={p,qty:0}; pmap[k].qty++; });
+  items.forEach(p=>{ if(p.door) return; const eb=p.eb||{}; const sig=['L1','L2','W1','W2'].map(s=>eb[s]?s+(eb.tk&&eb.tk[s]||'1'):'').filter(Boolean).join(','); const k=(p.label||'')+'|'+p.l+'x'+p.w+'|'+(p.grain||'L')+'|'+sig; if(!pmap[k]) pmap[k]={p:Object.assign({},p,{origL:p.l,origW:p.w}),qty:0}; pmap[k].qty+=(parseInt(p.qty)||1); });
   const panels=Object.values(pmap);
-  let html='<div class="pl-page" style="font-family:Arial,sans-serif;color:#111">';
+  let html='<div class="ap-doc">';
   html+='<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:8px;margin-bottom:12px">'
     +'<div><div style="font-size:17pt;font-weight:bold">Tayside Cut &amp; Edge</div><div style="font-size:9pt;color:#555">Order Approval &mdash; '+esc(jobName)+'</div></div>'
     +'<div style="text-align:right;font-size:9pt;color:#555">'+dateStr+'<br>Please check &amp; approve</div></div>';
   html+='<div style="font-size:9pt;color:#444;background:#f6f6f6;border:1px solid #e0e0e0;border-radius:5px;padding:8px 10px;margin-bottom:14px">Please confirm each item is the <b>correct size and orientation</b>, and that the <b>edgebanding is on the correct edges</b> (shown in <span style="color:#1f9d57;font-weight:bold">green</span>). Let us know to approve or change anything before we cut.</div>';
   if(doors.length){
     html+='<div style="font-size:11pt;font-weight:bold;margin:6px 0 8px;border-bottom:1px solid #ccc;padding-bottom:3px">Doors</div><div style="display:flex;flex-wrap:wrap;gap:12px">';
-    doors.forEach(d=>{ html+='<div style="border:1px solid #ddd;border-radius:6px;padding:8px 10px;width:200px;text-align:center">'+_apDoorSvg(d)
-      +'<div style="font-size:9.5pt;font-weight:bold;margin-top:4px">'+esc(d.ref||'Door')+' &mdash; '+(d.qty||1)+' off</div>'
+    doors.forEach(o=>{ const d=o.d; html+='<div class="ap-card" style="border:1px solid #ddd;border-radius:6px;padding:8px 10px;width:200px;text-align:center">'+_apDoorSvg(d)
+      +'<div style="font-size:9.5pt;font-weight:bold;margin-top:4px">'+esc(d.ref||'Door')+' &mdash; '+o.qty+' off</div>'
       +'<div style="font-size:8.5pt;color:#444">'+d.h+' &times; '+d.w+' mm</div>'
       +'<div style="font-size:8.5pt;color:#444">'+(d.panels||1)+' panel'+((d.panels||1)!==1?'s':'')+(d.frameMat?' &middot; '+esc(d.frameMat):'')+'</div></div>'; });
     html+='</div>';
@@ -3360,7 +3366,7 @@ function buildApprovalSheet(){
     html+='<div style="font-size:11pt;font-weight:bold;margin:16px 0 8px;border-bottom:1px solid #ccc;padding-bottom:3px">Panels</div><div style="display:flex;flex-wrap:wrap;gap:12px">';
     panels.forEach(it=>{ const p=it.p, eb=p.eb||{}; const lE=(eb.L1?1:0)+(eb.L2?1:0), sE=(eb.W1?1:0)+(eb.W2?1:0);
       const ebTxt=(lE||sE)?[lE?lE+' long':'',sE?sE+' short':''].filter(Boolean).join(' + ')+' edge'+((lE+sE)!==1?'s':''):'no edging';
-      html+='<div style="border:1px solid #ddd;border-radius:6px;padding:8px 10px;width:190px;text-align:center">'+_apPanelSvg(p)
+      html+='<div class="ap-card" style="border:1px solid #ddd;border-radius:6px;padding:8px 10px;width:190px;text-align:center">'+_apPanelSvg(p)
         +'<div style="font-size:9.5pt;font-weight:bold;margin-top:4px">'+esc(p.label||'Panel')+' &mdash; '+it.qty+' off</div>'
         +'<div style="font-size:8.5pt;color:#444">'+p.origL+' &times; '+p.origW+' mm</div>'
         +'<div style="font-size:8pt;color:#666">'+_apGrain(p.grain||'L')+'</div>'
