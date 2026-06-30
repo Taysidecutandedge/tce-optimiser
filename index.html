@@ -3154,15 +3154,26 @@ function applyImport(){
         sheetsAdded++;
       }
     } else if(!jobSheets.some(js=>(js.name||'').toLowerCase()===mn.toLowerCase())){
-      // Not in the library: create a sheet from the cutlist name so the board is
-      // never silently skipped. Defaults to a full Egger sheet; thickness is read
-      // from the name if present (e.g. "12mm ..."), otherwise 18mm.
+      // Not an exact library match: create a sheet from the cutlist name so the board is
+      // never silently skipped. Thickness is read from the name if present, otherwise 18mm.
       const thM=mn.match(/(\d+(?:\.\d+)?)\s*mm/i);
       const thick=thM?parseFloat(thM[1]):18;
-      jobSheets.push({id:jsid++,libRef:null,name:mn,l:2800,w:2070,thick:thick,
-        cost:0,color:nc(),grainLen:true,qty:1,trimT:15,trimB:15,trimL:15,trimR:15});
+      // If a library board matches the SAME thickness + base material (e.g. a client's
+      // "18mm mdf" → your "18mm Mr Mdf"), inherit its real size & cost. The cutlist NAME
+      // is kept as-is, so parts still match by exact name and 18 vs 22 never merge.
+      const baseOf=s=>String(s).toLowerCase().replace(/\d+(?:\.\d+)?\s*mm/g,'').replace(/\bmr\b/g,'').replace(/\bfinsa\b/g,'').replace(/[^a-z]+/g,' ').trim();
+      const tb=baseOf(mn);
+      const lb=tb?(library.find(l=>Math.abs((l.thick||0)-thick)<0.6 && baseOf(l.name)===tb && /\bmr\b/i.test(l.name))
+                || library.find(l=>Math.abs((l.thick||0)-thick)<0.6 && baseOf(l.name)===tb)):null;
+      if(lb){
+        jobSheets.push({id:jsid++,libRef:lb.id,name:mn,l:lb.l,w:lb.w,thick:lb.thick||thick,
+          cost:lb.cost||0,color:lb.color||nc(),grainLen:lb.grainLen!==undefined?lb.grainLen:true,qty:1,trimT:15,trimB:15,trimL:15,trimR:15});
+      }else{
+        jobSheets.push({id:jsid++,libRef:null,name:mn,l:2800,w:2070,thick:thick,
+          cost:0,color:nc(),grainLen:true,qty:1,trimT:15,trimB:15,trimL:15,trimR:15});
+        autoCreated.push(mn);
+      }
       sheetsAdded++;
-      autoCreated.push(mn);
     }
   });
   if(sheetsAdded>0)renderJobSheets();
