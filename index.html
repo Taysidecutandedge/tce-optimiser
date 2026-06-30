@@ -1476,14 +1476,18 @@ function _calculateInner(){
     ):null;
     if(grain==='L'&&(allNoGrain||(msGrainLen===false))) grain='N';
     // Laminate ×2: double the panel into two glued layers, each cut oversize so the
-    // glued-up panel can be trimmed flush. Edgebanding is applied to the finished
-    // 38mm panel after glue+trim, so the raw layers carry no banding.
+    // glued-up panel can be trimmed flush. The finished panel is banded ONCE after
+    // glue-up — so we show the banding on the FIRST layer of each glued pair (visible
+    // on the diagram + counted once); the second layer of the pair carries no band.
     const lam=p.laminate?2:1;
     const ov=p.laminate?(parseInt((document.getElementById('lamOversize')||{}).value)||0):0;
     const pl=p.l+ov, pw=p.w+ov;
     for(let i=0;i<p.qty*lam;i++){
       const piece={...p,l:pl,w:pw,grain,_msid:ms?ms.id:null};
-      if(p.laminate){ piece.label=(p.label||'Part')+' ·LAM'; piece.eb=makeEB(); }
+      if(p.laminate){
+        piece.label=(p.label||'Part')+' ·LAM×2';
+        if(i%2===1) piece.eb=makeEB();   // 2nd layer of each glued pair: no band (banded once, on the finished panel)
+      }
       if(grain==='W'){piece._pw=pl;piece._ph=pw;}
       else{piece._pw=pw;piece._ph=pl;}
       basePieces.push(piece);
@@ -2137,36 +2141,19 @@ function renderResults(sheets,unplaced){
   };
   const ebMap={};let ebGT=0; const ebDet={};
   sheets.forEach(s=>s.placements.forEach(p=>{
+    const isLam=/·LAM/.test(p.label||'');   // doubled-up panel → needs wider tape, list it separately
     ['L1','L2','W1','W2'].forEach(side=>{
       if(!p.eb[side])return;
       const isLong=(side==='L1'||side==='L2');
       const len=isLong?(Number(p.origL)||0):(Number(p.origW)||0);
       const tk=p.eb.tk[side]||'1';
-      const key=`${tk}mm · ${ebSheetCode(s.name)}`;
+      const key=`${tk}mm · ${ebSheetCode(s.name)}${isLam?' · LAMINATED (wide tape)':''}`;
       ebMap[key]=(ebMap[key]||0)+len;ebGT+=len;
-      const dk=tk+'|'+s.name;
-      if(!ebDet[dk]) ebDet[dk]={decor:s.name,tk,lenMm:0,count:0};
+      const dk=tk+'|'+s.name+(isLam?'|LAM':'');
+      if(!ebDet[dk]) ebDet[dk]={decor:s.name+(isLam?' (laminated)':''),tk,lenMm:0,count:0};
       ebDet[dk].lenMm+=len; ebDet[dk].count++;
     });
   }));
-  // Laminated panels are banded on the FINISHED 38mm panel after glue-up — not on the
-  // raw oversized layers — so count their edging ONCE (at finished size) for ordering.
-  (parts||[]).forEach(p=>{
-    if(!p.laminate||!p.eb) return;
-    const matName=p.matName||'';
-    ['L1','L2','W1','W2'].forEach(side=>{
-      if(!p.eb[side]) return;
-      const isLong=(side==='L1'||side==='L2');
-      const len=(isLong?(Number(p.l)||0):(Number(p.w)||0))*(p.qty||1);
-      if(!len) return;
-      const tk=p.eb.tk[side]||'1';
-      const key=`${tk}mm · ${ebSheetCode(matName)}`;
-      ebMap[key]=(ebMap[key]||0)+len; ebGT+=len;
-      const dk=tk+'|'+matName;
-      if(!ebDet[dk]) ebDet[dk]={decor:matName,tk,lenMm:0,count:0};
-      ebDet[dk].lenMm+=len; ebDet[dk].count+=(p.qty||1);
-    });
-  });
   _lastEbMap=ebMap; _lastEbGT=ebGT; _lastEbDetail=Object.values(ebDet);
 
   const _uo=window._lastUsedOffcuts||[];
