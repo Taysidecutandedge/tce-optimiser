@@ -2144,11 +2144,16 @@ function renderResults(sheets,unplaced){
       if(!p.eb[side])return;
       const isLong=(side==='L1'||side==='L2');
       const len=isLong?(Number(p.origL)||0):(Number(p.origW)||0);
-      const tk=p.eb.tk[side]||'1';
-      const key=`${tk}mm · ${ebSheetCode(s.name)}${isLam?' · LAMINATED (wide tape)':''}`;
+      // MDF (not veneered) is edged with your generic Mdf Card 0.6mm tape and tracked
+      // against the "Mdf Card" rolls — it is NOT decor-matched like the Egger boards.
+      const _isMdf=/\bmdf\b/i.test(s.name)&&!/\b(oak|walnut|veneer|birch|ply|melamine|hpl|laminate|valch|sonoma)\b/i.test(s.name);
+      const tk=_isMdf?'0.6':(p.eb.tk[side]||'1');
+      const _decorRaw=_isMdf?'Mdf Card':s.name;                       // used to match your rolls
+      const _decorDisp=_isMdf?'Mdf Card':ebSheetCode(s.name);         // shown in the panel
+      const key=`${tk}mm · ${_decorDisp}${isLam?' · LAMINATED (wide tape)':''}`;
       ebMap[key]=(ebMap[key]||0)+len;ebGT+=len;
-      const dk=tk+'|'+s.name+(isLam?'|LAM':'');
-      if(!ebDet[dk]) ebDet[dk]={decor:s.name+(isLam?' (laminated)':''),tk,lenMm:0,count:0};
+      const dk=tk+'|'+_decorRaw+(isLam?'|LAM':'');
+      if(!ebDet[dk]) ebDet[dk]={decor:_decorRaw+(isLam?' (laminated)':''),tk,lenMm:0,count:0};
       ebDet[dk].lenMm+=len; ebDet[dk].count++;
     });
   }));
@@ -2263,7 +2268,7 @@ function renderResults(sheets,unplaced){
       const sg=ebSugg[k];
       const pickLine = !sg ? ''
         : sg.pick
-          ? `<div class="eb-sum-sub" style="color:${sg.covers?'#7fe3a8':'#ffcf8a'};font-weight:600">→ use ${esc(sg.pick.code||'roll')} · ${Number(sg.pick.remaining_m).toFixed(1)}m${sg.covers?'':' · load 2nd roll'}</div>`
+          ? `<div class="eb-sum-sub" style="color:${sg.covers?'#7fe3a8':'#ffcf8a'};font-weight:600">→ use ${esc(sg.pick.code||'roll')}${sg.pick.tape_width?' ('+sg.pick.tape_width+'mm wide)':''} · ${Number(sg.pick.remaining_m).toFixed(1)}m${sg.covers?'':' · load 2nd roll'}</div>`
           : `<div class="eb-sum-sub" style="color:#ff8a80;font-weight:600">→ none in stock — order</div>`;
       return `
       <div class="eb-sum-card">
@@ -2323,7 +2328,7 @@ async function openEbDeduct(){
     const matches=_ebRolls.filter(r=>norm(r.decor)===norm(d.decor));
     const covering=matches.filter(r=>Number(r.remaining_m)>=need).sort((a,b)=>a.remaining_m-b.remaining_m);
     const def = covering.length ? covering[0].id : (matches.length ? matches.slice().sort((a,b)=>b.remaining_m-a.remaining_m)[0].id : '');
-    const opts='<option value="">— skip —</option>'+matches.map(r=>`<option value="${r.id}"${r.id===def?' selected':''}>${esc(r.code||'roll')} · ${Number(r.remaining_m).toFixed(1)}m left${r.tape_thick?(' · '+r.tape_thick+'mm'):''}</option>`).join('');
+    const opts='<option value="">— skip —</option>'+matches.map(r=>`<option value="${r.id}"${r.id===def?' selected':''}>${esc(r.code||'roll')} · ${Number(r.remaining_m).toFixed(1)}m left${r.tape_width?(' · '+r.tape_width+'mm wide'):''}${r.tape_thick?(' · '+r.tape_thick+'mm thick'):''}</option>`).join('');
     return `<div class="ebd-row" data-edge="${edgeM}" data-trim="${trimM}" style="border:1px solid var(--brd);border-radius:8px;padding:10px;margin-bottom:8px">
       <div style="font-weight:700">${esc(d.decor)} <span style="color:var(--txt3);font-weight:400">· ${d.tk}mm tape</span></div>
       <div style="font-size:12px;color:var(--txt2);margin:3px 0 7px">${edgeM.toFixed(1)}m edges + ${trimM.toFixed(2)}m trim (${d.count} edge${d.count!==1?'s':''} × 30mm)${matches.length?'':' · <span style="color:#ff8a80">no matching roll in stock</span>'}</div>
