@@ -3140,6 +3140,7 @@ function applyImport(){
     if(importLooksMaterial(v))return true;      // has a board code
     if(importResolveLib(v))return true;         // matches library by code
     if(/shaker\s*door/i.test(v))return true;    // shaker door rows
+    if(/^\s*\d+(?:\.\d+)?\s*mm\b/i.test(v))return true;  // thickness-prefixed material e.g. "22mm mdf", "18mm ply" — stops a previous material carrying forward onto these rows
     return false;
   };
   let lastBoard='';
