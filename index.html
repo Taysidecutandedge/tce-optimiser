@@ -507,6 +507,7 @@ select option{background:var(--surf2)}
           <th style="min-width:100px">Material</th>
           <th title="Edgebanding — L1/L2 long edges, W1/W2 short edges">EB</th>
           <th title="Grain: auto=↕ (along length), force-on=↕!, force-off=○">↕</th>
+          <th title="Laminate ×2 — doubles the panel into two glued layers, each cut oversize to trim flush after gluing">⧉²</th>
           <th></th>
         </tr></thead>
         <tbody id="partsTbody"></tbody>
@@ -528,6 +529,11 @@ select option{background:var(--surf2)}
           <label class="lbl">CNC Kerf (mm)</label>
           <input type="number" id="cncKerf" value="8" step="0.5" min="0" style="width:100px" oninput="onCncModeChange()">
           <div class="hint">Tool ⌀ + clearance</div>
+        </div>
+        <div>
+          <label class="lbl">Laminate oversize (mm)</label>
+          <input type="number" id="lamOversize" value="10" step="1" min="0" style="width:100px">
+          <div class="hint">Extra on ⧉² panels to trim after glue</div>
         </div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;padding:7px 10px;background:rgba(255,106,0,.08);border:1px solid rgba(255,106,0,.3);border-radius:5px">
@@ -1243,10 +1249,12 @@ function addPart(d){
     company:d?.company||'',
     eb:d?.eb??makeEB(),
     color:nc(),
-    door:d?.door||null
+    door:d?.door||null,
+    laminate:d?.laminate??false
   });
   if(!d){save();renderParts();}
 }
+function toggleLam(id){const p=parts.find(x=>x.id===id);if(p){p.laminate=!p.laminate;save();renderParts();}}
 
 function removePart(id){parts=parts.filter(p=>p.id!==id);save();renderParts();}
 function ps(id,k,v){const p=parts.find(x=>x.id===id);if(p){p[k]=v;save();}}
@@ -1320,6 +1328,7 @@ function renderParts(){
         ${ebSide('L1','L1')}${ebSide('L2','L2')}${ebSide('W1','W1')}${ebSide('W2','W2')}
       </div></td>
       <td><button class="${gcls}" onclick="cycleGrain(${p.id})" title="${gtip}">${glbl}</button></td>
+      <td><button class="gbtn" style="${p.laminate?'background:#1f7a4d;color:#fff;border-color:#1f7a4d':''}" onclick="toggleLam(${p.id})" title="${p.laminate?'Laminated ×2 — two glued layers, cut oversize (click to turn off)':'Make laminate ×2 — two glued layers, each cut oversize to trim flush'}">⧉²</button></td>
       <td><button class="btn-ico" onclick="removePart(${p.id})">✕</button></td>`;
     tb.appendChild(tr);
   });
@@ -1465,10 +1474,17 @@ function _calculateInner(){
       ms.grainLen
     ):null;
     if(grain==='L'&&(allNoGrain||(msGrainLen===false))) grain='N';
-    for(let i=0;i<p.qty;i++){
-      const piece={...p,grain,_msid:ms?ms.id:null};
-      if(grain==='W'){piece._pw=p.l;piece._ph=p.w;}
-      else{piece._pw=p.w;piece._ph=p.l;}
+    // Laminate ×2: double the panel into two glued layers, each cut oversize so the
+    // glued-up panel can be trimmed flush. Edgebanding is applied to the finished
+    // 38mm panel after glue+trim, so the raw layers carry no banding.
+    const lam=p.laminate?2:1;
+    const ov=p.laminate?(parseInt((document.getElementById('lamOversize')||{}).value)||0):0;
+    const pl=p.l+ov, pw=p.w+ov;
+    for(let i=0;i<p.qty*lam;i++){
+      const piece={...p,l:pl,w:pw,grain,_msid:ms?ms.id:null};
+      if(p.laminate){ piece.label=(p.label||'Part')+' ·LAM'; piece.eb=makeEB(); }
+      if(grain==='W'){piece._pw=pl;piece._ph=pw;}
+      else{piece._pw=pw;piece._ph=pl;}
       basePieces.push(piece);
     }
   });
@@ -2131,6 +2147,24 @@ function renderResults(sheets,unplaced){
       ebDet[dk].lenMm+=len; ebDet[dk].count++;
     });
   }));
+  // Laminated panels are banded on the FINISHED 38mm panel after glue-up — not on the
+  // raw oversized layers — so count their edging ONCE (at finished size) for ordering.
+  (parts||[]).forEach(p=>{
+    if(!p.laminate||!p.eb) return;
+    const matName=p.matName||'';
+    ['L1','L2','W1','W2'].forEach(side=>{
+      if(!p.eb[side]) return;
+      const isLong=(side==='L1'||side==='L2');
+      const len=(isLong?(Number(p.l)||0):(Number(p.w)||0))*(p.qty||1);
+      if(!len) return;
+      const tk=p.eb.tk[side]||'1';
+      const key=`${tk}mm · ${ebSheetCode(matName)}`;
+      ebMap[key]=(ebMap[key]||0)+len; ebGT+=len;
+      const dk=tk+'|'+matName;
+      if(!ebDet[dk]) ebDet[dk]={decor:matName,tk,lenMm:0,count:0};
+      ebDet[dk].lenMm+=len; ebDet[dk].count+=(p.qty||1);
+    });
+  });
   _lastEbMap=ebMap; _lastEbGT=ebGT; _lastEbDetail=Object.values(ebDet);
 
   const _uo=window._lastUsedOffcuts||[];
