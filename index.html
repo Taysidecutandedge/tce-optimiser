@@ -2885,6 +2885,17 @@ function openShakerModal(doors,normalFn){
   document.getElementById('shakerModal').classList.add('active');
 }
 function closeShakerModal(){document.getElementById('shakerModal').classList.remove('active');}
+function removeShakerDoor(di){
+  // capture every door's current on-screen edits so removing one doesn't reset the others
+  _shakerDoors.forEach((d,i)=>{
+    if(!document.getElementById('sk-qty-'+i)) return;
+    const q=parseInt(document.getElementById('sk-qty-'+i).value); if(q) d.qty=q;
+    d.cfg=getShakerCfgFromUI(i);
+  });
+  _shakerDoors.splice(di,1);
+  if(_shakerDoors.length===0){ closeShakerModal(); return; }
+  renderShakerDoors(); checkShakerMaterials();
+}
 
 function renderShakerDoors(){
   const list=document.getElementById('skDoorList'); list.innerHTML='';
@@ -2894,7 +2905,8 @@ function renderShakerDoors(){
     card.innerHTML=
       '<div class="sk-door-hdr"><span class="sk-door-ref">'+ref+'</span>'+
         '<div><div class="sk-door-name">'+esc(door.label||'Shaker Door')+'</div>'+
-        '<div class="sk-door-dims">'+door.h+' x '+door.w+'mm'+(door.notes?' | '+esc(door.notes):'')+'</div></div></div>'+
+        '<div class="sk-door-dims">'+door.h+' x '+door.w+'mm'+(door.notes?' | '+esc(door.notes):'')+'</div></div>'+
+        '<button class="btn btn-sm" style="margin-left:auto;align-self:flex-start;border:1px solid #5a2a2a;color:#ff8a80;background:none" onclick="removeShakerDoor('+di+')" title="Remove this door">✕ Remove</button></div>'+
       '<div class="sk-cfg">'+
         '<div class="sk-field"><label>Qty *</label><input type="number" id="sk-qty-'+di+'" value="'+(door.qty||'')+'" min="1" placeholder="enter qty"'+(door.qty?'':' style="border-color:var(--err)"')+' oninput="updateShakerPreview('+di+')" onchange="updateShakerPreview('+di+')"></div>'+
         '<div class="sk-field"><label>Outer Rail (mm)</label><input type="number" id="sk-rail-'+di+'" value="'+cfg.outerRail+'" min="30" max="200" oninput="updateShakerPreview('+di+')" onchange="updateShakerPreview('+di+')"></div>'+
