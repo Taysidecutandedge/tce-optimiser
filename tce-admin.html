@@ -820,8 +820,8 @@ function shakerDoorPrice(door){
   const panelThk=parseInt((door.panelMat||'').match(/(\d+)\s*mm/i)?.[1])||9;
   const OR=R.rail, MID=R.rail;            // outer rail width + mid/divider rail width
   const div=Math.max(panels-1,0);
-  const frameRate=(frameThk>=25)?R.frame25:R.frame22;
-  const panelRate=(panelThk>=12)?R.panel12:R.panel9;
+  const frameRate=shakerRate(frameThk>=25?25:22,(frameThk>=25)?R.frame25:R.frame22);
+  const panelRate=shakerRate(panelThk>=12?12:9,(panelThk>=12)?R.panel12:R.panel9);
   const outerPerimLM=(2*H+2*(W-2*OR))/1000;
   const frameCost=( outerPerimLM*((OR+R.oversize)/1000)
                   + (div*((W-2*OR)/1000)*R.wDiv)*(MID/1000) ) * frameRate * R.wBoard;
@@ -1748,6 +1748,44 @@ setTimeout(()=>document.getElementById('adminPassword')?.focus(), 100);
 document.addEventListener('keydown', e => {
   if (e.key==='Enter' && document.getElementById('pinScreen').style.display!=='none') doAdminLogin();
 });
+</script>
+<script>
+(function(){
+  var AREA=2440/1000*1220/1000;
+  window._shakerOverrides=JSON.parse(localStorage.getItem('tce_shaker_overrides')||'{}');
+  window.shakerRate=function(t,fb){
+    var o=window._shakerOverrides[t]; if(o!=null&&o!=='') return parseFloat(o);
+    try{ var L=(typeof _customBoards!=='undefined'&&_customBoards)||[];
+      var b=L.find(function(x){return x.board_name&&x.board_name.toLowerCase().indexOf('mr mdf')>=0&&x.thickness_mm===t&&String(x.sheet_size).indexOf('2440')===0&&parseFloat(x.base_cost)>0;});
+      if(b) return parseFloat(b.base_cost)/AREA; }catch(e){}
+    return fb;
+  };
+  window.saveShakerOverride=function(t,v){
+    if(v===''||v==null) delete window._shakerOverrides[t]; else window._shakerOverrides[t]=parseFloat(v)||0;
+    localStorage.setItem('tce_shaker_overrides',JSON.stringify(window._shakerOverrides)); window.renderShakerRates();
+  };
+  window.renderShakerRates=function(){
+    var tab=document.getElementById('tab-cutting'); if(!tab) return;
+    var card=document.getElementById('shakerRatesCard');
+    if(!card){ card=document.createElement('div'); card.className='card'; card.id='shakerRatesCard'; card.style.marginTop='16px';
+      card.innerHTML='<div class="card-title">Shaker Door Material Rates</div><div style="font-size:12px;color:#6b8f7e;margin-bottom:12px">Frame &amp; panel cost per m2 used in door pricing. Auto = your MR MDF cost div 2.977 m2 (sheet area), pulled live from Custom Boards. Leave an override blank to use Auto.</div><div id="shakerRatesWrap"></div>';
+      tab.appendChild(card); }
+    var R=(typeof SHAKER_RATES!=='undefined')?SHAKER_RATES:{frame22:19.76,frame25:14.35,panel12:7.57,panel9:5.54};
+    var rows=[{k:22,l:'Frame - 22mm MR MDF',d:R.frame22},{k:25,l:'Frame - 25mm MR MDF',d:R.frame25},{k:12,l:'Panel - 12mm MDF',d:R.panel12},{k:9,l:'Panel - 9mm MDF',d:R.panel9}];
+    var L=(typeof _customBoards!=='undefined'&&_customBoards)||[];
+    var rowsHtml=rows.map(function(r){
+      var cb=L.find(function(b){return b.board_name&&b.board_name.toLowerCase().indexOf('mr mdf')>=0&&b.thickness_mm===r.k&&String(b.sheet_size).indexOf('2440')===0&&parseFloat(b.base_cost)>0;});
+      var auto=cb?(parseFloat(cb.base_cost)/AREA):null;
+      var ov=window._shakerOverrides[r.k];
+      var used=window.shakerRate(r.k,r.d);
+      var at=auto!=null?('£'+auto.toFixed(2)+' <span style="color:#6b8f7e;font-size:10px">(£'+parseFloat(cb.base_cost).toFixed(2)+'/sheet)</span>'):'<span style="color:#6b8f7e">no MDF cost set</span>';
+      return '<tr><td>'+r.l+'</td><td>'+at+'</td><td><input type="number" step="0.01" value="'+(ov!=null&&ov!==''?ov:'')+'" placeholder="auto" style="width:80px" onchange="saveShakerOverride('+r.k+',this.value)"></td><td style="font-weight:bold;color:#f0a500">£'+used.toFixed(2)+'</td></tr>';
+    }).join('');
+    document.getElementById('shakerRatesWrap').innerHTML='<table class="price-table"><thead><tr><th>Material</th><th>Auto (per m2)</th><th>Override</th><th>Used</th></tr></thead><tbody>'+rowsHtml+'</tbody></table><div style="font-size:11px;color:#6b8f7e;margin-top:8px">Labour, waste, edging and margin still come from the calculator constants.</div>';
+  };
+  var _st=window.showTab; window.showTab=function(n){ if(_st)_st(n); if(n==='cutting'){try{window.renderShakerRates();}catch(e){}} };
+  if(typeof loadCustomBoards==='function'){ var _l=loadCustomBoards; window.loadCustomBoards=async function(){ var z=await _l.apply(this,arguments); try{window.renderShakerRates();}catch(e){} return z; }; }
+})();
 </script>
 </body>
 </html>
