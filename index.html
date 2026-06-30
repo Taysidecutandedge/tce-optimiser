@@ -3141,6 +3141,24 @@ function applyImport(){
     if(b&&looksLikeMaterial(b)) lastBoard=b;
     return lastBoard;
   });
+  // Canonicalise bare material names to your library — e.g. a client's "22mm mdf"
+  // (missing the "MR") maps to your "22mm Mr Mdf" board (right name + 2440×1220 size)
+  // instead of inventing a generic 2800×2070 sheet. Leaves names that already resolve,
+  // shaker doors, and distinct materials (e.g. Oak Veneer MDF) untouched.
+  const canonMat=(name)=>{
+    if(!name||/shaker\s*door/i.test(name)) return name;
+    if(importResolveLib(name)) return name;
+    const thM=String(name).match(/(\d+(?:\.\d+)?)\s*mm/i);
+    const baseOf=s=>String(s).toLowerCase().replace(/\d+(?:\.\d+)?\s*mm/g,'').replace(/\bmr\b/g,'').replace(/\bfinsa\b/g,'').replace(/[^a-z]+/g,' ').trim();
+    const base=baseOf(name);
+    if(thM&&base){
+      const th=parseFloat(thM[1]);
+      const cand=library.filter(l=>Math.abs((l.thick||0)-th)<0.6 && baseOf(l.name)===base);
+      if(cand.length) return (cand.find(l=>/\bmr\b/i.test(l.name))||cand[0]).name;
+    }
+    return name;
+  };
+  for(let i=0;i<rowBoards.length;i++) rowBoards[i]=canonMat(rowBoards[i]);
   const matsFound=new Set(rowBoards.filter(Boolean));
 
   // ── PASS 2: add matching library sheets BEFORE processing parts ──
