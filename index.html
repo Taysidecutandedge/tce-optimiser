@@ -23,7 +23,8 @@ header{display:flex;align-items:center;justify-content:space-between;padding:11p
 .logo svg{width:24px;height:24px;flex-shrink:0}
 .hdr-r{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
 
-.app{display:grid;grid-template-columns:430px 1fr;height:calc(100vh - 51px)}
+.app{display:grid;grid-template-columns:720px 1fr;height:calc(100vh - 51px)}
+.app.results{grid-template-columns:430px 1fr}
 .sidebar{background:var(--surf);border-right:1px solid var(--brd);overflow-y:auto;display:flex;flex-direction:column}
 .main{overflow-y:auto;padding:20px;background:var(--bg)}
 
@@ -152,7 +153,7 @@ select option{background:var(--surf2)}
 .sk-warn{font-size:11px;color:var(--warn);font-family:var(--mono);padding:6px 10px;background:rgba(212,130,10,.08);border:1px solid rgba(212,130,10,.3);border-radius:5px}
 .sk-miss{font-size:11px;color:var(--err);font-family:var(--mono);padding:6px 10px;background:rgba(224,92,42,.08);border:1px solid rgba(224,92,42,.3);border-radius:5px}
 
-@media(max-width:860px){.app{grid-template-columns:1fr;height:auto}}
+@media(max-width:860px){.app,.app.results{grid-template-columns:1fr;height:auto}}
 
 @media print{
   *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
@@ -2106,6 +2107,7 @@ async function markOffcutsUsed(btn){
 function renderResults(sheets,unplaced){
   // Store for print
   _lastSheets=sheets; _lastUnplaced=unplaced;
+  document.querySelector('.app')?.classList.add('results'); // narrow the input panel so the cut diagrams get room
   // Show cutting mode button now we have results
   document.getElementById('cutModeBtn').style.display='inline-flex';
   const adminBtnEl=document.getElementById('adminBtn');
@@ -3084,6 +3086,7 @@ function confirmShakerDoors(){
 }
 
 function applyImport(){
+  document.querySelector('.app')?.classList.remove('results'); // reviewing a fresh import — widen the input panel
   const g=k=>{const el=document.getElementById(`map_${k}`);return el&&el.value!==''?+el.value:-1;};
   const lC=g('l'),wC=g('w'),lblC=g('label');
   if(lC<0||wC<0||lblC<0)return alert('Length, Width and Panel Name columns are required — please map them above.');
@@ -4422,6 +4425,7 @@ function newProject(){
   save();
   renderJobSheets(); renderParts();
   document.getElementById('mainArea').innerHTML='<div style="padding:40px;text-align:center;color:var(--txt3);font-family:var(--mono)">New project ready — add sheets and panels to get started</div>';
+  document.querySelector('.app')?.classList.remove('results'); // widen input panel for editing/review
   document.getElementById('cutModeBtn').style.display='none';
   if(document.getElementById('labelBtn'))document.getElementById('labelBtn').style.display='none';
   if(document.getElementById('dxfBtn'))document.getElementById('dxfBtn').style.display='none';
