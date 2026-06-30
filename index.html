@@ -395,6 +395,7 @@ select option{background:var(--surf2)}
     <button class="btn btn-ghost btn-sm" onclick="exportCSV()">📤 Export CSV</button>
     <button class="btn btn-ghost btn-sm" id="dxfBtn" style="display:none" onclick="exportDXF()" title="Export each sheet layout as a DXF for CNC (Vectric etc.)">📐 Export DXF</button>
     <button class="btn btn-ghost btn-sm" onclick="openPrintLayout()">🖨 Print / Preview</button>
+    <button class="btn btn-ghost btn-sm" onclick="openApprovalSheet()" title="Clean item sheet to send the customer for sign-off — doors & panels, sizes, orientation & edged edges, no cut diagrams">✅ Customer Approval</button>
     <button class="btn btn-sm" id="cutModeBtn" style="background:var(--ok);color:#000;font-weight:700;display:none" onclick="openCuttingMode()">✂ Cutting Mode</button>
     <button class="btn btn-sm" id="labelBtn" style="background:#9c27b0;color:#fff;font-weight:700;display:none" onclick="openLabelPrint()">🏷 Print Labels</button>
       <a href="tce-admin.html" target="_blank" style="background:#1a2a3a;color:#8ab;border:1px solid #2b4a40;border-radius:6px;padding:7px 14px;cursor:pointer;font-size:12px;text-decoration:none;display:inline-flex;align-items:center;gap:5px">🔒 Admin</a>
@@ -3288,6 +3289,87 @@ function openPrintLayout(){
 function closePrintLayout(){
   document.getElementById('printLayout').style.display='none';
   document.body.style.overflow='';
+}
+
+// ═══════════════════════════════════════════════
+// CUSTOMER APPROVAL SHEET — items only (doors & panels),
+// sizes, orientation & edged edges. No sheet nesting.
+// ═══════════════════════════════════════════════
+function openApprovalSheet(){
+  if(!_lastSheets.length){ alert('Run Calculate first to generate the items.'); return; }
+  buildApprovalSheet();
+  document.getElementById('printLayout').style.display='block';
+  document.body.style.overflow='hidden';
+}
+function _apGrain(g){ return g==='W'?'grain &rarr; (across width)':(g==='N'?'no grain (can rotate)':'grain &uarr; (along length)'); }
+function _apPanelSvg(p){
+  const L=Number(p.origL)||0, W=Number(p.origW)||0, sc=140/Math.max(L,W,1);
+  const h=Math.max(Math.round(L*sc),26), w=Math.max(Math.round(W*sc),26);
+  const pad=24, x0=pad, y0=pad, VW=w+pad*2, VH=h+pad*2, G='#1f9d57', bw=5, eb=p.eb||{};
+  let e='';
+  if(eb.L1) e+='<line x1="'+x0+'" y1="'+y0+'" x2="'+x0+'" y2="'+(y0+h)+'" stroke="'+G+'" stroke-width="'+bw+'"/>';
+  if(eb.L2) e+='<line x1="'+(x0+w)+'" y1="'+y0+'" x2="'+(x0+w)+'" y2="'+(y0+h)+'" stroke="'+G+'" stroke-width="'+bw+'"/>';
+  if(eb.W1) e+='<line x1="'+x0+'" y1="'+y0+'" x2="'+(x0+w)+'" y2="'+y0+'" stroke="'+G+'" stroke-width="'+bw+'"/>';
+  if(eb.W2) e+='<line x1="'+x0+'" y1="'+(y0+h)+'" x2="'+(x0+w)+'" y2="'+(y0+h)+'" stroke="'+G+'" stroke-width="'+bw+'"/>';
+  const cx=x0+w/2, cy=y0+h/2, g=p.grain||'L'; let ga='';
+  if(g==='L') ga='<line x1="'+cx+'" y1="'+(cy-h*0.28)+'" x2="'+cx+'" y2="'+(cy+h*0.28)+'" stroke="#c0c0c0" stroke-width="1.4"/><path d="M'+(cx-3)+','+(cy-h*0.28+5)+' L'+cx+','+(cy-h*0.28)+' L'+(cx+3)+','+(cy-h*0.28+5)+'" fill="none" stroke="#c0c0c0" stroke-width="1.4"/>';
+  else if(g==='W') ga='<line x1="'+(cx-w*0.28)+'" y1="'+cy+'" x2="'+(cx+w*0.28)+'" y2="'+cy+'" stroke="#c0c0c0" stroke-width="1.4"/><path d="M'+(cx+w*0.28-5)+','+(cy-3)+' L'+(cx+w*0.28)+','+cy+' L'+(cx+w*0.28-5)+','+(cy+3)+'" fill="none" stroke="#c0c0c0" stroke-width="1.4"/>';
+  return '<svg width="'+VW+'" height="'+VH+'" viewBox="0 0 '+VW+' '+VH+'">'
+    +'<rect x="'+x0+'" y="'+y0+'" width="'+w+'" height="'+h+'" fill="#fafafa" stroke="#333" stroke-width="1.2"/>'+e+ga
+    +'<text x="'+cx+'" y="'+(y0-8)+'" font-size="9" text-anchor="middle" fill="#444">'+W+'</text>'
+    +'<text x="'+(x0-8)+'" y="'+cy+'" font-size="9" text-anchor="middle" fill="#444" transform="rotate(-90 '+(x0-8)+' '+cy+')">'+L+'</text></svg>';
+}
+function _apDoorSvg(d){
+  const H=Number(d.h)||0, W=Number(d.w)||0, panels=Math.max(parseInt(d.panels)||1,1), sc=150/Math.max(H,W,1);
+  const h=Math.max(Math.round(H*sc),40), w=Math.max(Math.round(W*sc),30);
+  const pad=22, x0=pad, y0=pad, VW=w+pad*2, VH=h+pad*2, rail=Math.max(Math.round(w*0.12),6);
+  let s='<rect x="'+x0+'" y="'+y0+'" width="'+w+'" height="'+h+'" fill="#fff" stroke="#333" stroke-width="1.4"/>'
+    +'<rect x="'+(x0+rail)+'" y="'+(y0+rail)+'" width="'+(w-2*rail)+'" height="'+(h-2*rail)+'" fill="#f4efe6" stroke="#aaa" stroke-width="0.7"/>';
+  const seg=(h-2*rail)/panels;
+  for(let i=1;i<panels;i++){ const yy=Math.round(y0+rail+seg*i); s+='<rect x="'+(x0+rail)+'" y="'+(yy-rail/2)+'" width="'+(w-2*rail)+'" height="'+rail+'" fill="#fff" stroke="#aaa" stroke-width="0.6"/>'; }
+  return '<svg width="'+VW+'" height="'+VH+'" viewBox="0 0 '+VW+' '+VH+'">'+s
+    +'<text x="'+(x0+w/2)+'" y="'+(y0-8)+'" font-size="9" text-anchor="middle" fill="#444">'+W+'</text>'
+    +'<text x="'+(x0-8)+'" y="'+(y0+h/2)+'" font-size="9" text-anchor="middle" fill="#444" transform="rotate(-90 '+(x0-8)+' '+(y0+h/2)+')">'+H+'</text></svg>';
+}
+function buildApprovalSheet(){
+  const sheets=_lastSheets;
+  const pages=document.getElementById('printPages'); pages.innerHTML='';
+  const dateStr=new Date().toLocaleDateString('en-GB');
+  const jobName=projectName||(jobSheets.length?jobSheets[0].name:'Job');
+  const placements=[]; sheets.forEach(s=>s.placements.forEach(p=>placements.push(p)));
+  const dmap={};
+  placements.forEach(p=>{ if(p.door){ const d=p.door; const k=(d.ref||'D')+'|'+d.h+'x'+d.w+'|'+(d.panels||1)+'|'+(d.qty||1); if(!dmap[k]) dmap[k]=d; }});
+  const doors=Object.values(dmap);
+  const pmap={};
+  placements.forEach(p=>{ if(p.door) return; const eb=p.eb||{}; const sig=['L1','L2','W1','W2'].map(s=>eb[s]?s+(eb.tk&&eb.tk[s]||'1'):'').filter(Boolean).join(','); const k=(p.label||'')+'|'+p.origL+'x'+p.origW+'|'+(p.grain||'L')+'|'+sig; if(!pmap[k]) pmap[k]={p,qty:0}; pmap[k].qty++; });
+  const panels=Object.values(pmap);
+  let html='<div class="pl-page" style="font-family:Arial,sans-serif;color:#111">';
+  html+='<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:8px;margin-bottom:12px">'
+    +'<div><div style="font-size:17pt;font-weight:bold">Tayside Cut &amp; Edge</div><div style="font-size:9pt;color:#555">Order Approval &mdash; '+esc(jobName)+'</div></div>'
+    +'<div style="text-align:right;font-size:9pt;color:#555">'+dateStr+'<br>Please check &amp; approve</div></div>';
+  html+='<div style="font-size:9pt;color:#444;background:#f6f6f6;border:1px solid #e0e0e0;border-radius:5px;padding:8px 10px;margin-bottom:14px">Please confirm each item is the <b>correct size and orientation</b>, and that the <b>edgebanding is on the correct edges</b> (shown in <span style="color:#1f9d57;font-weight:bold">green</span>). Let us know to approve or change anything before we cut.</div>';
+  if(doors.length){
+    html+='<div style="font-size:11pt;font-weight:bold;margin:6px 0 8px;border-bottom:1px solid #ccc;padding-bottom:3px">Doors</div><div style="display:flex;flex-wrap:wrap;gap:12px">';
+    doors.forEach(d=>{ html+='<div style="border:1px solid #ddd;border-radius:6px;padding:8px 10px;width:200px;text-align:center">'+_apDoorSvg(d)
+      +'<div style="font-size:9.5pt;font-weight:bold;margin-top:4px">'+esc(d.ref||'Door')+' &mdash; '+(d.qty||1)+' off</div>'
+      +'<div style="font-size:8.5pt;color:#444">'+d.h+' &times; '+d.w+' mm</div>'
+      +'<div style="font-size:8.5pt;color:#444">'+(d.panels||1)+' panel'+((d.panels||1)!==1?'s':'')+(d.frameMat?' &middot; '+esc(d.frameMat):'')+'</div></div>'; });
+    html+='</div>';
+  }
+  if(panels.length){
+    html+='<div style="font-size:11pt;font-weight:bold;margin:16px 0 8px;border-bottom:1px solid #ccc;padding-bottom:3px">Panels</div><div style="display:flex;flex-wrap:wrap;gap:12px">';
+    panels.forEach(it=>{ const p=it.p, eb=p.eb||{}; const lE=(eb.L1?1:0)+(eb.L2?1:0), sE=(eb.W1?1:0)+(eb.W2?1:0);
+      const ebTxt=(lE||sE)?[lE?lE+' long':'',sE?sE+' short':''].filter(Boolean).join(' + ')+' edge'+((lE+sE)!==1?'s':''):'no edging';
+      html+='<div style="border:1px solid #ddd;border-radius:6px;padding:8px 10px;width:190px;text-align:center">'+_apPanelSvg(p)
+        +'<div style="font-size:9.5pt;font-weight:bold;margin-top:4px">'+esc(p.label||'Panel')+' &mdash; '+it.qty+' off</div>'
+        +'<div style="font-size:8.5pt;color:#444">'+p.origL+' &times; '+p.origW+' mm</div>'
+        +'<div style="font-size:8pt;color:#666">'+_apGrain(p.grain||'L')+'</div>'
+        +'<div style="font-size:8.5pt;color:#1f9d57;font-weight:bold">Edged: '+ebTxt+'</div></div>'; });
+    html+='</div>';
+  }
+  if(!doors.length && !panels.length) html+='<div style="color:#888">No items to show.</div>';
+  html+='<div style="margin-top:26px;border-top:1px solid #ccc;padding-top:10px;font-size:9pt;color:#444">Approved by: ______________________________ &nbsp;&nbsp; Date: ____________</div></div>';
+  pages.innerHTML=html;
 }
 
 function buildPrintLayout(){
