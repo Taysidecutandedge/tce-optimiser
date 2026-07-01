@@ -2896,7 +2896,8 @@ function explodeShakerDoor(doorRef,H,W,qty,cfg,ebFrame,ebPanel,company){
     const lbl=cfg.panels>1?(i===0?doorRef+'-P1-Bot':i===cfg.panels-1?doorRef+'-P'+cfg.panels+'-Top':doorRef+'-P'+(i+1)):doorRef+'-Panel';
     parts2.push({label:lbl,l:oh+tongue*2,w:panelW,qty:qty,matName:panelMat,kind:'panel',grainOverride:'N',company,eb:{...ebP}});
   });
-  const doorInfo={ref:doorRef,h:H,w:W,panels:cfg.panels,qty,frameMat,panelMat,company};
+  const doorInfo={ref:doorRef,h:H,w:W,panels:cfg.panels,qty,frameMat,panelMat,company,
+    outerRail:cfg.outerRail, midRail:mr, centres, openingHeights};
   parts2.forEach(p=>{p.door=doorInfo;});
   return parts2;
 }
@@ -3325,16 +3326,30 @@ function _apPanelSvg(p){
     +'<text x="'+(x0-8)+'" y="'+cy+'" font-size="9" text-anchor="middle" fill="#444" transform="rotate(-90 '+(x0-8)+' '+cy+')">'+L+'</text></svg>';
 }
 function _apDoorSvg(d){
-  const H=Number(d.h)||0, W=Number(d.w)||0, panels=Math.max(parseInt(d.panels)||1,1), sc=150/Math.max(H,W,1);
-  const h=Math.max(Math.round(H*sc),40), w=Math.max(Math.round(W*sc),30);
-  const pad=22, x0=pad, y0=pad, VW=w+pad*2, VH=h+pad*2, rail=Math.max(Math.round(w*0.12),6);
-  let s='<rect x="'+x0+'" y="'+y0+'" width="'+w+'" height="'+h+'" fill="#fff" stroke="#333" stroke-width="1.4"/>'
-    +'<rect x="'+(x0+rail)+'" y="'+(y0+rail)+'" width="'+(w-2*rail)+'" height="'+(h-2*rail)+'" fill="#f4efe6" stroke="#aaa" stroke-width="0.7"/>';
-  const seg=(h-2*rail)/panels;
-  for(let i=1;i<panels;i++){ const yy=Math.round(y0+rail+seg*i); s+='<rect x="'+(x0+rail)+'" y="'+(yy-rail/2)+'" width="'+(w-2*rail)+'" height="'+rail+'" fill="#fff" stroke="#aaa" stroke-width="0.6"/>'; }
-  return '<svg width="'+VW+'" height="'+VH+'" viewBox="0 0 '+VW+' '+VH+'">'+s
-    +'<text x="'+(x0+w/2)+'" y="'+(y0-8)+'" font-size="9" text-anchor="middle" fill="#444">'+W+'</text>'
-    +'<text x="'+(x0-8)+'" y="'+(y0+h/2)+'" font-size="9" text-anchor="middle" fill="#444" transform="rotate(-90 '+(x0-8)+' '+(y0+h/2)+')">'+H+'</text></svg>';
+  const H=Number(d.h)||0, W=Number(d.w)||0;
+  const oR=Number(d.outerRail)||70, mR=Number(d.midRail)||oR;
+  const centres=Array.isArray(d.centres)?d.centres:[];
+  const sc=172/Math.max(H,W,1);
+  const w=Math.max(Math.round(W*sc),50), h=Math.max(Math.round(H*sc),84);
+  const padL=46, padR=18, padT=16, padB=18, x0=padL, y0=padT, VW=w+padL+padR, VH=h+padT+padB;
+  const oRs=Math.max(oR*sc,3.5), mRs=Math.max(mR*sc,3.5), Y=mm=>y0+(H-mm)*sc;
+  let s='<rect x="'+x0+'" y="'+y0+'" width="'+w+'" height="'+h+'" fill="#efe7d8" stroke="#333" stroke-width="1.4"/>';
+  s+='<rect x="'+x0+'" y="'+y0+'" width="'+w+'" height="'+oRs+'" fill="#fff" stroke="#c8bfae" stroke-width="0.5"/>';
+  s+='<rect x="'+x0+'" y="'+(y0+h-oRs)+'" width="'+w+'" height="'+oRs+'" fill="#fff" stroke="#c8bfae" stroke-width="0.5"/>';
+  s+='<rect x="'+x0+'" y="'+y0+'" width="'+oRs+'" height="'+h+'" fill="#fff" stroke="#c8bfae" stroke-width="0.5"/>';
+  s+='<rect x="'+(x0+w-oRs)+'" y="'+y0+'" width="'+oRs+'" height="'+h+'" fill="#fff" stroke="#c8bfae" stroke-width="0.5"/>';
+  centres.forEach(c=>{ const yc=Y(c); s+='<rect x="'+x0+'" y="'+(yc-mRs/2)+'" width="'+w+'" height="'+mRs+'" fill="#fff" stroke="#c8bfae" stroke-width="0.5"/>'; });
+  let t='<text x="'+(x0+w/2)+'" y="'+(y0-5)+'" font-size="8.5" text-anchor="middle" fill="#333">'+W+'</text>';
+  t+='<text x="'+(VW-5)+'" y="'+(y0+h/2)+'" font-size="8.5" text-anchor="middle" fill="#333" transform="rotate(-90 '+(VW-5)+' '+(y0+h/2)+')">'+H+'</text>';
+  t+='<text x="'+(x0+oRs+3)+'" y="'+(y0+h*0.42)+'" font-size="6.5" fill="#999">'+oR+'</text>';
+  centres.forEach(c=>{ const yc=Y(c);
+    t+='<text x="'+(x0+w/2)+'" y="'+(yc+2.3)+'" font-size="6.5" text-anchor="middle" fill="#777">'+mR+'</text>';
+    t+='<line x1="'+(x0-9)+'" y1="'+(y0+h)+'" x2="'+(x0-9)+'" y2="'+yc+'" stroke="#c0392b" stroke-width="0.6"/>';
+    t+='<line x1="'+(x0-12)+'" y1="'+(y0+h)+'" x2="'+(x0-6)+'" y2="'+(y0+h)+'" stroke="#c0392b" stroke-width="0.6"/>';
+    t+='<line x1="'+(x0-12)+'" y1="'+yc+'" x2="'+(x0-6)+'" y2="'+yc+'" stroke="#c0392b" stroke-width="0.6"/>';
+    t+='<text x="'+(x0-11)+'" y="'+((y0+h+yc)/2)+'" font-size="6.5" text-anchor="middle" fill="#c0392b" transform="rotate(-90 '+(x0-11)+' '+((y0+h+yc)/2)+')">'+c+'</text>';
+  });
+  return '<svg width="'+VW+'" height="'+VH+'" viewBox="0 0 '+VW+' '+VH+'">'+s+t+'</svg>';
 }
 function buildApprovalSheet(){
   const pages=document.getElementById('printPages'); pages.innerHTML='';
@@ -3359,7 +3374,10 @@ function buildApprovalSheet(){
     doors.forEach(o=>{ const d=o.d; html+='<div class="ap-card" style="border:1px solid #ddd;border-radius:6px;padding:8px 10px;width:200px;text-align:center">'+_apDoorSvg(d)
       +'<div style="font-size:9.5pt;font-weight:bold;margin-top:4px">'+esc(d.ref||'Door')+' &mdash; '+o.qty+' off</div>'
       +'<div style="font-size:8.5pt;color:#444">'+d.h+' &times; '+d.w+' mm</div>'
-      +'<div style="font-size:8.5pt;color:#444">'+(d.panels||1)+' panel'+((d.panels||1)!==1?'s':'')+(d.frameMat?' &middot; '+esc(d.frameMat):'')+'</div></div>'; });
+      +'<div style="font-size:8.5pt;color:#444">'+(d.panels||1)+' panel'+((d.panels||1)!==1?'s':'')+(d.frameMat?' &middot; '+esc(d.frameMat):'')+'</div>'
+      +(d.outerRail?'<div style="font-size:8pt;color:#666">'+d.outerRail+'mm rails/stiles'+((d.centres&&d.centres.length)?' &middot; '+(d.midRail||d.outerRail)+'mm mid rail':'')+'</div>':'')
+      +((d.centres&&d.centres.length)?'<div style="font-size:8pt;color:#c0392b;font-weight:bold">mid rail @ '+d.centres.join(', ')+'mm from base</div>':'')
+      +'</div>'; });
     html+='</div>';
   }
   if(panels.length){
