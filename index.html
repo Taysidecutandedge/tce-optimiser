@@ -3289,12 +3289,16 @@ let _loadedCloudJobId = null; // tracks which cloud job is currently loaded
 function openPrintLayout(){
   if(!_lastSheets.length){ alert('Run Calculate first to generate a layout.'); return; }
   buildPrintLayout();
+  const _jn=projectName||(jobSheets.length?jobSheets[0].name:'Job');
+  if(!window._optTitle) window._optTitle=document.title;
+  document.title=_jn+' - Cut Plan';
   document.getElementById('printLayout').style.display='block';
   document.body.style.overflow='hidden';
 }
 function closePrintLayout(){
   document.getElementById('printLayout').style.display='none';
   document.body.style.overflow='';
+  if(window._optTitle) document.title=window._optTitle;   // restore app title
 }
 
 // ═══════════════════════════════════════════════
@@ -3304,6 +3308,10 @@ function closePrintLayout(){
 function openApprovalSheet(){
   if(!_lastSheets.length){ alert('Run Calculate first to generate the items.'); return; }
   buildApprovalSheet();
+  // Name the saved PDF after the job so it's self-identifying in Downloads
+  const _jn=projectName||(jobSheets.length?jobSheets[0].name:'Job');
+  if(!window._optTitle) window._optTitle=document.title;
+  document.title=_jn+' - Order Approval';
   document.getElementById('printLayout').style.display='block';
   document.body.style.overflow='hidden';
 }
@@ -3364,9 +3372,12 @@ function buildApprovalSheet(){
   const pmap={};
   items.forEach(p=>{ if(p.door) return; const eb=p.eb||{}; const sig=['L1','L2','W1','W2'].map(s=>eb[s]?s+(eb.tk&&eb.tk[s]||'1'):'').filter(Boolean).join(','); const k=(p.label||'')+'|'+p.l+'x'+p.w+'|'+(p.grain||'L')+'|'+sig; if(!pmap[k]) pmap[k]={p:Object.assign({},p,{origL:p.l,origW:p.w}),qty:0}; pmap[k].qty+=(parseInt(p.qty)||1); });
   const panels=Object.values(pmap);
+  const cust=((items.find(p=>p&&p.company&&String(p.company).trim())||{}).company)||'';
   let html='<div class="ap-doc">';
   html+='<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:8px;margin-bottom:12px">'
-    +'<div><div style="font-size:17pt;font-weight:bold">Tayside Cut &amp; Edge</div><div style="font-size:9pt;color:#555">Order Approval &mdash; '+esc(jobName)+'</div></div>'
+    +'<div><div style="font-size:17pt;font-weight:bold">Tayside Cut &amp; Edge</div>'
+      +'<div style="font-size:10.5pt;color:#111;font-weight:bold;margin-top:2px">Order Approval</div>'
+      +'<div style="font-size:9pt;color:#555;margin-top:1px">Job: '+esc(jobName)+(cust?' &nbsp;&middot;&nbsp; Customer: '+esc(cust):'')+'</div></div>'
     +'<div style="text-align:right;font-size:9pt;color:#555">'+dateStr+'<br>Please check &amp; approve</div></div>';
   html+='<div style="font-size:9pt;color:#444;background:#f6f6f6;border:1px solid #e0e0e0;border-radius:5px;padding:8px 10px;margin-bottom:14px">Please confirm each item is the <b>correct size and orientation</b>, and that the <b>edgebanding is on the correct edges</b> (shown in <span style="color:#1f9d57;font-weight:bold">green</span>). Let us know to approve or change anything before we cut.</div>';
   if(doors.length){
