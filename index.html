@@ -401,6 +401,7 @@ select option{background:var(--surf2)}
     <button class="btn btn-ghost btn-sm" id="dxfBtn" style="display:none" onclick="exportDXF()" title="Export each sheet layout as a DXF for CNC (Vectric etc.)">📐 Export DXF</button>
     <button class="btn btn-ghost btn-sm" onclick="openPrintLayout()">🖨 Print / Preview</button>
     <button class="btn btn-ghost btn-sm" onclick="openApprovalSheet()" title="Clean item sheet to send the customer for sign-off — doors & panels, sizes, orientation & edged edges, no cut diagrams">✅ Customer Approval</button>
+    <button class="btn btn-ghost btn-sm" onclick="openMaterialsOrder()" title="What to order per supplier for this job — board & roll stock already subtracted, ready to copy into an email or the supplier website">📋 Materials Order</button>
     <button class="btn btn-sm" id="cutModeBtn" style="background:var(--ok);color:#000;font-weight:700;display:none" onclick="openCuttingMode()">✂ Cutting Mode</button>
     <button class="btn btn-sm" id="labelBtn" style="background:#9c27b0;color:#fff;font-weight:700;display:none" onclick="openLabelPrint()">🏷 Print Labels</button>
       <a href="tce-admin.html" target="_blank" style="background:#1a2a3a;color:#8ab;border:1px solid #2b4a40;border-radius:6px;padding:7px 14px;cursor:pointer;font-size:12px;text-decoration:none;display:inline-flex;align-items:center;gap:5px">🔒 Admin</a>
@@ -3405,6 +3406,56 @@ function buildApprovalSheet(){
   if(!doors.length && !panels.length) html+='<div style="color:#888">No items to show.</div>';
   html+='<div style="margin-top:26px;border-top:1px solid #ccc;padding-top:10px;font-size:9pt;color:#444">Approved by: ______________________________ &nbsp;&nbsp; Date: ____________</div></div>';
   pages.innerHTML=html;
+}
+
+// ═══════════════════════════════════════════════
+// MATERIALS ORDER — what to buy per supplier for this job,
+// board & roll stock subtracted, ready to copy into an email / website.
+// ═══════════════════════════════════════════════
+let _orderCopy=[];
+async function openMaterialsOrder(){
+  if(!_lastSheets.length){ alert('Run Calculate first to work out what to order.'); return; }
+  await sbLoadBoardStock(); await sbLoadEbRolls();
+  const jobName=projectName||(jobSheets.length?jobSheets[0].name:'Job');
+  const dateStr=new Date().toLocaleDateString('en-GB');
+  const groups=[]; const gi={};
+  const G=s=>{ if(gi[s]==null){ gi[s]=groups.length; groups.push({sup:s,boards:[],eb:[]}); } return groups[gi[s]]; };
+  // Boards — all Lathams for now; stock_qty subtracted
+  (_lastBoardNeed||[]).forEach(n=>{ const st=_bsStockFor(n.name,n.thick); const onhand=st?(+st.stock_qty||0):0;
+    G('Lathams').boards.push({name:n.name,thick:n.thick,need:n.count,onhand,order:Math.max(0,n.count-onhand)}); });
+  // Edgebanding — grouped by the matching roll's supplier (Lathams / Hranipex / Ostermanns …)
+  (_lastEbDetail||[]).forEach(d=>{ const needM=d.lenMm/1000+(d.count*30)/1000;
+    const matches=(_ebRolls||[]).filter(r=>_bsNorm(r.decor)===_bsNorm(d.decor));
+    const haveM=matches.reduce((a,r)=>a+(+r.remaining_m||0),0);
+    const roll=matches.slice().sort((a,b)=>(+b.remaining_m||0)-(+a.remaining_m||0))[0]||null;
+    const sup=roll?(roll.supplier||'Supplier (check)'):'Supplier (no roll on file)';
+    G(sup).eb.push({decor:d.decor,tk:d.tk,width:roll?roll.tape_width:'',needM,haveM,short:Math.max(0,needM-haveM),code:roll?(roll.order_code||roll.code||''):''}); });
+  _orderCopy=[]; let cards='';
+  const sub='font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--txt3);margin:8px 0 4px';
+  const row='display:flex;gap:8px;font-size:13px;padding:4px 6px;border-radius:5px;align-items:baseline';
+  groups.forEach((g,i)=>{
+    let txt='Tayside Cut & Edge — Materials Order\nJob: '+jobName+'    '+dateStr+'\nSupplier: '+g.sup+'\n'; let rows='';
+    if(g.boards.length){ rows+='<div style="'+sub+'">Boards</div>'; txt+='\nBOARDS\n';
+      g.boards.forEach(b=>{ const oc=b.order>0;
+        rows+='<div style="'+row+(oc?';background:rgba(31,122,77,.12)':'')+'"><span style="flex:1">'+esc(b.name)+' <span style="color:var(--txt3)">'+b.thick+'mm</span></span><span style="color:var(--txt3);width:58px">need '+b.need+'</span><span style="color:var(--txt3);width:64px">stock '+b.onhand+'</span><span style="width:92px;font-weight:700;color:'+(oc?'#7fe3a8':'var(--txt3)')+'">'+(oc?('ORDER '+b.order):'covered')+'</span></div>';
+        if(oc) txt+='- '+b.order+' x '+b.name+' '+b.thick+'mm\n'; }); }
+    if(g.eb.length){ rows+='<div style="'+sub+'">Edgebanding</div>'; txt+='\nEDGEBANDING\n';
+      g.eb.forEach(e=>{ const oc=e.short>0;
+        rows+='<div style="'+row+(oc?';background:rgba(31,122,77,.12)':'')+'"><span style="flex:1">'+esc(e.decor)+' <span style="color:var(--txt3)">'+e.tk+'mm'+(e.width?' · '+e.width+'mm':'')+'</span></span><span style="color:var(--txt3);width:58px">need '+e.needM.toFixed(1)+'m</span><span style="color:var(--txt3);width:64px">have '+e.haveM.toFixed(1)+'m</span><span style="width:92px;font-weight:700;color:'+(oc?'#7fe3a8':'var(--txt3)')+'">'+(oc?('ORDER'+(e.code?' '+esc(e.code):'')):'covered')+'</span></div>';
+        if(oc) txt+='- '+e.decor+' '+e.tk+'mm'+(e.width?' '+e.width+'mm wide':'')+' — ~'+Math.ceil(e.short)+'m short'+(e.code?' (code '+e.code+')':'')+'\n'; }); }
+    const anyOrder=g.boards.some(b=>b.order>0)||g.eb.some(e=>e.short>0); _orderCopy[i]=txt;
+    cards+='<div style="border:1px solid var(--brd);border-radius:8px;padding:10px 12px;margin-bottom:10px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:2px"><b style="font-size:15px">'+esc(g.sup)+'</b>'+(anyOrder?'':'<span style="color:#7fe3a8;font-size:11px">— nothing to order</span>')+'<button class="btn btn-sm" style="margin-left:auto;background:#1f7a4d;color:#fff;border:none" onclick="copyOrder('+i+')">📋 Copy order</button></div>'+rows+'</div>';
+  });
+  if(!groups.length) cards='<div style="color:var(--txt3)">Nothing to order.</div>';
+  const div=document.createElement('div'); div.id='orderModal';
+  div.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:5000;display:flex;align-items:center;justify-content:center;padding:14px';
+  div.innerHTML='<div style="background:var(--surf,#1b1b1f);border:1px solid var(--brd);border-radius:14px;max-width:660px;width:100%;max-height:90vh;overflow:auto;padding:18px"><div style="display:flex;align-items:center;margin-bottom:4px"><h2 style="font-size:18px;margin:0">Materials Order</h2><button class="btn btn-sm" style="margin-left:auto;background:none;border:1px solid var(--brd);color:var(--txt2)" onclick="document.getElementById(\'orderModal\').remove()">✕</button></div><div style="font-size:12px;color:var(--txt3);margin-bottom:6px">'+esc(jobName)+' · '+dateStr+' · your board & roll stock already subtracted</div><div style="font-size:11px;color:var(--txt3);margin-bottom:10px">Offcuts are not deducted — check your Offcut page if any of these can come from stock offcuts.</div>'+cards+'</div>';
+  document.body.appendChild(div);
+}
+function copyOrder(i){
+  const t=(_orderCopy||[])[i]||'';
+  const done=()=>{ const m=document.createElement('div'); m.textContent='Order copied — paste into your email or the supplier site'; m.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1f7a4d;color:#fff;padding:9px 16px;border-radius:8px;font-size:13px;z-index:6000'; document.body.appendChild(m); setTimeout(()=>m.remove(),2200); };
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(t).then(done).catch(()=>alert(t)); } else { alert(t); }
 }
 
 function buildPrintLayout(){
