@@ -139,6 +139,7 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
         <select id="fcat" onchange="render()"><option value="">All categories</option></select>
         <select id="fowner" onchange="render()"><option value="">All owners</option></select>
         <label class="chk"><input type="checkbox" id="lowonly" onchange="render()"> Low stock only</label>
+        <button class="btn btn-sm" onclick="printAllLabels()" title="Print box labels for the items shown">🏷 Labels</button>
       </div>
       <div class="count" id="cnt"></div>
       <div id="list"></div>
@@ -147,6 +148,7 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 </div>
 <div class="toast" id="toast"></div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <script>
 const SB_URL='https://mxjduublgtlpqtdgutzi.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im14amR1dWJsZ3RscHF0ZGd1dHppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwOTg2MjMsImV4cCI6MjA5MTY3NDYyM30.wfG9a91Udp7KQ7ywda6aNS9k-n79qtrGSe-epuCuk34';
@@ -163,7 +165,8 @@ async function init(){
   showLogin();
 }
 function showLogin(){$('login').classList.remove('hidden');$('app').classList.add('hidden');}
-async function showApp(){ $('login').classList.add('hidden');$('app').classList.remove('hidden');$('userline').textContent=_user.email; await loadItems(); }
+async function showApp(){ $('login').classList.add('hidden');$('app').classList.remove('hidden');$('userline').textContent=_user.email; await loadItems();
+  const pid=new URLSearchParams(location.search).get('id'); if(pid) setTimeout(()=>focusItem(pid),300); }
 async function doLogin(){
   $('li-err').textContent='';
   const email=$('li-email').value.trim(),password=$('li-pass').value;
@@ -224,6 +227,7 @@ function render(){
         ${pack>1?`<button type="button" title="Add one box of ${pack}" style="width:auto;padding:0 9px;font-size:12px" onclick="bump(${i.id},${pack})">+box</button>`:''}
       </div>
       <div class="lo"><input type="number" inputmode="numeric" min="0" placeholder="low @" value="${i.low_stock!=null?i.low_stock:''}" onchange="saveQty(${i.id})" title="Low-stock level"></div>
+      <button class="btn btn-sm btn-ghost" onclick="printLabel(${i.id})" title="Print box label (DYMO)">🏷</button>
       <button class="btn btn-sm btn-ghost" onclick="toggleEdit(${i.id})">✎</button>
       <div class="editp" id="ed-${i.id}">
         <div class="row2">
@@ -329,6 +333,51 @@ async function refreshCats(){
   const owners=[...new Set(_items.map(i=>i.owner).filter(Boolean))].sort();
   const co=$('fowner').value;
   $('fowner').innerHTML='<option value="">All owners</option>'+owners.map(o=>`<option value="${esc(o)}"${o===co?' selected':''}>${esc(o)}</option>`).join('');
+}
+
+// ── Box labels (DYMO 57×32) — readable info + a QR that opens this item ──
+function qrDataUrl(text){ try{ const q=qrcode(0,'M'); q.addData(text); q.make(); return q.createDataURL(4,2); }catch(e){ return ''; } }
+function labelUrl(id){ return location.origin+location.pathname+'?id='+id; }
+function labelHtml(i){
+  const qr=qrDataUrl(labelUrl(i.id));
+  const cat=[i.category,i.owner].filter(Boolean).join(' · ');
+  const loc=[(i.location||''),((+i.pack_size||1)>1?(i.pack_size+'/box'):'')].filter(Boolean).join(' · ');
+  return `<div class="lbl"><div class="lt"><div class="ln">${esc(i.name)}</div>`
+    +(cat?`<div class="lc">${esc(cat)}</div>`:'')
+    +(loc?`<div class="ll">${esc(loc)}</div>`:'')
+    +`</div>${qr?`<img class="lq" src="${qr}">`:''}</div>`;
+}
+function openPrint(html){
+  const w=window.open('','_blank','width=460,height=300');
+  if(!w){ toast('Allow pop-ups to print labels',true); return; }
+  w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Hardware labels</title><style>'
+    +'@page{size:57mm 32mm;margin:0}*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,Helvetica,sans-serif;color:#000}'
+    +'.lbl{width:57mm;height:32mm;padding:2mm;display:flex;gap:1.5mm;align-items:center;overflow:hidden;page-break-after:always}'
+    +'.lbl:last-child{page-break-after:auto}.lt{flex:1;min-width:0}'
+    +'.ln{font-size:11pt;font-weight:800;line-height:1.05;word-break:break-word}'
+    +'.lc{font-size:8pt;margin-top:1mm;color:#222}.ll{font-size:8pt;margin-top:.4mm;color:#222}'
+    +'.lq{width:18mm;height:18mm;flex-shrink:0}</style></head><body>'+html+'</body></html>');
+  w.document.close();
+  setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 350);
+}
+function printLabel(id){ const i=_items.find(x=>String(x.id)===String(id)); if(i) openPrint(labelHtml(i)); }
+function printAllLabels(){
+  const q=$('q').value.toLowerCase().trim(), fc=$('fcat').value, fo=$('fowner').value, lowOnly=$('lowonly').checked;
+  let rows=_items.slice();
+  if(fc)rows=rows.filter(i=>(i.category||'')===fc);
+  if(fo)rows=rows.filter(i=>(i.owner||'')===fo);
+  if(lowOnly)rows=rows.filter(isLow);
+  if(q)rows=rows.filter(i=>(`${i.name} ${i.supplier||''} ${i.order_code||''} ${i.category||''}`).toLowerCase().includes(q));
+  if(!rows.length){ toast('No items to label',true); return; }
+  openPrint(rows.map(labelHtml).join(''));
+}
+// Scan a box QR → page opens with ?id=… → land on that item, ready to adjust
+function focusItem(id){
+  const row=document.querySelector(`.brow[data-id="${id}"]`); if(!row) return;
+  row.scrollIntoView({behavior:'smooth',block:'center'});
+  row.style.transition='box-shadow .3s'; row.style.boxShadow='0 0 0 3px var(--acc)';
+  setTimeout(()=>{ row.style.boxShadow=''; }, 2200);
+  const qin=row.querySelector('.qin'); if(qin){ qin.focus(); qin.select&&qin.select(); }
 }
 
 init();
