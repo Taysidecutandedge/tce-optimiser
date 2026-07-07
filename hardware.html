@@ -365,13 +365,27 @@ function dymoQr(png,x,y,w,h){
     '<Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin>'+
     '<Data>'+png+'</Data><ScaleMode>Uniform</ScaleMode><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment>'+_lay(x,y,w,h)+'</ImageObject>';
 }
+// The item name is auto-sized so long names wrap onto several lines and always
+// fit the box (DYMO clips overflow instead of shrinking, so we size it ourselves).
+function _span(t,size,bold){ return '<TextSpan><Text>'+xesc(t)+'</Text><FontInfo><FontName>Segoe UI</FontName><FontSize>'+size+'</FontSize><IsBold>'+(bold?'True':'False')+'</IsBold><IsItalic>False</IsItalic><IsUnderline>False</IsUnderline><FontBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FontBrush></FontInfo></TextSpan>'; }
+function _wrapTo(text,cpl){ const w=String(text).split(/\s+/); const lines=[]; let cur=''; for(const word of w){ const chunk=word.length>cpl?word.match(new RegExp('.{1,'+cpl+'}','g')):[word]; for(const pc of chunk){ if(!cur)cur=pc; else if((cur+' '+pc).length<=cpl)cur+=' '+pc; else {lines.push(cur);cur=pc;} } } if(cur)lines.push(cur); return lines; }
+function _fitName(text,boxW,boxH){ for(let f=13;f>=7;f-=0.5){ const cpl=Math.max(6,Math.floor(boxW*72/(0.56*f))); const maxLines=Math.max(1,Math.floor(boxH*72/(f*1.32))); const lines=_wrapTo(text,cpl); if(lines.length<=maxLines) return {font:f,lines}; } const f=7,cpl=Math.max(6,Math.floor(boxW*72/(0.56*f))); return {font:f,lines:_wrapTo(text,cpl).slice(0,Math.floor(boxH*72/(f*1.32)))}; }
+function dymoName(text,x,y,w,h){
+  const fit=_fitName(text,w,h);
+  const body=fit.lines.map(l=>'<LineTextSpan>'+_span(l,fit.font,true)+'</LineTextSpan>').join('');
+  return '<TextObject><Name>Name</Name>'+_BR+
+    '<Rotation>Rotation0</Rotation><OutlineThickness>1</OutlineThickness><IsOutlined>False</IsOutlined><BorderStyle>SolidLine</BorderStyle>'+
+    '<Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin>'+
+    '<HorizontalAlignment>Left</HorizontalAlignment><VerticalAlignment>Top</VerticalAlignment><FitMode>None</FitMode><IsVertical>False</IsVertical>'+
+    '<FormattedText><FitMode>None</FitMode><HorizontalAlignment>Left</HorizontalAlignment><VerticalAlignment>Top</VerticalAlignment><IsVertical>False</IsVertical>'+body+'</FormattedText>'+_lay(x,y,w,h)+'</TextObject>';
+}
 function hwLabelXml(i){
   const cat=[i.category,i.owner].filter(Boolean).join('  ·  ');
   const loc=[(i.location||''),((+i.pack_size||1)>1?(i.pack_size+'/box'):'')].filter(Boolean).join('  ·  ');
-  let objs=dymoText('Name',i.name,0.08,0.10,1.36,0.40,13,true);
-  if(cat) objs+=dymoText('Cat',cat,0.08,0.56,1.36,0.22,9,false);
-  if(loc) objs+=dymoText('Loc',loc,0.08,0.82,1.36,0.22,9,false);
-  try{ const png=qrPngBase64(labelUrl(i.id)); if(png) objs+=dymoQr(png,1.50,0.28,0.66,0.66); }catch(e){}
+  let objs=dymoName(i.name,0.07,0.06,1.40,0.72);
+  if(cat) objs+=dymoText('Cat',cat,0.07,0.80,2.05,0.16,8.5,false);
+  if(loc) objs+=dymoText('Loc',loc,0.07,0.955,2.05,0.16,8.5,false);
+  try{ const png=qrPngBase64(labelUrl(i.id)); if(png) objs+=dymoQr(png,1.55,0.10,0.58,0.58); }catch(e){}
   return '<?xml version="1.0" encoding="utf-8"?>'+
     '<DesktopLabel Version="1"><DYMOLabel Version="4"><Description>DYMO Label</Description><Orientation>Portrait</Orientation><LabelName>S0722540 multipurpose</LabelName><InitialLength>0</InitialLength><BorderStyle>SolidLine</BorderStyle>'+
     '<DYMORect><DYMOPoint><X>0.04</X><Y>0.06</Y></DYMOPoint><Size><Width>2.17</Width><Height>1.13</Height></Size></DYMORect>'+
