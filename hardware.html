@@ -346,22 +346,38 @@ function qrPngBase64(text){
 }
 function labelUrl(id){ return location.origin+location.pathname+'?id='+id; }
 function xesc(s){ return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+// ── DYMO Connect (LabelWriter 550) — DesktopLabel format, verified via RenderLabel ──
+// Units are INCHES. Design area 2.17w × 1.13h (from the S0722540 multipurpose roll).
+const _BR='<Brushes><BackgroundBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></BackgroundBrush><BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush><StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush><FillBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush></Brushes>';
+function _lay(x,y,w,h){ return '<ObjectLayout><DYMOPoint><X>'+x+'</X><Y>'+y+'</Y></DYMOPoint><Size><Width>'+w+'</Width><Height>'+h+'</Height></Size></ObjectLayout>'; }
 function dymoText(nm,text,x,y,w,h,size,bold){
-  return '<ObjectInfo><TextObject><Name>'+nm+'</Name><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/><BackColor Alpha="0"/><HorizontalAlignment>Left</HorizontalAlignment><VerticalAlignment>Top</VerticalAlignment><TextFitMode>ShrinkToFit</TextFitMode><StyledText><Element><String>'+xesc(text)+'</String><Attributes><Font Family="Arial" Size="'+size+'" Bold="'+(bold?'True':'False')+'"/></Attributes></Element></StyledText></TextObject><Bounds X="'+x+'" Y="'+y+'" Width="'+w+'" Height="'+h+'"/></ObjectInfo>';
+  return '<TextObject><Name>'+nm+'</Name>'+_BR+
+    '<Rotation>Rotation0</Rotation><OutlineThickness>1</OutlineThickness><IsOutlined>False</IsOutlined><BorderStyle>SolidLine</BorderStyle>'+
+    '<Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin>'+
+    '<HorizontalAlignment>Left</HorizontalAlignment><VerticalAlignment>Top</VerticalAlignment><FitMode>ShrinkToFit</FitMode><IsVertical>False</IsVertical>'+
+    '<FormattedText><FitMode>ShrinkToFit</FitMode><HorizontalAlignment>Left</HorizontalAlignment><VerticalAlignment>Top</VerticalAlignment><IsVertical>False</IsVertical>'+
+    '<LineTextSpan><TextSpan><Text>'+xesc(text)+'</Text><FontInfo><FontName>Segoe UI</FontName><FontSize>'+size+'</FontSize><IsBold>'+(bold?'True':'False')+'</IsBold><IsItalic>False</IsItalic><IsUnderline>False</IsUnderline><FontBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FontBrush></FontInfo></TextSpan></LineTextSpan>'+
+    '</FormattedText>'+_lay(x,y,w,h)+'</TextObject>';
 }
-// Print via the DYMO web service (same route as your panel labels) so the 57×32
-// landscape geometry is correct. QR goes on as an image so it always renders.
+function dymoQr(png,x,y,w,h){
+  return '<ImageObject><Name>QR</Name>'+_BR+
+    '<Rotation>Rotation0</Rotation><OutlineThickness>1</OutlineThickness><IsOutlined>False</IsOutlined><BorderStyle>SolidLine</BorderStyle>'+
+    '<Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin>'+
+    '<Data>'+png+'</Data><ScaleMode>Uniform</ScaleMode><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment>'+_lay(x,y,w,h)+'</ImageObject>';
+}
 function hwLabelXml(i){
   const cat=[i.category,i.owner].filter(Boolean).join('  ·  ');
   const loc=[(i.location||''),((+i.pack_size||1)>1?(i.pack_size+'/box'):'')].filter(Boolean).join('  ·  ');
-  let img='';
-  try{ const png=qrPngBase64(labelUrl(i.id)); if(png) img='<ObjectInfo><ImageObject><Name>QR</Name><Brushes/><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/><BackColor Alpha="0" Red="255" Green="255" Blue="255"/><LinkedObjectName/><Rotation>Rotation0</Rotation><IsMirrored>False</IsMirrored><IsVariable>False</IsVariable><Image>'+png+'</Image><ScaleMode>Uniform</ScaleMode><BorderWidth>0</BorderWidth><BorderColor Alpha="255" Red="0" Green="0" Blue="0"/><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Center</VerticalAlignment></ImageObject><Bounds X="2300" Y="430" Width="840" Height="840"/></ObjectInfo>'; }catch(e){}
-  let xml='<?xml version="1.0" encoding="utf-8"?><DieCutLabel Version="8.0" Units="twips"><PaperOrientation>Landscape</PaperOrientation><Id>LW</Id><PaperName>57 mm x 32 mm</PaperName><DrawCommands><RoundRectangle X="0" Y="0" Width="3240" Height="1800" Rx="270" Ry="270"/></DrawCommands>';
-  xml+=dymoText('T1',i.name,90,110,2150,640,13,true);
-  if(cat) xml+=dymoText('T2',cat,90,770,2150,260,9,false);
-  if(loc) xml+=dymoText('T3',loc,90,1040,2150,260,9,false);
-  xml+=img+'</DieCutLabel>';
-  return xml;
+  let objs=dymoText('Name',i.name,0.08,0.10,1.36,0.40,13,true);
+  if(cat) objs+=dymoText('Cat',cat,0.08,0.56,1.36,0.22,9,false);
+  if(loc) objs+=dymoText('Loc',loc,0.08,0.82,1.36,0.22,9,false);
+  try{ const png=qrPngBase64(labelUrl(i.id)); if(png) objs+=dymoQr(png,1.50,0.28,0.66,0.66); }catch(e){}
+  return '<?xml version="1.0" encoding="utf-8"?>'+
+    '<DesktopLabel Version="1"><DYMOLabel Version="4"><Description>DYMO Label</Description><Orientation>Portrait</Orientation><LabelName>S0722540 multipurpose</LabelName><InitialLength>0</InitialLength><BorderStyle>SolidLine</BorderStyle>'+
+    '<DYMORect><DYMOPoint><X>0.04</X><Y>0.06</Y></DYMOPoint><Size><Width>2.17</Width><Height>1.13</Height></Size></DYMORect>'+
+    '<BorderColor><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderColor><BorderThickness>1</BorderThickness><Show_Border>False</Show_Border><HasFixedLength>False</HasFixedLength><FixedLengthValue>0</FixedLengthValue>'+
+    '<DynamicLayoutManager><RotationBehavior>ClearObjects</RotationBehavior><LabelObjects>'+objs+'</LabelObjects></DynamicLayoutManager></DYMOLabel>'+
+    '<LabelApplication>Blank</LabelApplication><DataTable><Columns></Columns><Rows></Rows></DataTable></DesktopLabel>';
 }
 function dymoPrint(xml){
   return fetch('https://localhost:41951/DYMO/DLS/Printing/PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'printerName=&labelXml='+encodeURIComponent(xml)+'&printParamsXml=&labelSetXml='});
