@@ -379,8 +379,19 @@ function hwLabelXml(i){
     '<DynamicLayoutManager><RotationBehavior>ClearObjects</RotationBehavior><LabelObjects>'+objs+'</LabelObjects></DynamicLayoutManager></DYMOLabel>'+
     '<LabelApplication>Blank</LabelApplication><DataTable><Columns></Columns><Rows></Rows></DataTable></DesktopLabel>';
 }
-function dymoPrint(xml){
-  return fetch('https://localhost:41951/DYMO/DLS/Printing/PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'printerName=&labelXml='+encodeURIComponent(xml)+'&printParamsXml=&labelSetXml='});
+// The LW550 needs the exact printer name — an empty name is accepted but never
+// physically prints. Look it up once from DYMO Connect and cache it.
+let _dymoPrinter=null;
+async function dymoPrinterName(){
+  if(_dymoPrinter!=null) return _dymoPrinter;
+  try{ const r=await fetch('https://localhost:41951/DYMO/DLS/Printing/GetPrinters');
+    const t=await r.text(); const m=t.match(/<Name>([^<]*)<\/Name>/); _dymoPrinter=m?m[1]:''; }
+  catch(e){ _dymoPrinter=''; }
+  return _dymoPrinter;
+}
+async function dymoPrint(xml){
+  const printer=await dymoPrinterName();
+  return fetch('https://localhost:41951/DYMO/DLS/Printing/PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'printerName='+encodeURIComponent(printer)+'&labelXml='+encodeURIComponent(xml)+'&printParamsXml=&labelSetXml='});
 }
 function printLabel(id){
   const i=_items.find(x=>String(x.id)===String(id)); if(!i) return;
