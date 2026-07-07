@@ -111,6 +111,10 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
           <div><label class="fl">Category</label><input id="a-cat" list="cats" placeholder="Hinges"></div>
           <div><label class="fl">Supplier</label><input id="a-sup" placeholder="Blum / Häfele…"></div>
         </div>
+        <div class="row2" style="margin-top:8px">
+          <div><label class="fl">Owner (company)</label><input id="a-owner" list="owners" placeholder="TCE / RDO / Shared"></div>
+          <div><label class="fl">Units per box</label><input id="a-pack" type="number" inputmode="numeric" min="1" value="1"></div>
+        </div>
         <div class="row3" style="margin-top:8px">
           <div><label class="fl">Order code</label><input id="a-code" placeholder="optional"></div>
           <div><label class="fl">Cost each (£)</label><input id="a-cost" type="number" step="0.01" inputmode="decimal" placeholder="0.00"></div>
@@ -128,10 +132,12 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
         <option>Handles / knobs</option><option>LED</option><option>Connectors / cams</option>
         <option>Dowels</option><option>Screws</option><option>Other</option>
       </datalist>
+      <datalist id="owners"><option>TCE</option><option>RDO</option><option>Shared</option></datalist>
 
       <div class="toolbar">
         <input type="search" id="q" placeholder="Search name, supplier, code…" oninput="render()">
         <select id="fcat" onchange="render()"><option value="">All categories</option></select>
+        <select id="fowner" onchange="render()"><option value="">All owners</option></select>
         <label class="chk"><input type="checkbox" id="lowonly" onchange="render()"> Low stock only</label>
       </div>
       <div class="count" id="cnt"></div>
@@ -180,15 +186,19 @@ async function loadItems(){
   }catch(e){ _items=[]; }
   const cats=[...new Set(_items.map(i=>i.category).filter(Boolean))].sort();
   $('fcat').innerHTML='<option value="">All categories</option>'+cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  const owners=[...new Set(_items.map(i=>i.owner).filter(Boolean))].sort();
+  $('fowner').innerHTML='<option value="">All owners</option>'+owners.map(o=>`<option value="${esc(o)}">${esc(o)}</option>`).join('');
   render();
 }
 
 function render(){
   const q=$('q').value.toLowerCase().trim();
   const fc=$('fcat').value;
+  const fo=$('fowner').value;
   const lowOnly=$('lowonly').checked;
   let rows=_items.slice();
   if(fc) rows=rows.filter(i=>(i.category||'')===fc);
+  if(fo) rows=rows.filter(i=>(i.owner||'')===fo);
   if(lowOnly) rows=rows.filter(isLow);
   if(q) rows=rows.filter(i=>(`${i.name} ${i.supplier||''} ${i.order_code||''} ${i.category||''}`).toLowerCase().includes(q));
   // summary across ALL
@@ -200,8 +210,8 @@ function render(){
   $('cnt').textContent=`${rows.length} item${rows.length!==1?'s':''}`;
   if(!rows.length){ $('list').innerHTML='<div class="empty">No hardware yet — add your first item above.</div>'; return; }
   $('list').innerHTML=rows.map(i=>{
-    const n=+i.stock_qty||0, low=isLow(i);
-    const meta=[i.category,i.supplier,i.order_code,(+i.cost>0?'£'+(+i.cost).toFixed(2)+' ea':''),(i.location?'📍'+i.location:'')].filter(Boolean).map(esc).join(' · ');
+    const n=+i.stock_qty||0, low=isLow(i), pack=Math.max(1,+i.pack_size||1);
+    const meta=[i.owner,i.category,i.supplier,i.order_code,(+i.cost>0?'£'+(+i.cost).toFixed(2)+' ea':''),(pack>1?pack+'/box':''),(i.location?'📍'+i.location:'')].filter(Boolean).map(esc).join(' · ');
     return `<div class="brow ${low?'islow':''}" data-id="${i.id}">
       <div class="bd">
         <div class="nm">${esc(i.name)}${low?'<span class="badge">LOW</span>':''}</div>
@@ -211,6 +221,7 @@ function render(){
         <button type="button" onclick="bump(${i.id},-1)">−</button>
         <input class="qin" type="number" inputmode="numeric" min="0" value="${n}" onchange="saveQty(${i.id})">
         <button type="button" onclick="bump(${i.id},1)">+</button>
+        ${pack>1?`<button type="button" title="Add one box of ${pack}" style="width:auto;padding:0 9px;font-size:12px" onclick="bump(${i.id},${pack})">+box</button>`:''}
       </div>
       <div class="lo"><input type="number" inputmode="numeric" min="0" placeholder="low @" value="${i.low_stock!=null?i.low_stock:''}" onchange="saveQty(${i.id})" title="Low-stock level"></div>
       <button class="btn btn-sm btn-ghost" onclick="toggleEdit(${i.id})">✎</button>
@@ -224,8 +235,12 @@ function render(){
           <div><label class="fl">Order code</label><input id="e-code-${i.id}" value="${esc(i.order_code||'')}"></div>
           <div><label class="fl">Cost each (£)</label><input id="e-cost-${i.id}" type="number" step="0.01" value="${i.cost!=null?i.cost:''}"></div>
         </div>
-        <div class="row3" style="margin-top:8px;align-items:end">
+        <div class="row3" style="margin-top:8px">
+          <div><label class="fl">Owner (company)</label><input id="e-owner-${i.id}" list="owners" value="${esc(i.owner||'')}"></div>
+          <div><label class="fl">Units per box</label><input id="e-pack-${i.id}" type="number" min="1" value="${i.pack_size!=null?i.pack_size:1}"></div>
           <div><label class="fl">Location</label><input id="e-loc-${i.id}" value="${esc(i.location||'')}"></div>
+        </div>
+        <div class="row2" style="margin-top:8px;align-items:end">
           <div><button class="btn btn-acc" style="width:100%" onclick="saveFull(${i.id})">Save changes</button></div>
           <div><button class="btn btn-del" style="width:100%" onclick="delItem(${i.id})">Delete</button></div>
         </div>
@@ -265,7 +280,8 @@ async function saveQty(id){
 async function saveFull(id){
   const g=k=>{const e=$('e-'+k+'-'+id);return e?e.value.trim():'';};
   const body={ name:g('name'), category:g('cat')||null, supplier:g('sup')||null, order_code:g('code')||null,
-    cost:parseFloat($('e-cost-'+id).value)||0, location:g('loc')||null };
+    cost:parseFloat($('e-cost-'+id).value)||0, location:g('loc')||null,
+    owner:g('owner')||null, pack_size:Math.max(1,parseInt($('e-pack-'+id).value)||1) };
   if(!body.name){ toast('Name required',true); return; }
   try{
     await patch(id,body);
@@ -289,12 +305,13 @@ async function addItem(){
   const body={ name, category:$('a-cat').value.trim()||null, supplier:$('a-sup').value.trim()||null,
     order_code:$('a-code').value.trim()||null, cost:parseFloat($('a-cost').value)||0,
     location:$('a-loc').value.trim()||null, stock_qty:Math.max(0,parseInt($('a-qty').value)||0),
-    low_stock:Math.max(0,parseInt($('a-low').value)||0) };
+    low_stock:Math.max(0,parseInt($('a-low').value)||0),
+    pack_size:Math.max(1,parseInt($('a-pack').value)||1), owner:$('a-owner').value.trim()||null };
   try{
     const r=await fetch(SB_URL+'/rest/v1/tce_hardware',{method:'POST',headers:{...H(),'Prefer':'return=representation'},body:JSON.stringify(body)});
     if(!r.ok){ const t=await r.text(); if(r.status===404){ toast('Run the tce_hardware migration first',true); return;} throw new Error(t); }
     const rows=await r.json(); if(rows&&rows[0]) _items.push(rows[0]);
-    ['a-name','a-cat','a-sup','a-code','a-cost','a-loc'].forEach(k=>$(k).value=''); $('a-qty').value='0'; $('a-low').value='0';
+    ['a-name','a-cat','a-sup','a-code','a-cost','a-loc','a-owner'].forEach(k=>$(k).value=''); $('a-qty').value='0'; $('a-low').value='0'; $('a-pack').value='1';
     await refreshCats(); render(); $('a-name').focus(); toast('Added');
   }catch(e){ toast('Add failed',true); }
 }
@@ -309,6 +326,9 @@ async function refreshCats(){
   const cats=[...new Set(_items.map(i=>i.category).filter(Boolean))].sort();
   const cur=$('fcat').value;
   $('fcat').innerHTML='<option value="">All categories</option>'+cats.map(c=>`<option value="${esc(c)}"${c===cur?' selected':''}>${esc(c)}</option>`).join('');
+  const owners=[...new Set(_items.map(i=>i.owner).filter(Boolean))].sort();
+  const co=$('fowner').value;
+  $('fowner').innerHTML='<option value="">All owners</option>'+owners.map(o=>`<option value="${esc(o)}"${o===co?' selected':''}>${esc(o)}</option>`).join('');
 }
 
 init();
