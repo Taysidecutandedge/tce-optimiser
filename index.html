@@ -3886,6 +3886,7 @@ function openCuttingMode(){
 function closeCuttingMode(){
   document.getElementById('cuttingMode').classList.remove('active');
   document.body.style.overflow='';
+  _cmReview=false;
 }
 
 function cmStep(dir){
@@ -3970,8 +3971,10 @@ function cmRender(){
   document.getElementById('cmProgress').textContent=done+' / '+total+' confirmed';
   const body=document.getElementById('cmBody');
 
-  if(_cmDone.size>=total&&total>0){
-    body.innerHTML='<div class="cm-finished"><div class="cm-finished-icon">✅</div><div class="cm-finished-title">Job Complete!</div><div class="cm-finished-sub">All '+total+' panels confirmed</div><button class="cm-confirm" style="max-width:280px;margin-top:20px" onclick="closeCuttingMode()">Back to Optimiser</button></div>';
+  if(_cmDone.size>=total&&total>0&&!_cmReview){
+    body.innerHTML='<div class="cm-finished"><div class="cm-finished-icon">✅</div><div class="cm-finished-title">Job Complete!</div><div class="cm-finished-sub">All '+total+' panels confirmed</div>'
+      +'<button class="cm-confirm" style="max-width:280px;margin-top:20px" onclick="cmStartReview()">🖨 Review / reprint labels</button>'
+      +'<button class="cm-confirm" style="max-width:280px;margin-top:12px;background:#2b4a40;color:#e8f0ec" onclick="closeCuttingMode()">Back to Optimiser</button></div>';
     return;
   }
   if(_cmIdx>=total){_cmIdx=0;for(let i=0;i<total;i++){if(!_cmDone.has(i)){_cmIdx=i;break;}}}
@@ -4044,9 +4047,10 @@ function cmRender(){
         '</button>'+
       '</div>'+
       '<div class="cm-confirm-wrap">'+
-        '<button class="cm-confirm'+( confirmed?' confirmed':'')+'" onclick="cmConfirm()">'+
-          (confirmed?'✓ Done':'✓ Confirm Cut')+
-        '</button>'+
+        '<button onclick="cmReprint()" style="background:#1f3a34;color:#cfe7dd;border:none;border-radius:10px;font-size:13px;font-weight:700;padding:9px;cursor:pointer;width:100%;margin-bottom:8px;font-family:var(--mono)">🖨 Reprint</button>'+
+        (_cmReview
+          ? '<button class="cm-confirm" style="background:#2b4a40;color:#e8f0ec" onclick="closeCuttingMode()">✓ Finish</button>'
+          : '<button class="cm-confirm'+( confirmed?' confirmed':'')+'" onclick="cmConfirm()">'+(confirmed?'✓ Done':'✓ Confirm Cut')+'</button>')+
       '</div>'+
     '</div>';
   // Use double RAF to ensure layout is complete before measuring
@@ -4422,6 +4426,86 @@ function printLabelForPanel(p,sheetIdx){
 }
 
 
+// ═══════════════════════════════════════════════════════════════════
+//  DYMO LabelWriter 550 printing + cutting-mode reprint/review
+//  (replaces the older DieCutLabel builders that the 550 rejected)
+// ═══════════════════════════════════════════════════════════════════
+var _cmReview=false;
+function cmStartReview(){ _cmReview=true; _cmIdx=0; cmRender(); }
+function cmReprint(){
+  const p=_cmPanels[_cmIdx]; if(!p) return;
+  cmToast('🖨 Reprinting label…');
+  printLabelForPanel(p,p.sheetIdx);
+  const dd=_shakerDoorForPanel(p); if(dd) printShakerDoorLabel(dd);
+}
+function cmToast(msg,bad){
+  let el=document.getElementById('cmToast');
+  if(!el){ el=document.createElement('div'); el.id='cmToast';
+    el.style.cssText='position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:99999;padding:12px 18px;border-radius:10px;font-family:var(--mono);font-size:14px;font-weight:700;box-shadow:0 6px 24px rgba(0,0,0,.45);max-width:90vw;text-align:center';
+    document.body.appendChild(el); }
+  el.style.transition='none'; el.style.opacity='1';
+  el.style.background=bad?'#5a1a1a':'#1a5a3a'; el.style.color='#fff'; el.textContent=msg;
+  clearTimeout(el._t); el._t=setTimeout(()=>{ el.style.transition='opacity .5s'; el.style.opacity='0'; }, bad?6000:1800);
+}
+// The 550 needs the exact printer name (an empty name is accepted but never
+// physically prints — the cause of the "sent but nothing came out" labels).
+var _optPrinter=null;
+async function _optPrinterName(){
+  if(_optPrinter!=null) return _optPrinter;
+  try{ const r=await fetch('https://localhost:41951/DYMO/DLS/Printing/GetPrinters');
+    const t=await r.text(); const m=t.match(/<Name>([^<]*)<\/Name>/); _optPrinter=m?m[1]:''; }
+  catch(e){ _optPrinter=''; }
+  return _optPrinter;
+}
+async function _optDymoSend(xml){
+  for(let attempt=0; attempt<2; attempt++){
+    try{
+      const printer=await _optPrinterName();
+      const r=await fetch('https://localhost:41951/DYMO/DLS/Printing/PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'printerName='+encodeURIComponent(printer)+'&labelXml='+encodeURIComponent(xml)+'&printParamsXml=&labelSetXml='});
+      const t=((await r.text())||'').trim().toLowerCase();
+      if(r.ok && t.indexOf('true')>=0) return true;
+      _optPrinter=null; // the DYMO service sometimes drops (the 400 you saw) — re-look-up clears it
+    }catch(e){ _optPrinter=null; }
+    await new Promise(res=>setTimeout(res,400));
+  }
+  cmToast('⚠ Label didn’t print — check DYMO Connect is open, then tap 🖨 Reprint.',true);
+  return false;
+}
+function _oxesc(s){ return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+var _BRO='<Brushes><BackgroundBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></BackgroundBrush><BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush><StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush><FillBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush></Brushes>';
+function _olay(x,y,w,h){ return '<ObjectLayout><DYMOPoint><X>'+x+'</X><Y>'+y+'</Y></DYMOPoint><Size><Width>'+w+'</Width><Height>'+h+'</Height></Size></ObjectLayout>'; }
+function _otext(nm,text,x,y,w,h,size,bold,align){ align=align||'Center';
+  return '<TextObject><Name>'+nm+'</Name>'+_BRO+'<Rotation>Rotation0</Rotation><OutlineThickness>1</OutlineThickness><IsOutlined>False</IsOutlined><BorderStyle>SolidLine</BorderStyle><Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin><HorizontalAlignment>'+align+'</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment><FitMode>ShrinkToFit</FitMode><IsVertical>False</IsVertical><FormattedText><FitMode>ShrinkToFit</FitMode><HorizontalAlignment>'+align+'</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment><IsVertical>False</IsVertical><LineTextSpan><TextSpan><Text>'+_oxesc(text)+'</Text><FontInfo><FontName>Segoe UI</FontName><FontSize>'+size+'</FontSize><IsBold>'+(bold?'True':'False')+'</IsBold><IsItalic>False</IsItalic><IsUnderline>False</IsUnderline><FontBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FontBrush></FontInfo></TextSpan></LineTextSpan></FormattedText>'+_olay(x,y,w,h)+'</TextObject>';
+}
+function _odoc(objs){
+  return '<?xml version="1.0" encoding="utf-8"?><DesktopLabel Version="1"><DYMOLabel Version="4"><Description>DYMO Label</Description><Orientation>Portrait</Orientation><LabelName>S0722540 multipurpose</LabelName><InitialLength>0</InitialLength><BorderStyle>SolidLine</BorderStyle><DYMORect><DYMOPoint><X>0.04</X><Y>0.06</Y></DYMOPoint><Size><Width>2.17</Width><Height>1.13</Height></Size></DYMORect><BorderColor><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderColor><BorderThickness>1</BorderThickness><Show_Border>False</Show_Border><HasFixedLength>False</HasFixedLength><FixedLengthValue>0</FixedLengthValue><DynamicLayoutManager><RotationBehavior>ClearObjects</RotationBehavior><LabelObjects>'+objs+'</LabelObjects></DynamicLayoutManager></DYMOLabel><LabelApplication>Blank</LabelApplication><DataTable><Columns></Columns><Rows></Rows></DataTable></DesktopLabel>';
+}
+function printShakerDoorLabel(d){
+  if(!d) return;
+  const cust=d.company||projectName||'';
+  let o='';
+  o+=_otext('T1','SHAKER DOOR '+(d.ref||''),0.06,0.06,2.05,0.20,11,true,'Center');
+  o+=_otext('T2',cust,0.06,0.30,2.05,0.16,8,true,'Center');
+  o+=_otext('T3',(d.h+' x '+d.w),0.06,0.47,2.05,0.34,16,true,'Center');
+  o+=_otext('T4',((d.panels||1)+' panel   '+(d.frameMat||'')),0.06,0.90,2.05,0.16,8,true,'Center');
+  _optDymoSend(_odoc(o));
+}
+function printLabelForPanel(p,sheetIdx){
+  const sheet=_lastSheets[sheetIdx]; if(!sheet) return;
+  const company='Tayside Cut & Edge'; const customer=projectName||'';
+  const grain=p.grain==='W'?'W':p.grain==='N'?'N':'Y';
+  const codeFor=tk=>tk==='2'?'O':(tk==='0.6'?'P':'Y');
+  const ebSides=['L1','L2','W1','W2'].filter(s=>p.eb&&p.eb[s]).map(s=>s+':'+codeFor((p.eb.tk&&p.eb.tk[s])||'1')).join(' ');
+  const matching=sheet.placements.filter(pl=>pl.label===p.label&&pl.origL===p.origL&&pl.origW===p.origW);
+  const pidx=matching.findIndex(pl=>pl.x===p.x&&pl.y===p.y);
+  const panelNum=(pidx+1)+'/'+matching.length;
+  let o='';
+  o+=_otext('T1',(company+'    '+customer),0.06,0.05,2.05,0.15,7.5,true,'Left');
+  o+=_otext('T2',('['+grain+']   '+p.origL+' x '+p.origW+'   ['+grain+']'),0.06,0.22,2.05,0.20,10,true,'Center');
+  o+=_otext('T3',p.label,0.06,0.44,2.05,0.38,16,true,'Center');
+  o+=_otext('T4',('['+grain+']   '+ebSides+'    '+panelNum),0.06,0.90,2.05,0.15,8,true,'Center');
+  _optDymoSend(_odoc(o));
+}
 function onCncModeChange(){
   const on=document.getElementById('cncMode').checked;
   // Warn the user visibly so they don't accidentally calculate with CNC kerf for saw work
