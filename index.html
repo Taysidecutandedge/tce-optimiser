@@ -3886,6 +3886,7 @@ function openCuttingMode(){
 function closeCuttingMode(){
   document.getElementById('cuttingMode').classList.remove('active');
   document.body.style.overflow='';
+  _cmReview=false;
 }
 
 function cmStep(dir){
@@ -3970,8 +3971,10 @@ function cmRender(){
   document.getElementById('cmProgress').textContent=done+' / '+total+' confirmed';
   const body=document.getElementById('cmBody');
 
-  if(_cmDone.size>=total&&total>0){
-    body.innerHTML='<div class="cm-finished"><div class="cm-finished-icon">✅</div><div class="cm-finished-title">Job Complete!</div><div class="cm-finished-sub">All '+total+' panels confirmed</div><button class="cm-confirm" style="max-width:280px;margin-top:20px" onclick="closeCuttingMode()">Back to Optimiser</button></div>';
+  if(_cmDone.size>=total&&total>0&&!_cmReview){
+    body.innerHTML='<div class="cm-finished"><div class="cm-finished-icon">✅</div><div class="cm-finished-title">Job Complete!</div><div class="cm-finished-sub">All '+total+' panels confirmed</div>'
+      +'<button class="cm-confirm" style="max-width:280px;margin-top:20px" onclick="cmStartReview()">🖨 Review / reprint labels</button>'
+      +'<button class="cm-confirm" style="max-width:280px;margin-top:12px;background:#2b4a40;color:#e8f0ec" onclick="closeCuttingMode()">Back to Optimiser</button></div>';
     return;
   }
   if(_cmIdx>=total){_cmIdx=0;for(let i=0;i<total;i++){if(!_cmDone.has(i)){_cmIdx=i;break;}}}
@@ -4044,9 +4047,10 @@ function cmRender(){
         '</button>'+
       '</div>'+
       '<div class="cm-confirm-wrap">'+
-        '<button class="cm-confirm'+( confirmed?' confirmed':'')+'" onclick="cmConfirm()">'+
-          (confirmed?'✓ Done':'✓ Confirm Cut')+
-        '</button>'+
+        '<button onclick="cmReprint()" style="flex-shrink:0;background:#1f3a34;color:#cfe7dd;border:none;border-radius:10px;font-size:13px;font-weight:700;padding:11px 9px;cursor:pointer;width:100%;margin-bottom:8px;font-family:var(--mono)">🖨 Reprint</button>'+
+        (_cmReview
+          ? '<button class="cm-confirm" style="height:auto;flex:1;min-height:64px;background:#2b4a40;color:#e8f0ec" onclick="closeCuttingMode()">✓ Finish</button>'
+          : '<button class="cm-confirm'+( confirmed?' confirmed':'')+'" style="height:auto;flex:1;min-height:64px" onclick="cmConfirm()">'+(confirmed?'✓ Done':'✓ Confirm Cut')+'</button>')+
       '</div>'+
     '</div>';
   // Use double RAF to ensure layout is complete before measuring
