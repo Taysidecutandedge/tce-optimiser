@@ -4450,13 +4450,26 @@ function cmToast(msg,bad){
 // Resilient send: the DYMO service occasionally drops and returns 400 — the error
 // a page refresh used to clear. We retry a few times so it recovers on its own,
 // and only warn you if it truly can't print. Your label design is unchanged.
+// Target the LabelWriter by name so jobs never misroute to the LabelManager
+// tape printer (you have both installed). Falls back gracefully if not found.
+var _lwName=null;
+async function _lwPrinter(){
+  if(_lwName!=null) return _lwName;
+  try{ const r=await fetch('https://localhost:41951/DYMO/DLS/Printing/GetPrinters'); const t=await r.text();
+    const names=[...t.matchAll(/<Name>([^<]*)<\/Name>/g)].map(m=>m[1]);
+    _lwName = names.find(n=>/labelwriter/i.test(n)) || names.find(n=>/550/.test(n)) || names[0] || '';
+  }catch(e){ _lwName=''; }
+  return _lwName;
+}
 async function _dymoSendRetry(xml){
   for(let attempt=0; attempt<3; attempt++){
     try{
-      const r=await fetch('https://localhost:41951/DYMO/DLS/Printing/PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'printerName=&labelXml='+encodeURIComponent(xml)+'&printParamsXml=&labelSetXml='});
+      const printer=await _lwPrinter();
+      const r=await fetch('https://localhost:41951/DYMO/DLS/Printing/PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'printerName='+encodeURIComponent(printer)+'&labelXml='+encodeURIComponent(xml)+'&printParamsXml=&labelSetXml='});
       const t=((await r.text())||'').trim().toLowerCase();
       if(r.ok && t.indexOf('true')>=0) return true;
-    }catch(e){}
+      _lwName=null; // re-resolve on failure (clears a dropped connection)
+    }catch(e){ _lwName=null; }
     await new Promise(res=>setTimeout(res,500));
   }
   cmToast('⚠ Label didn’t print — check DYMO Connect is open, then tap 🖨 Reprint.',true);

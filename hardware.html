@@ -399,7 +399,10 @@ let _dymoPrinter=null;
 async function dymoPrinterName(){
   if(_dymoPrinter!=null) return _dymoPrinter;
   try{ const r=await fetch('https://localhost:41951/DYMO/DLS/Printing/GetPrinters');
-    const t=await r.text(); const m=t.match(/<Name>([^<]*)<\/Name>/); _dymoPrinter=m?m[1]:''; }
+    const t=await r.text();
+    const names=[...t.matchAll(/<Name>([^<]*)<\/Name>/g)].map(m=>m[1]);
+    // Prefer the LabelWriter (you also have a LabelManager 280 tape printer)
+    _dymoPrinter = names.find(n=>/labelwriter/i.test(n)) || names.find(n=>/550/.test(n)) || names[0] || ''; }
   catch(e){ _dymoPrinter=''; }
   return _dymoPrinter;
 }
