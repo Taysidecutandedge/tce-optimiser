@@ -4475,6 +4475,45 @@ async function _dymoSendRetry(xml){
   cmToast('⚠ Label didn’t print — check DYMO Connect is open, then tap 🖨 Reprint.',true);
   return false;
 }
+// ── 550 label builders (DesktopLabel format — the only format the 550 accepts).
+//    Layout mirrors the original panel label; content is unchanged. ──
+function _oxesc(s){ return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+var _BRO='<Brushes><BackgroundBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></BackgroundBrush><BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush><StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush><FillBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush></Brushes>';
+function _olay(x,y,w,h){ return '<ObjectLayout><DYMOPoint><X>'+x+'</X><Y>'+y+'</Y></DYMOPoint><Size><Width>'+w+'</Width><Height>'+h+'</Height></Size></ObjectLayout>'; }
+function _otext(nm,text,x,y,w,h,size,bold,align){ align=align||'Center';
+  return '<TextObject><Name>'+nm+'</Name>'+_BRO+'<Rotation>Rotation0</Rotation><OutlineThickness>1</OutlineThickness><IsOutlined>False</IsOutlined><BorderStyle>SolidLine</BorderStyle><Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin><HorizontalAlignment>'+align+'</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment><FitMode>ShrinkToFit</FitMode><IsVertical>False</IsVertical><FormattedText><FitMode>ShrinkToFit</FitMode><HorizontalAlignment>'+align+'</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment><IsVertical>False</IsVertical><LineTextSpan><TextSpan><Text>'+_oxesc(text)+'</Text><FontInfo><FontName>Segoe UI</FontName><FontSize>'+size+'</FontSize><IsBold>'+(bold?'True':'False')+'</IsBold><IsItalic>False</IsItalic><IsUnderline>False</IsUnderline><FontBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FontBrush></FontInfo></TextSpan></LineTextSpan></FormattedText>'+_olay(x,y,w,h)+'</TextObject>';
+}
+function _odoc(objs){
+  return '<?xml version="1.0" encoding="utf-8"?><DesktopLabel Version="1"><DYMOLabel Version="4"><Description>DYMO Label</Description><Orientation>Portrait</Orientation><LabelName>S0722540 multipurpose</LabelName><InitialLength>0</InitialLength><BorderStyle>SolidLine</BorderStyle><DYMORect><DYMOPoint><X>0.04</X><Y>0.06</Y></DYMOPoint><Size><Width>2.17</Width><Height>1.13</Height></Size></DYMORect><BorderColor><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderColor><BorderThickness>1</BorderThickness><Show_Border>False</Show_Border><HasFixedLength>False</HasFixedLength><FixedLengthValue>0</FixedLengthValue><DynamicLayoutManager><RotationBehavior>ClearObjects</RotationBehavior><LabelObjects>'+objs+'</LabelObjects></DynamicLayoutManager></DYMOLabel><LabelApplication>Blank</LabelApplication><DataTable><Columns></Columns><Rows></Rows></DataTable></DesktopLabel>';
+}
+function printShakerDoorLabel(d){
+  if(!d) return;
+  const cust=d.company||projectName||'';
+  let o='';
+  o+=_otext('T1','SHAKER DOOR '+(d.ref||''),0.06,0.05,2.05,0.18,11,true,'Center');
+  o+=_otext('T2',cust,0.06,0.28,2.05,0.16,8,true,'Center');
+  o+=_otext('T3',(d.h+' x '+d.w),0.06,0.46,2.05,0.34,16,true,'Center');
+  o+=_otext('T4',((d.panels||1)+' panel   '+(d.frameMat||'')),0.06,0.90,2.05,0.16,8,true,'Center');
+  _dymoSendRetry(_odoc(o));
+}
+function printLabelForPanel(p,sheetIdx){
+  const sheet=_lastSheets[sheetIdx]; if(!sheet) return;
+  const company='Tayside Cut & Edge'; const customer=projectName||'';
+  const grain=p.grain==='W'?'W':p.grain==='N'?'N':'Y';
+  const codeFor=tk=>tk==='2'?'O':(tk==='0.6'?'P':'Y');
+  const ebSides=['L1','L2','W1','W2'].filter(s=>p.eb&&p.eb[s]).map(s=>s+':'+codeFor((p.eb.tk&&p.eb.tk[s])||'1')).join(' ');
+  const matching=sheet.placements.filter(pl=>pl.label===p.label&&pl.origL===p.origL&&pl.origW===p.origW);
+  const pidx=matching.findIndex(pl=>pl.x===p.x&&pl.y===p.y);
+  const panelNum=(pidx+1)+'/'+matching.length;
+  // Same five elements, same positions as the original panel label
+  let o='';
+  o+=_otext('T1','['+grain+']',0.06,0.03,2.05,0.14,8,true,'Center');
+  o+=_otext('T2',(company+'    '+customer),0.06,0.18,2.05,0.13,7,true,'Left');
+  o+=_otext('T3',('['+grain+']   '+p.origL+' x '+p.origW+'   ['+grain+']'),0.06,0.33,2.05,0.17,9,true,'Center');
+  o+=_otext('T4',p.label,0.06,0.52,2.05,0.34,14,true,'Center');
+  o+=_otext('T5',('['+grain+']   '+ebSides+'   '+panelNum),0.06,0.92,2.05,0.14,8,true,'Right');
+  _dymoSendRetry(_odoc(o));
+}
 function onCncModeChange(){
   const on=document.getElementById('cncMode').checked;
   // Warn the user visibly so they don't accidentally calculate with CNC kerf for saw work
