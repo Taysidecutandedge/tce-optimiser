@@ -4435,8 +4435,11 @@ function cmStartReview(){ _cmReview=true; _cmIdx=0; cmRender(); }
 function cmReprint(){
   const p=_cmPanels[_cmIdx]; if(!p) return;
   cmToast('🖨 Reprinting label…');
+  // Do exactly what Confirm Cut does to print — including publishing the panel
+  // to the print hub (cmEmitCutEvent), which is what actually prints the label.
   printLabelForPanel(p,p.sheetIdx);
   const dd=_shakerDoorForPanel(p); if(dd) printShakerDoorLabel(dd);
+  cmEmitCutEvent(p);
 }
 function cmToast(msg,bad){
   let el=document.getElementById('cmToast');
