@@ -2033,7 +2033,14 @@ function _calculateInner(){
   best.sheets.forEach(s=>tidySheetSafe(s,kerf));   // stack lone panels into same-width strips (self-validating, reverts if not rippable)
   // Tally offcuts this result consumed (Phase 2) for the "mark used" prompt
   const _usedOff={};
-  best.sheets.forEach(s=>{ if(s._isOffcut&&s.placements.length){ const k=s._offcutId; if(!_usedOff[k])_usedOff[k]={id:s._offcutId,code:s._offcutCode,l:s._offL,w:s._offW,count:0}; _usedOff[k].count++; } });
+  best.sheets.forEach(s=>{ if(s._isOffcut&&s.placements.length){ const k=s._offcutId;
+    if(!_usedOff[k]){
+      // pull material + rack location off the stock record so the pick list is usable
+      const src=(_offcutStock||[]).find(o=>String(o.id)===String(s._offcutId))||{};
+      _usedOff[k]={id:s._offcutId,code:s._offcutCode,l:s._offL,w:s._offW,count:0,
+                   mat:src.name||s.name||'',loc:src.location||''};
+    }
+    _usedOff[k].count++; } });
   window._lastUsedOffcuts=Object.values(_usedOff);
   renderResults(best.sheets,best.unplaced);
 }
@@ -2104,20 +2111,61 @@ function fitsT(pw,ph,r,tol){return pw<=r.w+.001+tol&&ph<=r.h+.001+tol;}
 // ═══════════════════════════════════════════════
 // RENDER RESULTS
 // ═══════════════════════════════════════════════
+// Two locations in practice: the rack, or standing up. Tidy the spelling variants
+// ("Racking", "Top Rack", "top rack" …) into one group each.
+function _ocLoc(loc){
+  const s=String(loc||'').toLowerCase().trim();
+  if(!s) return 'Location not set';
+  if(/rack/.test(s)) return 'Top rack';
+  if(/stand/.test(s)) return 'Standing up';
+  return String(loc);
+}
+let _ocUndo=null;
 async function markOffcutsUsed(btn){
   const list=window._lastUsedOffcuts||[]; if(!list.length)return;
+  const total=list.reduce((a,x)=>a+x.count,0);
+  if(!confirm('Mark '+total+' offcut'+(total!==1?'s':'')+' as used?\n\nThis takes them out of your offcut stock.')) return;
   if(btn){btn.disabled=true;btn.textContent='Marking…';}
+  const undo=[];
   for(const u of list){
     try{
-      const cur=await (await fetch(SB_URL+'/rest/v1/tce_library?select=qty&id=eq.'+u.id,{headers:sbAuthH()})).json();
+      const cur=await (await fetch(SB_URL+'/rest/v1/tce_library?select=qty,status&id=eq.'+u.id,{headers:sbAuthH()})).json();
+      const prev=(cur&&cur[0])||{};
       const q=((cur&&cur[0]?(+cur[0].qty||1):1)-u.count);
       const patch = q>0 ? {qty:q} : {qty:0,status:'used',used_at:new Date().toISOString()};
-      await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+u.id,{method:'PATCH',headers:sbAuthH(),body:JSON.stringify(patch)});
+      const r=await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+u.id,{method:'PATCH',headers:sbAuthH(),body:JSON.stringify(patch)});
+      if(r.ok) undo.push({id:u.id, qty:(prev.qty!=null?prev.qty:1), status:prev.status||'in_stock'});
     }catch(e){}
   }
+  _ocUndo=undo.length?undo:null;
   await sbLoadOffcuts();
   window._lastUsedOffcuts=[];
-  if(btn){btn.textContent='✓ Marked used';btn.style.background='#555';}
+  if(btn){
+    btn.textContent='✓ Marked used'; btn.style.background='#555';
+    if(_ocUndo&&btn.parentNode&&!document.getElementById('ocUndoBtn')){
+      const u=document.createElement('button');
+      u.id='ocUndoBtn'; u.className='btn btn-sm'; u.textContent='↶ Undo';
+      u.style.cssText='background:#7a4a1f;color:#fff;border:none';
+      u.onclick=()=>undoOffcutsUsed(u);
+      btn.parentNode.appendChild(u);
+    }
+  }
+}
+async function undoOffcutsUsed(btn){
+  const list=_ocUndo||[];
+  if(!list.length){ alert('Nothing to undo.'); return; }
+  if(btn){btn.disabled=true;btn.textContent='Undoing…';}
+  let ok=0,fail=0;
+  for(const u of list){
+    try{
+      const r=await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+u.id,{method:'PATCH',headers:sbAuthH(),
+        body:JSON.stringify({qty:u.qty,status:u.status,used_at:null})});
+      if(r.ok) ok++; else fail++;
+    }catch(e){ fail++; }
+  }
+  _ocUndo=null;
+  await sbLoadOffcuts();
+  if(btn){ btn.textContent='✓ Put back '+ok+(fail?(' · '+fail+' failed'):''); btn.style.background='#555'; }
 }
 function renderResults(sheets,unplaced){
   // Store for print
@@ -2175,10 +2223,39 @@ function renderResults(sheets,unplaced){
   const _uo=window._lastUsedOffcuts||[];
   const _freshBoards=sheets.filter(s=>!s._isOffcut).length;
   const _offcutsN=sheets.filter(s=>s._isOffcut).length;
-  const _offcutBanner=_uo.length?`<div style="margin:0 0 12px;padding:10px 14px;background:rgba(40,170,90,.12);border:1px solid rgba(40,170,90,.45);border-radius:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-      <span style="font-size:13px">♻ This job used <strong>${_uo.reduce((a,x)=>a+x.count,0)}</strong> offcut(s): ${_uo.map(x=>esc(x.code)+' ('+x.l+'×'+x.w+(x.count>1?' ×'+x.count:'')+')').join(', ')}</span>
-      <button class="btn btn-sm" style="margin-left:auto;background:#27ae60;color:#fff;border:none" onclick="markOffcutsUsed(this)">Mark them used</button>
-    </div>`:'';
+  const _offcutBanner=(()=>{
+    if(!_uo.length) return '';
+    const groups={};
+    _uo.forEach(x=>{ const g=_ocLoc(x.loc); (groups[g]=groups[g]||[]).push(x); });
+    const order=['Top rack','Standing up'];
+    const keys=Object.keys(groups).sort((a,b)=>{
+      const ia=order.indexOf(a), ib=order.indexOf(b);
+      return ((ia<0?98:ia)-(ib<0?98:ib))||a.localeCompare(b);
+    });
+    const total=_uo.reduce((a,x)=>a+x.count,0);
+    const body=keys.map(k=>{
+      const n=groups[k].reduce((a,x)=>a+x.count,0);
+      const rows=groups[k].slice().sort((a,b)=>(b.l*b.w)-(a.l*a.w)).map(x=>`
+        <div style="display:flex;gap:12px;align-items:baseline;padding:2px 0;font-size:13px">
+          <span style="font-weight:700;min-width:150px">${esc(x.mat||'—')}</span>
+          <span style="font-family:var(--mono);min-width:104px">${x.l}×${x.w}</span>
+          <span style="color:var(--txt3);font-size:11px;font-family:var(--mono)">${esc(x.code||'')}${x.count>1?' ×'+x.count:''}</span>
+        </div>`).join('');
+      const unset=k==='Location not set';
+      return `<div style="margin-top:9px">
+        <div style="font-size:11px;letter-spacing:.6px;font-weight:700;color:${unset?'#ffcf8a':'#7fe3a8'};margin-bottom:2px">${esc(k.toUpperCase())} (${n})</div>
+        ${rows}</div>`;
+    }).join('');
+    return `<div style="margin:0 0 12px;padding:10px 14px;background:rgba(40,170,90,.12);border:1px solid rgba(40,170,90,.45);border-radius:8px">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span style="font-size:13px">♻ <strong>${total}</strong> offcut${total!==1?'s':''} to collect</span>
+        <span id="ocBtns" style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn btn-sm" style="background:#27ae60;color:#fff;border:none" onclick="markOffcutsUsed(this)">Mark them used</button>
+        </span>
+      </div>
+      ${body}
+    </div>`;
+  })();
   main.innerHTML=`
     ${_offcutBanner}
     <div class="stats-bar">
