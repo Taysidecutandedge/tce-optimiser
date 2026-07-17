@@ -2265,24 +2265,26 @@ function renderResults(sheets,unplaced){
     (_lastEbDetail||[]).forEach(d=>{
       const key=`${d.tk}mm · ${ebSheetCode(d.decor)}`;
       const need=d.lenMm/1000 + d.count*30/1000 + _setupD;
-      const matches=(_ebRolls||[]).filter(r=>_norm(r.decor)===_norm(d.decor));
-      let pick=null, covers=false;
-      if(matches.length){
-        const cov=matches.filter(r=>Number(r.remaining_m)>=need).sort((a,b)=>a.remaining_m-b.remaining_m);
-        pick = cov[0] || matches.slice().sort((a,b)=>b.remaining_m-a.remaining_m)[0];
-        covers = Number(pick.remaining_m)>=need;
-      }
-      ebSugg[key]={pick,covers,inStock:matches.length>0,need};
+      const {matches,plan}=ebPlanRolls(d.decor,need);
+      ebSugg[key]={plan,inStock:matches.length>0,need};
     });
     const cards=sorted.map(([k,v])=>{
       const metres=(v/1000);
       const rolls=Math.ceil(v/ROLL);
       const rollTxt=rolls===1?'1 roll':`${rolls} rolls`;
       const sg=ebSugg[k];
-      const pickLine = !sg ? ''
-        : sg.pick
-          ? `<div class="eb-sum-sub" style="color:${sg.covers?'#7fe3a8':'#ffcf8a'};font-weight:600">→ use ${esc(sg.pick.code||'roll')}${sg.pick.tape_width?' ('+sg.pick.tape_width+'mm wide)':''} · ${Number(sg.pick.remaining_m).toFixed(1)}m${sg.covers?'':' · load 2nd roll'}</div>`
-          : `<div class="eb-sum-sub" style="color:#ff8a80;font-weight:600">→ none in stock — order</div>`;
+      let pickLine='';
+      if(sg){
+        if(!sg.inStock){
+          pickLine=`<div class="eb-sum-sub" style="color:#ff8a80;font-weight:600">→ none in stock — order</div>`;
+        }else{
+          const steps=sg.plan.filter(p=>!p.short).map(p=>p.useAll
+            ? `use up ${esc(p.code||'roll')} (${p.metres}m — finishes it)`
+            : `${p.metres}m from ${esc(p.code||'roll')}${p.width?' ('+p.width+'mm wide)':''}`);
+          const short=sg.plan.find(p=>p.short);
+          pickLine=`<div class="eb-sum-sub" style="color:${short?'#ffcf8a':'#7fe3a8'};font-weight:600">→ ${steps.join(' → ')}${short?` · short ${short.short}m — order more`:''}</div>`;
+        }
+      }
       return `
       <div class="eb-sum-card">
         <div class="eb-sum-lbl">${k}</div>
@@ -2324,11 +2326,45 @@ function renderResults(sheets,unplaced){
 // per decor: edge metres + 30mm/edge trim + confirmable setup
 // ═══════════════════════════════════════════════
 function closeEbDeduct(){ const m=document.getElementById('ebDeductModal'); if(m)m.remove(); }
+// ── Roll plan: clear the small rolls first, then finish on the smallest roll that
+//    can complete the run. Swapping rolls of the same decor/thickness costs nothing
+//    (setup tape is only for a thickness change), so remnants are always worth using.
+function _ebNorm(s){ return String(s||'').toLowerCase().replace(/\s+/g,' ').trim(); }
+function ebPlanRolls(decor, need){
+  const matches=(_ebRolls||[]).filter(r=>_ebNorm(r.decor)===_ebNorm(decor));
+  const rolls=matches.filter(r=>Number(r.remaining_m)>0).sort((a,b)=>a.remaining_m-b.remaining_m);
+  const plan=[]; const used=new Set(); let remaining=need;
+  for(const r of rolls){
+    const have=Number(r.remaining_m);
+    if(have>=remaining) continue;                 // could finish it alone — save for the last step
+    plan.push({id:r.id,code:r.code,width:r.tape_width,metres:+have.toFixed(2),useAll:true});
+    used.add(r.id); remaining=+(remaining-have).toFixed(4);
+  }
+  const fin=rolls.find(r=>!used.has(r.id)&&Number(r.remaining_m)>=remaining);
+  if(fin) plan.push({id:fin.id,code:fin.code,width:fin.tape_width,metres:+Math.max(0,remaining).toFixed(2),useAll:false});
+  else if(remaining>0.005) plan.push({short:+remaining.toFixed(2)});
+  return {matches, plan};
+}
+function ebLinesHtml(decor, need){
+  const {matches, plan}=ebPlanRolls(decor, need);
+  if(!matches.length) return '<div style="font-size:12px;color:#ff8a80;margin-top:6px">no matching roll in stock — order</div>';
+  const optsFor=sel=>'<option value="">— skip —</option>'+matches.map(r=>`<option value="${r.id}"${String(r.id)===String(sel)?' selected':''}>${esc(r.code||'roll')} · ${Number(r.remaining_m).toFixed(1)}m left${r.tape_width?(' · '+r.tape_width+'mm wide'):''}${r.tape_thick?(' · '+r.tape_thick+'mm thick'):''}</option>`).join('');
+  let html=plan.filter(p=>!p.short).map(p=>`<div class="ebd-line" style="display:flex;gap:8px;align-items:center;margin-top:6px">
+      <select class="ebd-roll" style="flex:1">${optsFor(p.id)}</select>
+      <input type="number" class="ebd-metres" value="${p.metres}" step="0.1" min="0" style="width:88px">
+      <span style="font-size:11px;color:${p.useAll?'#7fe3a8':'var(--txt3)'};min-width:82px">m${p.useAll?' · finishes it':''}</span>
+    </div>`).join('');
+  const short=plan.find(p=>p.short);
+  if(short) html+=`<div style="font-size:12px;color:#ff8a80;margin-top:6px">short by ${short.short}m — order more</div>`;
+  return html;
+}
 function ebRowRecalc(input){
   const row=input.closest('.ebd-row'); if(!row)return;
   const edge=parseFloat(row.dataset.edge)||0, trim=parseFloat(row.dataset.trim)||0;
   const setup=parseFloat(input.value)||0;
-  const t=row.querySelector('.ebd-total'); if(t) t.textContent=(edge+trim+setup).toFixed(1);
+  const need=edge+trim+setup;
+  const t=row.querySelector('.ebd-total'); if(t) t.textContent=need.toFixed(1);
+  const box=row.querySelector('.ebd-lines'); if(box) box.innerHTML=ebLinesHtml(row.dataset.decor, need);
 }
 async function openEbDeduct(){
   closeEbDeduct();
@@ -2339,17 +2375,14 @@ async function openEbDeduct(){
   const rowsHtml=_lastEbDetail.map((d,i)=>{
     const edgeM=d.lenMm/1000, trimM=d.count*30/1000, need=edgeM+trimM+setupDefault;
     const matches=_ebRolls.filter(r=>norm(r.decor)===norm(d.decor));
-    const covering=matches.filter(r=>Number(r.remaining_m)>=need).sort((a,b)=>a.remaining_m-b.remaining_m);
-    const def = covering.length ? covering[0].id : (matches.length ? matches.slice().sort((a,b)=>b.remaining_m-a.remaining_m)[0].id : '');
-    const opts='<option value="">— skip —</option>'+matches.map(r=>`<option value="${r.id}"${r.id===def?' selected':''}>${esc(r.code||'roll')} · ${Number(r.remaining_m).toFixed(1)}m left${r.tape_width?(' · '+r.tape_width+'mm wide'):''}${r.tape_thick?(' · '+r.tape_thick+'mm thick'):''}</option>`).join('');
-    return `<div class="ebd-row" data-edge="${edgeM}" data-trim="${trimM}" style="border:1px solid var(--brd);border-radius:8px;padding:10px;margin-bottom:8px">
+    return `<div class="ebd-row" data-edge="${edgeM}" data-trim="${trimM}" data-decor="${esc(d.decor)}" style="border:1px solid var(--brd);border-radius:8px;padding:10px;margin-bottom:8px">
       <div style="font-weight:700">${esc(d.decor)} <span style="color:var(--txt3);font-weight:400">· ${d.tk}mm tape</span></div>
       <div style="font-size:12px;color:var(--txt2);margin:3px 0 7px">${edgeM.toFixed(1)}m edges + ${trimM.toFixed(2)}m trim (${d.count} edge${d.count!==1?'s':''} × 30mm)${matches.length?'':' · <span style="color:#ff8a80">no matching roll in stock</span>'}</div>
       <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
         <div><label style="font-size:11px;color:var(--txt3)">Setup (m)</label><br><input type="number" class="ebd-setup" value="${setupDefault}" step="0.25" min="0" style="width:78px" oninput="ebRowRecalc(this)"></div>
-        <div style="flex:1;min-width:170px"><label style="font-size:11px;color:var(--txt3)">Deduct from roll</label><br><select class="ebd-roll" style="width:100%">${opts}</select></div>
-        <div style="text-align:right"><label style="font-size:11px;color:var(--txt3)">Used</label><br><span class="ebd-total" style="font-weight:700;font-family:var(--mono)">${(edgeM+trimM+setupDefault).toFixed(1)}</span>m</div>
+        <div style="text-align:right;margin-left:auto"><label style="font-size:11px;color:var(--txt3)">Total needed</label><br><span class="ebd-total" style="font-weight:700;font-family:var(--mono)">${need.toFixed(1)}</span>m</div>
       </div>
+      <div class="ebd-lines">${ebLinesHtml(d.decor, need)}</div>
     </div>`;
   }).join('');
   const div=document.createElement('div');
@@ -2368,26 +2401,33 @@ async function openEbDeduct(){
 }
 async function confirmEbDeduct(){
   const rows=[...document.querySelectorAll('#ebDeductModal .ebd-row')];
-  let firstSetup=null, done=0, fail=0;
+  let firstSetup=null, done=0, fail=0, emptied=0;
+  // Gather every roll line across all decors, combining any roll used twice
+  const totals={};
   for(const row of rows){
-    const sel=row.querySelector('.ebd-roll'); const rollId=sel?sel.value:'';
     const setup=parseFloat(row.querySelector('.ebd-setup').value)||0;
     if(firstSetup===null) firstSetup=setup;
-    if(!rollId) continue;
-    const edge=parseFloat(row.dataset.edge)||0, trim=parseFloat(row.dataset.trim)||0;
-    const used=edge+trim+setup;
+    row.querySelectorAll('.ebd-line').forEach(line=>{
+      const rollId=(line.querySelector('.ebd-roll')||{}).value||'';
+      const m=parseFloat((line.querySelector('.ebd-metres')||{}).value)||0;
+      if(!rollId||m<=0) return;
+      totals[rollId]=(totals[rollId]||0)+m;
+    });
+  }
+  for(const rollId of Object.keys(totals)){
+    const used=totals[rollId];
     const roll=_ebRolls.find(r=>String(r.id)===String(rollId));
     const newRem=Math.max(0,(Number(roll&&roll.remaining_m)||0)-used);
     const patch = newRem<=0 ? {remaining_m:0,status:'empty',label_pending:false}
                             : {remaining_m:Number(newRem.toFixed(2)),label_pending:true};
     try{
       const r=await fetch(SB_URL+'/rest/v1/tce_eb_rolls?id=eq.'+rollId,{method:'PATCH',headers:sbAuthH(),body:JSON.stringify(patch)});
-      if(r.ok){ done++; if(roll) roll.remaining_m=newRem; } else fail++;
+      if(r.ok){ done++; if(newRem<=0) emptied++; if(roll) roll.remaining_m=newRem; } else fail++;
     }catch(e){ fail++; }
   }
   if(firstSetup!=null) localStorage.setItem('tce_eb_setup',String(firstSetup));
   closeEbDeduct();
-  alert(done?(done+' roll'+(done!==1?'s':'')+' updated'+(fail?(' · '+fail+' failed'):'')+'. Fresh label'+(done!==1?'s':'')+' queued — print at the workshop station.'):(fail?'Update failed — check connection.':'Nothing deducted.'));
+  alert(done?(done+' roll'+(done!==1?'s':'')+' updated'+(emptied?(' · '+emptied+' finished & off the rack'):'')+(fail?(' · '+fail+' failed'):'')+'. Fresh label'+(done!==1?'s':'')+' queued — print at the workshop station.'):(fail?'Update failed — check connection.':'Nothing deducted.'));
 }
 
 // ═══════════════════════════════════════════════
