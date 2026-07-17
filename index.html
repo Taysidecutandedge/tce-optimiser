@@ -1627,8 +1627,12 @@ function _calculateInner(){
       const bySize=(a,b)=>(a.uw*a.uh)-(b.uw*b.uh)||a._poolIdx-b._poolIdx;
       // 1) SMALL offcuts first — use freely (smallest that fits)
       for(const sh of matching.filter(s=>s._isOffcut&&ocSmall(s)).sort(bySize)) if(tryPlace(sh,piece)) return true;
-      // 2) Existing fresh boards — fullest first (original behaviour)
-      const fullCands=matching.filter(sh=>!sh._isOffcut)
+      // 2) Boards ALREADY IN USE — fullest first (original behaviour).
+      //    Untouched boards are excluded here: an empty board is effectively a NEW
+      //    board, and big offcuts (step 3) exist precisely to avoid opening one.
+      //    (Previously every job sheet was pre-seeded as an empty board, so this
+      //    step always won and big offcuts could never be reached.)
+      const fullCands=matching.filter(sh=>!sh._isOffcut&&sh.placements.length>0)
         .sort((a,b)=>{
           const ua=a.placements.reduce((s,p)=>s+p.w*p.h,0)/(a.uw*a.fullL);
           const ub=b.placements.reduce((s,p)=>s+p.w*p.h,0)/(b.uw*b.fullL);
@@ -1638,7 +1642,9 @@ function _calculateInner(){
       for(const sh of fullCands) if(tryPlace(sh,piece)) return true;
       // 3) BIG offcuts — only now, i.e. only to avoid opening a NEW board (so they only get used when they actually save a board)
       for(const sh of matching.filter(s=>s._isOffcut&&!ocSmall(s)).sort(bySize)) if(tryPlace(sh,piece)) return true;
-      // 4) Open a fresh full board
+      // 4) Open a fresh full board — reuse an untouched board already in the pool first
+      const emptyBoard=matching.find(sh=>!sh._isOffcut&&!sh.placements.length);
+      if(emptyBoard&&tryPlace(emptyBoard,piece)) return true;
       const src=jobSheets.find(s=>!piece._msid||s.id===piece._msid);
       if(!src) return false;
       const newSh=addToPool(makeSheet(src));
