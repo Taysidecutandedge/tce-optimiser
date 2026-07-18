@@ -4137,12 +4137,18 @@ function cmRender(){
 
   // Sheet identity — highlighted when sheet changes
   const sheetBg=sheetChanged?'background:rgba(212,130,10,.25);border-color:var(--acc)':'';
+  const _isOff=!!p.sheet._isOffcut;
+  const _offTag=_isOff
+    ? '<span style="background:#27ae60;color:#fff;font-family:var(--mono);font-size:12px;font-weight:700;padding:2px 9px;border-radius:5px">♻ '+esc(p.sheet._offcutCode||'OFFCUT')+' · '+p.sheet._offL+'×'+p.sheet._offW+'mm</span>'
+    : '';
   const sheetIdentity=
     '<div style="flex-shrink:0;background:var(--surf2);border-bottom:2px solid '+(sheetChanged?'var(--acc)':'var(--brd)')+';padding:6px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;'+sheetBg+'">'+
       '<span style="font-family:var(--mono);font-size:11px;font-weight:700;color:var(--acc)">SHEET '+(p.sheetIdx+1)+' / '+_lastSheets.length+'</span>'+
       '<span style="font-family:var(--mono);font-size:11px;color:var(--txt2)">'+esc(p.sheetName)+'</span>'+
-      '<span style="font-family:var(--mono);font-size:10px;color:var(--txt3)">'+p.sheet.fullL+'×'+p.sheet.fullW+'mm</span>'+
-      (sheetChanged?'<span style="font-family:var(--mono);font-size:10px;font-weight:700;color:var(--acc);margin-left:auto">⚠ NEW SHEET</span>':'')+
+      (_isOff
+        ? _offTag
+        : '<span style="font-family:var(--mono);font-size:10px;color:var(--txt3)">'+p.sheet.fullL+'×'+p.sheet.fullW+'mm</span>')+
+      (sheetChanged?'<span style="font-family:var(--mono);font-size:10px;font-weight:700;color:var(--acc);margin-left:auto">⚠ NEW '+(_isOff?'OFFCUT':'SHEET')+'</span>':'')+
       '<button class="cm-nav-btn" onclick="cmResetCuts()" title="Clear all marked cuts and start fresh" style="'+(sheetChanged?'':'margin-left:auto;')+'font-size:11px;padding:5px 12px">↺ Reset cuts</button>'+
     '</div>';
 
