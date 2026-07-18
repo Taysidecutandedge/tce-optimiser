@@ -2223,6 +2223,13 @@ function renderResults(sheets,unplaced){
   const _uo=window._lastUsedOffcuts||[];
   const _freshBoards=sheets.filter(s=>!s._isOffcut).length;
   const _offcutsN=sheets.filter(s=>s._isOffcut).length;
+  // Break the fresh-board count down by material, so "12" reads "8× H1367 St40, 2× 22mm Mr Mdf…"
+  const _boardTally={};
+  sheets.filter(s=>!s._isOffcut).forEach(s=>{ const k=s.name||'Board'; _boardTally[k]=(_boardTally[k]||0)+1; });
+  const _boardBreakdown=Object.entries(_boardTally)
+    .sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]))
+    .map(([n,c])=>`<div style="display:flex;gap:8px;font-size:11px;line-height:1.45"><span style="font-family:var(--mono);font-weight:700;color:var(--acc);min-width:20px">${c}×</span><span style="color:var(--txt2)">${esc(n)}</span></div>`)
+    .join('');
   const _offcutBanner=(()=>{
     if(!_uo.length) return '';
     const groups={};
@@ -2259,7 +2266,7 @@ function renderResults(sheets,unplaced){
   main.innerHTML=`
     ${_offcutBanner}
     <div class="stats-bar">
-      <div class="stat"><div class="stat-lbl">${_offcutsN?'Fresh Boards':'Sheets Used'}</div><div class="stat-val cv-acc">${_offcutsN?_freshBoards:sheets.length}</div></div>
+      <div class="stat"><div class="stat-lbl">${_offcutsN?'Fresh Boards':'Sheets Used'}</div><div class="stat-val cv-acc">${_offcutsN?_freshBoards:sheets.length}</div>${_boardBreakdown?`<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--brd)">${_boardBreakdown}</div>`:''}</div>
       ${_offcutsN?`<div class="stat"><div class="stat-lbl">Offcuts Used</div><div class="stat-val cv-ok">♻ ${_offcutsN}</div></div>`:''}
       <div class="stat"><div class="stat-lbl">Parts Placed</div><div class="stat-val cv-ok">${placed}</div></div>
       <div class="stat"><div class="stat-lbl">Efficiency</div><div class="stat-val ${eP>=80?'cv-ok':eP>=60?'cv-acc':'cv-err'}">${eP}%</div></div>
