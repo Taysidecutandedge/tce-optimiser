@@ -675,6 +675,30 @@ const INVITE_CODE='TCE2026'; // Change this in Supabase dashboard or here when n
 
 let _sbToken=null; // JWT access token for authenticated requests
 let _sbUser=null;  // {id, email}
+let _sbRefresh=null;      // long-lived refresh token — renews the JWT so long iPad sessions never silently expire
+let _sbRefreshTimer=null;
+// Renew the access token from the stored refresh token (Supabase rotates it each time).
+async function sbDoRefresh(){
+  const rt=_sbRefresh||localStorage.getItem('tce_refresh');
+  if(!rt) return false;
+  try{
+    const r=await fetch(SB_URL+'/auth/v1/token?grant_type=refresh_token',{
+      method:'POST',headers:{'apikey':SB_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify({refresh_token:rt})});
+    if(!r.ok) return false;
+    const d=await r.json();
+    if(!d.access_token) return false;
+    _sbToken=d.access_token;
+    localStorage.setItem('tce_token',_sbToken);
+    if(d.refresh_token){ _sbRefresh=d.refresh_token; localStorage.setItem('tce_refresh',_sbRefresh); }
+    return true;
+  }catch(e){ return false; }
+}
+function sbStartRefreshTimer(){
+  if(_sbRefreshTimer) clearInterval(_sbRefreshTimer);
+  // Proactively renew well before the ~1h expiry, so a long cutting session never lapses
+  _sbRefreshTimer=setInterval(()=>{ sbDoRefresh(); }, 45*60*1000);
+}
 
 // Headers for anon requests (no auth)
 const sbAnonH={'apikey':SB_KEY,'Content-Type':'application/json'};
@@ -696,8 +720,11 @@ async function sbSignIn(email,password){
   if(!r.ok)throw new Error(d.error_description||d.msg||'Sign in failed');
   _sbToken=d.access_token;
   _sbUser={id:d.user.id,email:d.user.email};
+  _sbRefresh=d.refresh_token||null;
   localStorage.setItem('tce_token',_sbToken);
   localStorage.setItem('tce_user',JSON.stringify(_sbUser));
+  if(_sbRefresh) localStorage.setItem('tce_refresh',_sbRefresh);
+  sbStartRefreshTimer();
   return d;
 }
 
@@ -715,8 +742,11 @@ async function sbSignUp(email,password){
   }
   _sbToken=d.access_token;
   _sbUser={id:d.user.id,email:d.user.email};
+  _sbRefresh=d.refresh_token||null;
   localStorage.setItem('tce_token',_sbToken);
   localStorage.setItem('tce_user',JSON.stringify(_sbUser));
+  if(_sbRefresh) localStorage.setItem('tce_refresh',_sbRefresh);
+  sbStartRefreshTimer();
   return d;
 }
 
@@ -725,23 +755,30 @@ async function sbRefreshToken(){
   const tok=localStorage.getItem('tce_token');
   const usr=localStorage.getItem('tce_user');
   if(!tok||!usr)return false;
-  // Verify token is still valid with a lightweight request
-  try{
-    const r=await fetch(SB_URL+'/auth/v1/user',{
-      headers:{'apikey':SB_KEY,'Authorization':'Bearer '+tok}
-    });
-    if(!r.ok)return false;
-    const d=await r.json();
-    _sbToken=tok;
-    _sbUser={id:d.id,email:d.email};
-    return true;
-  }catch(e){return false;}
+  _sbRefresh=localStorage.getItem('tce_refresh')||null;
+  const verify=async t=>{
+    try{ const r=await fetch(SB_URL+'/auth/v1/user',{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+t}}); return r.ok?await r.json():null; }
+    catch(e){ return null; }
+  };
+  let d=await verify(tok);
+  if(d){ _sbToken=tok; }
+  else{
+    // Stored token expired — renew it from the refresh token rather than logging out
+    if(!(await sbDoRefresh())) return false;
+    d=await verify(_sbToken);
+    if(!d) return false;
+  }
+  _sbUser={id:d.id,email:d.email};
+  sbStartRefreshTimer();
+  return true;
 }
 
 function sbSignOut(){
-  _sbToken=null; _sbUser=null;
+  _sbToken=null; _sbUser=null; _sbRefresh=null;
+  if(_sbRefreshTimer){ clearInterval(_sbRefreshTimer); _sbRefreshTimer=null; }
   localStorage.removeItem('tce_token');
   localStorage.removeItem('tce_user');
+  localStorage.removeItem('tce_refresh');
 }
 
 // ── UI helpers ────────────────────────────────
@@ -4028,7 +4065,7 @@ function cmStep(dir){
   _cmIdx=idx; cmRender();
 }
 
-function cmEmitCutEvent(p){
+async function cmEmitCutEvent(p){
   // Fire-and-forget: publish this confirmed panel to the offload screen.
   // Fully wrapped so it can NEVER affect cutting if anything fails (offline, error).
   try{
@@ -4050,7 +4087,21 @@ function cmEmitCutEvent(p){
         door:_shakerDoorForPanel(p)
       }
     };
-    fetch(SB_URL+'/rest/v1/tce_cut_events',{method:'POST',headers:{...sbAuthH(),'Prefer':'return=minimal'},body:JSON.stringify(body)}).catch(()=>{});
+    // Reliable publish: if the token has lapsed (common on a long iPad session) the
+    // POST 401s — renew and retry, then one network retry, and only if it STILL
+    // fails do we warn, so a Confirm can't silently miss the print station.
+    const post=()=>fetch(SB_URL+'/rest/v1/tce_cut_events',{method:'POST',headers:{...sbAuthH(),'Prefer':'return=minimal'},body:JSON.stringify(body)}).then(r=>r.status).catch(()=>0);
+    let st=await post();
+    if(st===401){ if(await sbDoRefresh()) st=await post(); }
+    if(!(st>=200&&st<300)){
+      await new Promise(r=>setTimeout(r,700));
+      if(st===401){ if(await sbDoRefresh()) {} }
+      st=await post();
+      if(st===401){ if(await sbDoRefresh()) st=await post(); }
+    }
+    if(!(st>=200&&st<300) && typeof cmToast==='function'){
+      cmToast('⚠ Confirm didn’t reach the print station — check Wi-Fi, then tap 🖨 Reprint',true);
+    }
   }catch(e){}
 }
 
