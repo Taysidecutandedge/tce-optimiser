@@ -151,6 +151,39 @@ let _current=null;
 const recent=[];
 let autoPrint = localStorage.getItem('tce_autoprint')==='1';
 
+// ── Reliable confirm delivery ─────────────────────────────────────────
+// Realtime (websocket) is primary but can silently drop on a sleeping tablet
+// or a Wi-Fi blip. A fast backup poll catches anything it misses, and every
+// event is de-duplicated so a confirm can never print twice.
+const _seenIds=new Set();   // cut_event ids already handled (realtime + poll dedup)
+const _panelTs={};          // panelKey -> last auto-print time (blocks rapid re-confirm doubles)
+let _lastCutId=0;
+function _panelKey(r){ const p=(r&&r.panel)||{}; return (r.session_id||'')+'|'+(p.label||'')+'|'+(p.panelNum||'')+'|'+(p.sheetIdx||'')+'|'+(p.origL||'')+'x'+(p.origW||''); }
+function handleConfirm(r, fromRealtime){
+  if(!r || !r.id) return;
+  if(r.action!=='confirm' && r.action!=='reprint') return;
+  if(_seenIds.has(r.id)) return;                 // already handled this exact row — never twice
+  _seenIds.add(r.id);
+  if(r.id>_lastCutId) _lastCutId=r.id;
+  render(r); pushRecent(r, !!fromRealtime);
+  if(autoPrint && r.action==='confirm'){
+    const k=_panelKey(r), now=Date.now();
+    if(_panelTs[k] && (now-_panelTs[k])<90000) return;   // same panel re-confirmed within 90s → don't double-print
+    _panelTs[k]=now;
+    printLabel(r.panel);
+  }
+}
+let _cutPollBusy=false;
+async function pollCutEvents(){
+  if(_cutPollBusy) return; _cutPollBusy=true;
+  try{
+    const since=new Date(Date.now()-15*60000).toISOString();
+    const {data}=await sb.from('tce_cut_events').select('*').eq('action','confirm').gte('created_at',since).order('id',{ascending:true}).limit(200);
+    if(data) for(const r of data) handleConfirm(r,false);   // dedup gate stops any re-print
+  }catch(e){}
+  _cutPollBusy=false;
+}
+
 async function doLogin(){
   const email=document.getElementById('email').value.trim();
   const pass=document.getElementById('pass').value;
@@ -166,18 +199,24 @@ async function startApp(){
   updateAutoBtn();
   checkDymo();
   try{
-    const {data}=await sb.from('tce_cut_events').select('*').eq('action','confirm').order('created_at',{ascending:false}).limit(10);
+    // Load recent history: remember every id so the backup poll won't reprint it,
+    // but only auto-print things that arrive AFTER we're up (via realtime/poll).
+    const since=new Date(Date.now()-15*60000).toISOString();
+    const {data}=await sb.from('tce_cut_events').select('*').eq('action','confirm').gte('created_at',since).order('id',{ascending:true}).limit(200);
     if(data&&data.length){
-      [...data].reverse().forEach(r=>pushRecent(r,false));
-      render(data[0]);
+      data.forEach(r=>{ _seenIds.add(r.id); if(r.id>_lastCutId)_lastCutId=r.id; });
+      data.slice(-10).forEach(r=>pushRecent(r,false));
+      render(data[data.length-1]);
     }
   }catch(e){}
   subscribe();
+  pollCutEvents();                                             // safety-net poll for confirms
   pollPendingOffcuts(); pollPendingEbLabels();
+  setInterval(pollCutEvents, 3000);                            // catch anything the websocket drops, within ~3s
   setInterval(()=>{ pollPendingOffcuts(); pollPendingEbLabels(); }, 12000);   // auto-print phone-queued labels (runs while the tab is visible)
-  // Background tabs throttle timers, so ALSO print the queue the moment this window is brought to the front:
-  document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ pollPendingOffcuts(); pollPendingEbLabels(); } });
-  window.addEventListener('focus',()=>{ pollPendingOffcuts(); pollPendingEbLabels(); });
+  // Background tabs throttle timers, so ALSO poll the moment this window is brought to the front:
+  document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ pollCutEvents(); pollPendingOffcuts(); pollPendingEbLabels(); } });
+  window.addEventListener('focus',()=>{ pollCutEvents(); pollPendingOffcuts(); pollPendingEbLabels(); });
 }
 
 function setLive(on,txt){
@@ -199,11 +238,7 @@ function subscribe(){
   if(_cutChannel){ try{ sb.removeChannel(_cutChannel); }catch(e){} _cutChannel=null; }   // drop the old channel before reconnecting
   _cutChannel=sb.channel('cut-events-offload')
     .on('postgres_changes',{event:'INSERT',schema:'public',table:'tce_cut_events'},payload=>{
-      const r=payload.new;
-      if(r.action==='confirm'||r.action==='reprint'){
-        render(r); pushRecent(r,true);
-        if(autoPrint && r.action==='confirm') printLabel(r.panel);
-      }
+      handleConfirm(payload.new,true);
     })
     .subscribe((status)=>{
       if(status==='SUBSCRIBED') setLive(true,'live');
