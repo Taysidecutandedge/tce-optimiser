@@ -1963,12 +1963,12 @@ function _calculateInner(){
 
   const scoreResult=res=>{
     if(res.unplaced.length) return Infinity;
-    // Objective: fewest sheets first (dominant term), then spread the spare
-    // material EVENLY so no single sheet ends up half-empty. For a fixed sheet
-    // count the TOTAL waste is identical however parts are arranged, so we
-    // balance it by MINIMISING the free area of the emptiest sheet — pulling
-    // parts across sheets so every sheet looks tidy, rather than pooling all the
-    // slack (and stray small parts) onto one ugly half-used sheet.
+    // Objective: fewest sheets first (dominant term). Then, for a fixed sheet
+    // count (the TOTAL waste is identical however parts are arranged), CONCENTRATE
+    // the spare material onto ONE board instead of smearing it across several —
+    // so the leftover comes off as a single big reusable offcut rather than lots
+    // of small ones. We do that by MAXIMISING the free area of the emptiest board,
+    // which pulls parts tight onto the other boards and pools the slack on one.
     let maxFree=0, fullBoards=0, smallOff=0, bigOff=0;
     for(const s of res.sheets){
       if(s._isOffcut){ (Math.max(s._offL||0,s._offW||0)<=offcutGuard ? smallOff++ : bigOff++); continue; }
@@ -1977,9 +1977,12 @@ function _calculateInner(){
       if(free>maxFree) maxFree=free;
       fullBoards++;
     }
-    // Primary: fewest FRESH BOARDS (big offcuts help only by reducing this). Then: consume
-    // more SMALL offcuts (clears the nuisance, consolidates board waste). Then: even fill.
-    return fullBoards*1e9 - smallOff*1e7 + maxFree;
+    // Primary: fewest FRESH BOARDS (dominant — big offcuts help only by reducing this).
+    // Then: consume more SMALL offcuts. Then: concentrate the leftover into ONE big
+    // offcut (maximise the emptiest board's free area). The 1e9 / 1e7 weights dwarf
+    // maxFree (≤ ~6e6), so board count and offcut usage are unchanged — only which
+    // same-board-count layout wins flips from "even spread" to "one big offcut".
+    return fullBoards*1e9 - smallOff*1e7 - maxFree;
   };
 
   let best=null;
@@ -3050,8 +3053,9 @@ function explodeShakerDoor(doorRef,H,W,qty,cfg,ebFrame,ebPanel,company){
   const ebP=ebPanel?{L1:true,L2:true,W1:true,W2:true,tk:{L1:'1',L2:'1',W1:'1',W2:'1'}}:makeEB();
   const trim=(cfg.frameOversize!=null?cfg.frameOversize:10);   // frame squaring oversize (0 = exact)
   const tongue=(cfg.panelTongue!=null?cfg.panelTongue:10);     // panel tongue into groove each side
-  const frameMat=(cfg.frameThk||22)+'mm MR MDF';
-  const panelMat=(cfg.panelThk||9)+'mm MR MDF';
+  const _suf=_shakerMatSuffix(cfg);
+  const frameMat=(cfg.frameThk||22)+_suf;
+  const panelMat=(cfg.panelThk||9)+_suf;
   const parts2=[];
   parts2.push({label:doorRef+'-Stile',l:H+trim*2,w:cfg.outerRail+trim,qty:2*qty,matName:frameMat,kind:'frame',grainOverride:'L',company,eb:ebStile});
   parts2.push({label:doorRef+'-TopRail',l:W-2*cfg.outerRail,w:cfg.outerRail+trim,qty:2*qty,matName:frameMat,kind:'frame',grainOverride:'L',company,eb:ebRail});
@@ -3060,9 +3064,13 @@ function explodeShakerDoor(doorRef,H,W,qty,cfg,ebFrame,ebPanel,company){
     parts2.push({label:lbl,l:W-2*cfg.outerRail,w:mr,qty:qty,matName:frameMat,kind:'frame',grainOverride:'L',company,eb:{...ebDiv}});
   }
   const panelW=W-2*cfg.outerRail+tongue*2;
+  // Oak (veneered) panels: grain runs UP the door (along the panel length), so each
+  // opening is cut vertically and the grain reads continuously up to the mid-rails.
+  // Painted MDF has no grain, so it stays free-rotating for tighter nesting.
+  const panelGrain=(cfg.mat==='oak')?'L':'N';
   openingHeights.forEach((oh,i)=>{
     const lbl=cfg.panels>1?(i===0?doorRef+'-P1-Bot':i===cfg.panels-1?doorRef+'-P'+cfg.panels+'-Top':doorRef+'-P'+(i+1)):doorRef+'-Panel';
-    parts2.push({label:lbl,l:oh+tongue*2,w:panelW,qty:qty,matName:panelMat,kind:'panel',grainOverride:'N',company,eb:{...ebP}});
+    parts2.push({label:lbl,l:oh+tongue*2,w:panelW,qty:qty,matName:panelMat,kind:'panel',grainOverride:panelGrain,company,eb:{...ebP}});
   });
   const doorInfo={ref:doorRef,h:H,w:W,panels:cfg.panels,qty,frameMat,panelMat,company,
     outerRail:cfg.outerRail, midRail:mr, centres, openingHeights};
@@ -3115,6 +3123,7 @@ function renderShakerDoors(){
         '<div class="sk-field"><label>Panels</label><select id="sk-panels-'+di+'" onchange="updateShakerPreview('+di+')">'
         +[1,2,3,4].map(n=>'<option value="'+n+'"'+(cfg.panels===n?' selected':'')+'>'+n+(n>1?' panels':' panel')+'</option>').join('')+'</select></div>'+
         '<div class="sk-field" id="sk-cw-'+di+'" style="'+(cfg.panels>1?'':'display:none')+'"><label>Rail centre(s) from bottom (mm)</label><input type="text" id="sk-centres-'+di+'" value="'+cfg.centres.join(', ')+'" placeholder="e.g. 800" oninput="updateShakerPreview('+di+')" onchange="updateShakerPreview('+di+')"></div>'+
+        '<div class="sk-field"><label>Material</label><select id="sk-mat-'+di+'" onchange="updateShakerPreview('+di+')"><option value="mdf"'+((cfg.mat||'mdf')==='mdf'?' selected':'')+'>MR MDF (paint)</option><option value="oak"'+((cfg.mat)==='oak'?' selected':'')+'>Oak Veneer</option></select></div>'+
         '<div class="sk-field"><label>Frame thk</label><select id="sk-fthk-'+di+'" onchange="updateShakerPreview('+di+')">'+[18,22,25].map(n=>'<option value="'+n+'"'+((cfg.frameThk||22)===n?' selected':'')+'>'+n+'mm</option>').join('')+'</select></div>'+
         '<div class="sk-field"><label>Panel thk</label><select id="sk-pthk-'+di+'" onchange="updateShakerPreview('+di+')">'+[6,9,12].map(n=>'<option value="'+n+'"'+((cfg.panelThk||9)===n?' selected':'')+'>'+n+'mm</option>').join('')+'</select></div>'+
         '<div class="sk-field"><label>Frame oversize (mm)</label><input type="number" id="sk-foversize-'+di+'" value="'+(cfg.frameOversize!=null?cfg.frameOversize:10)+'" min="0" max="50" title="Squaring allowance added to frame parts. Set 0 for exact size." oninput="updateShakerPreview('+di+')" onchange="updateShakerPreview('+di+')"></div>'+
@@ -3139,9 +3148,12 @@ function getShakerCfgFromUI(di){
     frameThk:parseInt(document.getElementById('sk-fthk-'+di)?.value)||22,
     panelThk:parseInt(document.getElementById('sk-pthk-'+di)?.value)||9,
     frameOversize:(fo&&fo.value!=='')?(parseInt(fo.value)||0):10,
-    panelTongue:(pt&&pt.value!=='')?(parseInt(pt.value)||0):10
+    panelTongue:(pt&&pt.value!=='')?(parseInt(pt.value)||0):10,
+    mat:(document.getElementById('sk-mat-'+di)?.value)||'mdf'
   };
 }
+// Material name suffix for a shaker door: painted MR MDF (default) or oak veneer.
+function _shakerMatSuffix(cfg){ return (cfg&&cfg.mat==='oak')?'mm Oak Veneer MDF':'mm MR MDF'; }
 
 function updateShakerPreview(di){
   const door=_shakerDoors[di]; if(!door) return;
@@ -3169,14 +3181,15 @@ function updateShakerPreview(di){
 function checkShakerMaterials(){
   const div=document.getElementById('skMissingMats'); if(!div) return;
   const missing=[];
-  // Check by thickness — "12mm Mr MDF" satisfies "12mm MDF" requirement
-  const hasThkMDF=(thk)=>library.some(l=>{
+  // Check by thickness + material — "12mm Mr MDF" satisfies "12mm MDF" (paint),
+  // "12mm Oak Veneer MDF" satisfies an oak requirement (they must not cross-match).
+  const hasThk=(thk,oak)=>library.some(l=>{
     const n=l.name.toLowerCase();
-    return n.includes('mdf')&&n.startsWith(thk+'mm');
+    return n.includes('mdf')&&n.startsWith(thk+'mm')&&((/oak|veneer/.test(n))===oak);
   });
   const need=new Set();
-  _shakerDoors.forEach((d,di)=>{ const c=getShakerCfgFromUI(di); need.add('frame:'+(c.frameThk||22)); need.add('panel:'+(c.panelThk||9)); });
-  need.forEach(t=>{ const thk=parseInt(t.split(':')[1]); if(!hasThkMDF(thk)) missing.push(thk+'mm MR MDF'); });
+  _shakerDoors.forEach((d,di)=>{ const c=getShakerCfgFromUI(di); const oak=c.mat==='oak'?1:0; need.add('f:'+oak+':'+(c.frameThk||22)); need.add('p:'+oak+':'+(c.panelThk||9)); });
+  need.forEach(t=>{ const pr=t.split(':'); const oak=pr[1]==='1'; const thk=parseInt(pr[2]); if(!hasThk(thk,oak)) missing.push(thk+'mm '+(oak?'Oak Veneer MDF':'MR MDF')); });
   div.innerHTML=missing.length?'<div class="sk-miss">Not in library: '+missing.join(', ')+' - will be auto-added at 2440x1220mm</div>':'';
 }
 
@@ -3187,12 +3200,14 @@ function ensureShakerSheet(matName,thick){
   // Extract thickness from name e.g. "12mm MDF" -> 12, "22mm MR MDF" -> 22
   const thkMatch=mn.match(/^(\d+)mm/);
   const thk=thkMatch?parseInt(thkMatch[1]):thick;
-  // Helper: does a sheet name match our target thickness + generic MDF type?
+  const wantOak=/oak|veneer/.test(mn);
+  // Helper: does a sheet name match our target thickness + material (MDF vs oak veneer)?
   const shakerMatch=(name)=>{
     const n=name.toLowerCase();
-    if(!n.includes('mdf')&&!n.includes('mdf')) return false;
+    if(!n.includes('mdf')) return false;
     const nThk=n.match(/^(\d+)mm/);
-    if(nThk&&parseInt(nThk[1])!==thk) return false; // wrong thickness
+    if(nThk&&parseInt(nThk[1])!==thk) return false;        // wrong thickness
+    if((/oak|veneer/.test(n))!==wantOak) return false;      // don't cross-match oak vs plain MDF
     return true;
   };
   // 1. Already in job sheets?
@@ -3206,18 +3221,18 @@ function ensureShakerSheet(matName,thick){
   if(libEntry){
     if(!jobSheets.find(js=>js.libRef===libEntry.id)){
       jobSheets.push({id:jsid++,libRef:libEntry.id,name:libEntry.name,l:libEntry.l,w:libEntry.w,
-        thick:libEntry.thick,cost:libEntry.cost,color:libEntry.color,grainLen:libEntry.grainLen,
+        thick:libEntry.thick,cost:libEntry.cost,color:libEntry.color,grainLen:(wantOak?true:libEntry.grainLen),
         qty:1,trimT:15,trimB:15,trimL:15,trimR:15});
     }
     return libEntry.name;
   }
-  // 3. Not found — auto-add
-  const color=thk<=12?'#ab47bc':thk<=18?'#26c6da':'#8d6e63';
+  // 3. Not found — auto-add. Oak veneer is grained (grain runs up the door); MDF isn't.
+  const color=wantOak?'#8d6e63':(thk<=12?'#ab47bc':thk<=18?'#26c6da':'#8d6e63');
   const entry={id:libId++,name:matName,l:2440,w:1220,thick:thk,cost:0,
-    notes:'Auto-added for shaker doors',grainLen:false,color,_sbid:null};
+    notes:'Auto-added for shaker doors',grainLen:wantOak,color,_sbid:null};
   library.push(entry); sbSaveSheet(entry);
   jobSheets.push({id:jsid++,libRef:entry.id,name:entry.name,l:2440,w:1220,
-    thick:thk,cost:0,color,grainLen:false,qty:1,trimT:15,trimB:15,trimL:15,trimR:15});
+    thick:thk,cost:0,color,grainLen:wantOak,qty:1,trimT:15,trimB:15,trimL:15,trimR:15});
   return matName;
 }
 
@@ -3235,9 +3250,10 @@ function confirmShakerDoors(){
     const qty=parseInt(document.getElementById('sk-qty-'+di)?.value)||1;
     const ebFrame=document.getElementById('sk-ebframe-'+di)?.checked||false;
     const ebPanel=document.getElementById('sk-ebpanel-'+di)?.checked||false;
-    // Resolve the actual library sheet names for THIS door's chosen thicknesses
-    const frameMat=ensureShakerSheet((cfg.frameThk||22)+'mm MR MDF',cfg.frameThk||22);
-    const panelMat=ensureShakerSheet((cfg.panelThk||9)+'mm MR MDF',cfg.panelThk||9);
+    // Resolve the actual library sheet names for THIS door's chosen thicknesses + material
+    const _suf=_shakerMatSuffix(cfg);
+    const frameMat=ensureShakerSheet((cfg.frameThk||22)+_suf,cfg.frameThk||22);
+    const panelMat=ensureShakerSheet((cfg.panelThk||9)+_suf,cfg.panelThk||9);
     explodeShakerDoor('D'+(maxN+di+1),door.h,door.w,qty,cfg,ebFrame,ebPanel,door.company||'').forEach(sp=>{
       const resolvedMat=sp.kind==='panel'?panelMat:frameMat;
       addPart({label:sp.label,l:sp.l,w:sp.w,qty:sp.qty,grainOverride:sp.grainOverride,matName:resolvedMat,company:sp.company,eb:sp.eb,door:sp.door});
