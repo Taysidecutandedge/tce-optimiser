@@ -4001,8 +4001,9 @@ function _cmSig(){
   for(let i=0;i<_cmPanels.length;i++){const p=_cmPanels[i];s+='|'+p.sheetIdx+','+(p.label||'')+','+Math.round(p.w)+'x'+Math.round(p.h);}
   return s;
 }
+let _cmSince=0;   // cuts made before this time are ignored on reload (set by "Reset cuts")
 function _cmSave(){
-  try{ localStorage.setItem('tce_cm_state', JSON.stringify({sig:_cmSig(),done:[..._cmDone],recut:[..._cmRecut],idx:_cmIdx,session:_cmSession,t:Date.now()})); }catch(e){}
+  try{ localStorage.setItem('tce_cm_state', JSON.stringify({sig:_cmSig(),done:[..._cmDone],recut:[..._cmRecut],idx:_cmIdx,session:_cmSession,since:_cmSince,t:Date.now()})); }catch(e){}
 }
 function _cmLoad(){
   try{
@@ -4010,6 +4011,7 @@ function _cmLoad(){
     const st=JSON.parse(raw); if(!st||st.sig!==_cmSig())return false;   // only restore if same layout
     _cmDone=new Set(st.done||[]); _cmRecut=new Set(st.recut||[]);
     _cmIdx=(typeof st.idx==='number')?st.idx:0; if(st.session)_cmSession=st.session;
+    if(st.since) _cmSince=st.since;
     return true;
   }catch(e){return false;}
 }
@@ -4017,9 +4019,36 @@ function cmResetCuts(){
   if(!confirm('Clear all marked cuts for this job and start fresh?'))return;
   _cmDone=new Set(); _cmRecut=new Set(); _cmIdx=0;
   _cmSession=(projectName||'job')+'-'+Date.now();
+  _cmSince=Date.now();    // ignore every confirm logged before now, so reload starts clean
   _cmSave(); cmRender();
 }
-function openCuttingMode(){
+// Rebuild the "already cut" set from the cloud cut-log. This is the authoritative
+// source, so confirmed panels survive a refresh, a session timeout, a re-nest, or
+// even opening the job on a different device. Matches panels by identity (label +
+// size) and copy count — independent of the current nest layout order.
+async function cmReconcileFromCloud(){
+  if(!_sbToken || !_cmPanels.length) return {ok:false,count:0};
+  const since=new Date(Math.max(_cmSince||0, Date.now()-48*3600*1000)).toISOString();
+  const url=SB_URL+'/rest/v1/tce_cut_events?select=panel,created_at&action=eq.confirm&created_at=gte.'+encodeURIComponent(since)+'&order=id.desc&limit=2000';
+  let rows;
+  try{
+    let r=await fetch(url,{headers:sbAuthH()});
+    if(r.status===401 && typeof sbDoRefresh==='function' && await sbDoRefresh()) r=await fetch(url,{headers:sbAuthH()});
+    if(!r.ok) return {ok:false,count:0};
+    rows=await r.json();
+  }catch(e){ return {ok:false,count:0}; }
+  const uniq=new Set(), cnt={};
+  rows.forEach(x=>{ const p=x.panel||{};
+    const uk=(p.label||'')+'|'+(p.panelNum||'')+'|'+(p.origL||'')+'|'+(p.origW||'');
+    if(uniq.has(uk)) return; uniq.add(uk);
+    const ck=(p.label||'')+'|'+(p.origL||'')+'|'+(p.origW||''); cnt[ck]=(cnt[ck]||0)+1; });
+  const rem={...cnt}; const done=new Set();
+  _cmPanels.forEach((p,i)=>{ if(_cmRecut.has(i)) return;   // keep panels the operator marked for re-cut
+    const ck=(p.label||'')+'|'+(p.origL||'')+'|'+(p.origW||''); if(rem[ck]>0){ done.add(i); rem[ck]--; } });
+  _cmDone=done;
+  return {ok:true,count:done.size};
+}
+async function openCuttingMode(){
   if(!_lastSheets.length){alert('Run Calculate first.');return;}
   _cmPanels=[];
   _lastSheets.forEach((sheet,si)=>{
@@ -4044,27 +4073,21 @@ function openCuttingMode(){
     });
   });
   const newCount=_cmPanels.length;
-  // Restore saved progress for THIS exact layout (survives leaving cut mode, page reloads, iPad tab refresh)
+  // Local fast-restore (offline fallback). Cloud reconcile below is authoritative.
   const restored=_cmLoad();
-  if(restored){
-    // resume at first unconfirmed panel
-    if(_cmIdx>=_cmPanels.length||_cmDone.has(_cmIdx)){
-      _cmIdx=0; for(let i=0;i<_cmPanels.length;i++){if(!_cmDone.has(i)){_cmIdx=i;break;}}
-    }
-  } else if(newCount!==_cmPrevCount){
-    // New / different calculation — start fresh
-    _cmDone=new Set(); _cmRecut=new Set(); _cmIdx=0;
-    _cmSession=(projectName||'job')+'-'+Date.now();
-  } else {
-    // Re-entering same session — resume at first unconfirmed
-    _cmIdx=0;
-    for(let i=0;i<_cmPanels.length;i++){if(!_cmDone.has(i)){_cmIdx=i;break;}}
-  }
+  if(!restored && newCount!==_cmPrevCount){ _cmDone=new Set(); _cmRecut=new Set(); }
+  if(!_cmSession) _cmSession=(projectName||'job')+'-'+Date.now();
   _cmPrevCount=newCount;
+  // Rebuild "what's cut" from the cloud cut-log so confirmed panels can never be
+  // lost to a refresh, a session timeout, a re-nest, or a different device.
+  const rec=await cmReconcileFromCloud();
+  // Land on the first panel that still needs cutting
+  _cmIdx=0; for(let i=0;i<_cmPanels.length;i++){ if(!_cmDone.has(i)){ _cmIdx=i; break; } }
   _cmSave();
   document.getElementById('cuttingMode').classList.add('active');
   document.body.style.overflow='hidden';
   cmRender();
+  if(rec&&rec.ok&&rec.count>0&&typeof cmToast==='function') cmToast('✅ Restored '+rec.count+' already-cut panel'+(rec.count!==1?'s':'')+' from the cloud');
 }
 function closeCuttingMode(){
   document.getElementById('cuttingMode').classList.remove('active');
