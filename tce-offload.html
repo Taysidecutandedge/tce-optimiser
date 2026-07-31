@@ -352,10 +352,17 @@ async function printOffcutLabel(o){
   setPrintStat('printing offcut label…');
   const base=await ensureDymo();
   if(!base){ setPrintStat('printer not reachable — open DYMO Connect & accept certificate'); return false; }
+  const xml=offcutLabelXml(o);
+  // Print the 2 copies as two separate jobs with an EMPTY printParams field — the
+  // exact call your cut labels use. The old <LabelWriterPrintParams><Copies>2</…>
+  // block is rejected by the 550 alongside the DesktopLabel format (that's the error);
+  // sending it twice with empty params prints two labels reliably.
+  const send=()=>fetch(base+'PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'printerName='+encodeURIComponent(_dymoPrinter)+'&labelXml='+encodeURIComponent(xml)+'&printParamsXml=&labelSetXml='}).then(r=>r.ok).catch(()=>{ _dymoBase=null; return false; });
   try{
-    const r=await fetch(base+'PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'printerName='+encodeURIComponent(_dymoPrinter)+'&labelXml='+encodeURIComponent(offcutLabelXml(o))+'&printParamsXml='+encodeURIComponent('<LabelWriterPrintParams><Copies>2</Copies></LabelWriterPrintParams>')+'&labelSetXml='});
-    setPrintStat(r.ok?('offcut label sent ✓ '+(o.code||'')):'printer error '+r.status);
-    return r.ok;
+    const ok1=await send();
+    if(ok1) await send();   // second copy
+    setPrintStat(ok1?('offcut label sent ✓ '+(o.code||'')):'printer error');
+    return ok1;
   }catch(e){ _dymoBase=null; setPrintStat('printer not reachable'); return false; }
 }
 // Auto-print offcut labels queued from the phone/offcuts page (this laptop is the one wired to the DYMO)
