@@ -852,9 +852,12 @@ function doLogout(){
 
 // ── Library sync (per-user) ───────────────────
 async function sbLoadLibrary(){
-  if(!_sbToken)return false;
+  if(!_sbToken){ if(typeof sbDoRefresh==='function') await sbDoRefresh(); if(!_sbToken) return false; }
   try{
-    const r=await fetch(SB_URL+'/rest/v1/tce_library?select=*&order=id',{headers:sbAuthH()});
+    const q=()=>fetch(SB_URL+'/rest/v1/tce_library?select=*&order=id',{headers:sbAuthH()});
+    let r=await q();
+    // Session lapsed (idle/timeout) → renew the token and retry so the library never comes up empty
+    if(r.status===401 && typeof sbDoRefresh==='function' && await sbDoRefresh()) r=await q();
     if(!r.ok)return false;
     let rows=await r.json();
     if(!Array.isArray(rows))return false;
@@ -1157,7 +1160,10 @@ window.onload=async()=>{
 // ═══════════════════════════════════════════════
 // LIBRARY
 // ═══════════════════════════════════════════════
-function openLibModal(){const sb=document.getElementById('libSearch');if(sb)sb.value='';renderLibList();sm('libModal');}
+async function openLibModal(){const sb=document.getElementById('libSearch');if(sb)sb.value='';
+  // If the library is empty (e.g. the session lapsed while idle), reload it before showing
+  if(!library||!library.length){ try{ await sbLoadLibrary(); }catch(e){} }
+  renderLibList();sm('libModal');}
 
 function renderLibList(){
   const el=document.getElementById('libList');
