@@ -767,10 +767,9 @@ function lookupBoardPrice(matName, tier) {
 
   if (basePrice === null) return null;
 
-  // Apply supplier surcharge
-  const supplier = _suppliers.find(s=>s.name===supplierName);
-  const surcharge = supplier ? (parseFloat(supplier.surcharge_pct)||0)/100 : 0;
-  const afterSurcharge = basePrice * (1 + surcharge);
+  // Supplier surcharge is NOT baked in here — it's applied per-quote via the
+  // "+8% surcharge" checkbox, so an unticked quote carries no surcharge.
+  const afterSurcharge = basePrice;
 
   // Apply customer markup based on material type
   // Get markup from _currentCustomerRates if available
@@ -793,9 +792,24 @@ function getDefaultCutRate(jobData, tier) {
   // Try to match sheet size from job
   if (!jobData?.jobSheets?.length) return tier==='trade'?70:70;
   const s = jobData.jobSheets[0];
-  const label = `${s.l}×${s.w}`;
-  const rate = _cutRates.find(r=>r.size_label===label||r.size_label.includes('2800'));
-  return rate ? (tier==='trade'?parseFloat(rate.rate_trade):parseFloat(rate.rate_retail)) : 70;
+  return cutRateForSheet(s.l, s.w, tier);
+}
+// Cut rate for a specific sheet size. Matches the dimensions inside the label
+// (so "2440×1220 (8×4)" still matches a 2440×1220 sheet), only falling back to
+// the jumbo/first rate when there's genuinely no size match.
+function cutRateForSheet(l, w, tier){
+  if(!l||!w) return tier==='trade'?70:70;
+  const a=(l+'×'+w).replace(/\s/g,''), b=(w+'×'+l).replace(/\s/g,'');
+  const norm=x=>String(x||'').replace(/\s/g,'');
+  let r=_cutRates.find(x=>{ const sl=norm(x.size_label); return sl.startsWith(a)||sl.startsWith(b)||sl.includes(a)||sl.includes(b); });
+  if(!r) r=_cutRates.find(x=>norm(x.size_label).includes('2800'))||_cutRates[0];
+  return r ? parseFloat(tier==='trade'?r.rate_trade:r.rate_retail)||0 : (tier==='trade'?70:70);
+}
+// Cut rate for a material, using THAT material's own sheet size (not just the first sheet).
+function cutRateForMat(mat, jobData, tier){
+  const sheets=(jobData&&jobData.jobSheets)||[];
+  const s=sheets.find(js=>js.name===mat) || sheets.find(js=>String(js.name||'').toLowerCase()===String(mat||'').toLowerCase()) || sheets[0];
+  return s ? cutRateForSheet(s.l, s.w, tier) : getDefaultCutRate(jobData, tier);
 }
 
 // ── Shaker door pricing — mirrors MDF_Shaker_Calculator_v9 (verified to £55.02) ──
@@ -911,7 +925,7 @@ async function buildQuote() {
     const autoPrice = lookupBoardPrice(mat, tier);
     const boardPrice = ov.boardPrice !== undefined ? ov.boardPrice : (autoPrice ?? 0);
     const surcharge = ov.surcharge || false;
-    const cutRate = ov.cutRate !== undefined ? ov.cutRate : defaultCutRate;
+    const cutRate = ov.cutRate !== undefined ? ov.cutRate : cutRateForMat(mat, jobData, tier);
     const ebTapeKey = ov.ebTapeKey || '23x1 ABS';
     const ebRate = _ebRates.find(r=>r.tape_key===ebTapeKey);
     const ebMatRate = ebRate ? parseFloat(ebRate.mat_rate) : 0.60;
@@ -1079,7 +1093,7 @@ function printQuote() {
     const autoPrice=lookupBoardPrice(mat,tier);
     const boardPrice=ov.boardPrice!==undefined?ov.boardPrice:(autoPrice??0);
     const surcharge=ov.surcharge||false;
-    const cutRate=ov.cutRate!==undefined?ov.cutRate:defaultCutRate;
+    const cutRate=ov.cutRate!==undefined?ov.cutRate:cutRateForMat(mat,jobData,tier);
     const ebTapeKey=ov.ebTapeKey||'23x1 ABS';
     const ebRate=_ebRates.find(r=>r.tape_key===ebTapeKey);
     const ebMatRate=ebRate?parseFloat(ebRate.mat_rate):0.60;
