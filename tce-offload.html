@@ -161,6 +161,8 @@ let _lastCutId=0;
 function _panelKey(r){ const p=(r&&r.panel)||{}; return (r.session_id||'')+'|'+(p.label||'')+'|'+(p.panelNum||'')+'|'+(p.sheetIdx||'')+'|'+(p.origL||'')+'x'+(p.origW||''); }
 function handleConfirm(r, fromRealtime){
   if(!r || !r.id) return;
+  // Offcut fully cut on the saw side → prompt HERE (the offloader's screen) to log the remainder.
+  if(r.action==='offcut_remainder'){ if(_seenIds.has(r.id))return; _seenIds.add(r.id); showRemainderPrompt(r.panel||{}); return; }
   if(r.action!=='confirm' && r.action!=='reprint') return;
   if(_seenIds.has(r.id)) return;                 // already handled this exact row — never twice
   _seenIds.add(r.id);
@@ -429,6 +431,25 @@ function onOfDecorInput(){
   const v=document.getElementById('of-decor').value.trim().toLowerCase();
   const tm=v.match(/^(\d+(?:\.\d+)?)\s*mm\b/);
   if(tm) document.getElementById('of-thick').value=tm[1];
+}
+// Auto-prompted from the saw side when an offcut is fully cut: log its remainder.
+// Reuses the same log-offcut form (which prints the new offcut's label on save).
+function showRemainderPrompt(info){
+  info=info||{};
+  const g=id=>document.getElementById(id);
+  if(g('of-decor')) g('of-decor').value=info.name||info.decor||'';
+  if(g('of-cust'))  g('of-cust').value='';
+  if(g('of-l'))     g('of-l').value='';
+  if(g('of-w'))     g('of-w').value='';
+  if(g('of-qty'))   g('of-qty').value='1';
+  if(g('of-bay'))   g('of-bay').value=info.location||'';
+  if(g('of-thick')) g('of-thick').value=(info.thick!=null?info.thick:'');
+  if(g('of-err'))   g('of-err').textContent='';
+  if(g('of-descr')) g('of-descr').value=info.code?('Remainder of '+info.code+(info.wasL?(' (was '+info.wasL+'×'+info.wasW+')'):'')):'';
+  if(g('of-sep'))   g('of-sep').checked=false;
+  _ofBoard={color:info.color||'#4e9af1', grain_len:info.grain_len!==false};
+  const modal=g('offcutModal'); if(modal) modal.style.display='flex';
+  if(g('of-l')) g('of-l').focus();
 }
 async function openOffcutForm(){
   const p=_current||{};
