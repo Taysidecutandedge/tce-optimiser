@@ -4178,9 +4178,9 @@ async function cmEmitCutEvent(p, opts){
     // (so identical parts stack in one pile and the full set is easy to check off).
     const _myIdx=(_cmPanels.indexOf(p)>=0)?_cmPanels.indexOf(p):_cmIdx;
     let _pTotal=0,_pNum=0;
-    // Number within the same role too, so laminated 'finish' layers count among
-    // finish panels and 'lam' layers among lam layers (not 1/2 across the pair).
-    _cmPanels.forEach((x,i)=>{ if(!x._isCrosscut&&!x._isPickupStrip&&x.label===p.label&&x.origL===p.origL&&x.origW===p.origW&&(x._lamRole||'')===(p._lamRole||'')){ _pTotal++; if(i<=_myIdx) _pNum=_pTotal; } });
+    // Count a laminated panel's two glued pieces TOGETHER, so they number 1/2 and 2/2
+    // — the operator can see the two labels are a pair to glue.
+    _cmPanels.forEach((x,i)=>{ if(!x._isCrosscut&&!x._isPickupStrip&&x.label===p.label&&x.origL===p.origL&&x.origW===p.origW){ _pTotal++; if(i<=_myIdx) _pNum=_pTotal; } });
     if(_pTotal===0){ _pTotal=1; _pNum=1; }
     const body={
       session_id:_cmSession||(projectName||'job'),
