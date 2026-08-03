@@ -1539,7 +1539,13 @@ function _calculateInner(){
       const piece={...p,l:pl,w:pw,grain,_msid:ms?ms.id:null};
       if(p.laminate){
         piece.label=(p.label||'Part')+' ·LAM×2';
-        if(i%2===1) piece.eb=makeEB();   // 2nd layer of each glued pair: no band (banded once, on the finished panel)
+        // Carry the finished (trim) size + oversize so the print station can print
+        // a LAMINATE label (cut/oversize size) and a FINISHED label (trim size).
+        piece._lam=true; piece._finL=p.l; piece._finW=p.w; piece._lamOv=ov;
+        // Each glued pair = one 'finish' layer (banded → carries the finished label)
+        // + one 'lam' layer (no band → carries the laminate/glue-up label).
+        if(i%2===1){ piece.eb=makeEB(); piece._lamRole='lam'; }
+        else { piece._lamRole='finish'; }
       }
       if(grain==='W'){piece._pw=pl;piece._ph=pw;}
       else{piece._pw=pw;piece._ph=pl;}
@@ -1594,7 +1600,8 @@ function _calculateInner(){
         sh.placements.push({
           id:piece.id,label:piece.label,color:piece.color,
           grain:piece.grain,eb:piece.eb,rot,
-          x,y,w,h,origL:piece.l,origW:piece.w,bandY:y
+          x,y,w,h,origL:piece.l,origW:piece.w,bandY:y,
+          _lam:piece._lam,_lamRole:piece._lamRole,_finL:piece._finL,_finW:piece._finW,_lamOv:piece._lamOv
         });
       };
       if(isFullRun){
@@ -1714,6 +1721,7 @@ function _calculateInner(){
           const piece={
             id:pl.id,label:pl.label,color:pl.color,grain:pl.grain,eb:pl.eb,
             l:pl.origL,w:pl.origW,
+            _lam:pl._lam,_lamRole:pl._lamRole,_finL:pl._finL,_finW:pl._finW,_lamOv:pl._lamOv,
             _pw:pl.rot?pl.h:pl.w,_ph:pl.rot?pl.w:pl.h,_msid:sparse.jsid
           };
           const targets=filled
@@ -1823,7 +1831,8 @@ function _calculateInner(){
         rot:best.rot?!pl.rot:pl.rot,
         x:best.r.x,y:best.r.y,
         w:best.rot?ph:pw,h:best.rot?pw:ph,
-        origL:pl.origL,origW:pl.origW,bandY:best.r.y
+        origL:pl.origL,origW:pl.origW,bandY:best.r.y,
+        _lam:pl._lam,_lamRole:pl._lamRole,_finL:pl._finL,_finW:pl._finW,_lamOv:pl._lamOv
       });
       return true;
     };
@@ -4159,7 +4168,9 @@ async function cmEmitCutEvent(p){
     // (so identical parts stack in one pile and the full set is easy to check off).
     const _myIdx=(_cmPanels.indexOf(p)>=0)?_cmPanels.indexOf(p):_cmIdx;
     let _pTotal=0,_pNum=0;
-    _cmPanels.forEach((x,i)=>{ if(!x._isCrosscut&&!x._isPickupStrip&&x.label===p.label&&x.origL===p.origL&&x.origW===p.origW){ _pTotal++; if(i<=_myIdx) _pNum=_pTotal; } });
+    // Number within the same role too, so laminated 'finish' layers count among
+    // finish panels and 'lam' layers among lam layers (not 1/2 across the pair).
+    _cmPanels.forEach((x,i)=>{ if(!x._isCrosscut&&!x._isPickupStrip&&x.label===p.label&&x.origL===p.origL&&x.origW===p.origW&&(x._lamRole||'')===(p._lamRole||'')){ _pTotal++; if(i<=_myIdx) _pNum=_pTotal; } });
     if(_pTotal===0){ _pTotal=1; _pNum=1; }
     const body={
       session_id:_cmSession||(projectName||'job'),
@@ -4169,6 +4180,7 @@ async function cmEmitCutEvent(p){
         eb:p.eb, grain:p.grain, company:p.company||projectName||'',
         sheetName:p.sheetName, sheetIdx:p.sheetIdx,
         panelNum:_pNum, panelTotal:_pTotal,
+        _lam:p._lam||false, _lamRole:p._lamRole||null, _finL:p._finL, _finW:p._finW, _lamOv:p._lamOv,
         door:_shakerDoorForPanel(p)
       }
     };
