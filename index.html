@@ -2331,8 +2331,20 @@ function renderResults(sheets,unplaced){
       ${body}
     </div>`;
   })();
+  // Quote-basis indicator: shows whether the customer-quote board count is locked in.
+  const _qbBanner=(()=>{
+    if(_quoteBasis && Object.keys(_quoteBasis).length){
+      const txt=Object.entries(_quoteBasis).map(([k,v])=>v+'× '+esc(k)).join(', ');
+      return `<div style="margin:0 0 12px;padding:8px 14px;background:rgba(40,120,170,.14);border:1px solid rgba(70,150,210,.45);border-radius:8px;font-size:12px;color:#9cc">✅ Quote basis (offcuts-off): <strong style="color:#cfe3f5">${txt}</strong> — the customer quote prices from this, offcuts on or off</div>`;
+    }
+    if(sheets.some(s=>s._isOffcut)){
+      return `<div style="margin:0 0 12px;padding:8px 14px;background:rgba(240,165,0,.14);border:1px solid rgba(240,165,0,.5);border-radius:8px;font-size:12px;color:#ffcf8a">⚠ No quote basis set yet — Calculate once with <strong>offcuts OFF</strong>, then Save, to lock in the customer-quote board count.</div>`;
+    }
+    return '';
+  })();
   main.innerHTML=`
     ${_offcutBanner}
+    ${_qbBanner}
     <div class="stats-bar">
       <div class="stat"><div class="stat-lbl">${_offcutsN?'Fresh Boards':'Sheets Used'}</div><div class="stat-val cv-acc">${_offcutsN?_freshBoards:sheets.length}</div>${_boardBreakdown?`<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--brd)">${_boardBreakdown}</div>`:''}</div>
       ${_offcutsN?`<div class="stat"><div class="stat-lbl">Offcuts Used</div><div class="stat-val cv-ok">♻ ${_offcutsN}</div></div>`:''}
