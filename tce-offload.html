@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TCE — Offload Station</title>
 <style>
@@ -156,6 +159,7 @@ let autoPrint = localStorage.getItem('tce_autoprint')==='1';
 // or a Wi-Fi blip. A fast backup poll catches anything it misses, and every
 // event is de-duplicated so a confirm can never print twice.
 const _seenIds=new Set();   // cut_event ids already handled (realtime + poll dedup)
+const _lamPairDone=new Set();   // laminated panels whose label PAIR has already printed (either piece)
 const _panelTs={};          // panelKey -> last auto-print time (blocks rapid re-confirm doubles)
 let _lastCutId=0;
 function _panelKey(r){ const p=(r&&r.panel)||{}; return (r.session_id||'')+'|'+(p.label||'')+'|'+(p.panelNum||'')+'|'+(p.sheetIdx||'')+'|'+(p.origL||'')+'x'+(p.origW||'')+'|'+(p._lamRole||''); }
@@ -176,6 +180,16 @@ function handleConfirm(r, fromRealtime){
     return;
   }
   if(autoPrint && r.action==='confirm'){
+    const p=r.panel||{};
+    if(p._lam){
+      // Laminated panel: its two pieces are identical, so whichever you confirm first
+      // prints the label PAIR; the twin piece's confirm is skipped (pair already done).
+      const pk=(r.session_id||'')+'|'+_lamPairKey(p);
+      if(_lamPairDone.has(pk)) return;
+      _lamPairDone.add(pk);
+      printLabel(p);
+      return;
+    }
     const k=_panelKey(r), now=Date.now();
     if(_panelTs[k] && (now-_panelTs[k])<90000) return;   // same panel re-confirmed within 90s → don't double-print
     _panelTs[k]=now;
@@ -271,12 +285,9 @@ function render(r){
   const _isLam=p._lam, _role=p._lamRole;
   const _dispName=_isLam?cleanLamName(p.label):(p.label||'Panel');
   let _dimsHTML, _lamBanner='';
-  if(_isLam && _role==='lam'){
-    _dimsHTML=esc(p.origL)+' × '+esc(p.origW)+' mm <span class="tag">CUT · oversize</span>';
-    _lamBanner='<div class="panel-num" style="color:#2e7d46;font-weight:800">⧉ Laminated part — laminate label (trim to '+esc(p._finL)+'×'+esc(p._finW)+')</div>';
-  } else if(_isLam && _role==='finish'){
-    _dimsHTML=esc(p._finL)+' × '+esc(p._finW)+' mm <span class="tag">finished</span>';
-    _lamBanner='<div class="panel-num" style="color:#2e7d46;font-weight:800">⧉ Laminated part — finished label + edgebanding</div>';
+  if(_isLam){
+    _dimsHTML='CUT '+esc(p.origL)+'×'+esc(p.origW)+' → FINISH '+esc(p._finL)+'×'+esc(p._finW)+' mm';
+    _lamBanner='<div class="panel-num" style="color:#2e7d46;font-weight:800">⧉ Laminated — prints laminate + finished label (confirm either piece)</div>';
   } else {
     _dimsHTML=esc(p.origL)+' × '+esc(p.origW)+' mm';
   }
@@ -368,31 +379,38 @@ async function runPrintQ(){
   }
   _printQBusy=false;
 }
+// Same for a panel's two pieces (role-aware numbering gives both the same panelNum),
+// distinct across separate laminated panels — so N panels print N pairs.
+function _lamPairKey(p){ return cleanLamName(p&&p.label)+'|'+((p&&p._finL)||'')+'x'+((p&&p._finW)||'')+'|'+((p&&p.panelNum)||''); }
 async function printLabel(p){
   if(!p) return;
-  const ebc=s=>(p.eb&&p.eb[s])?ebCodeFor((p.eb.tk&&p.eb.tk[s])||'1'):'';
-  // Two labels for a laminated panel, BOTH in the normal format:
-  //  • 'lam' layer  → the laminate/cut label: normal label at the oversize CUT size,
-  //                    just flagged "·LAM x2" so you know it's a laminated piece.
-  //  • 'finish' layer → the finished label, exactly as always: FINISHED size + edgebanding.
-  const isLam=p._lam, role=p._lamRole;
-  let L,W,desc;
-  if(isLam && role==='finish'){
-    L=(p._finL!=null?p._finL:p.origL); W=(p._finW!=null?p._finW:p.origW);
-    desc=cleanLamName(p.label);                       // clean name = the normal finished label
-  } else if(isLam){
-    L=p.origL; W=p.origW;                              // oversize cut size
-    desc=cleanLamName(p.label)+'  ·LAM x2';            // laminate indication, ASCII-safe
-  } else {
-    L=p.origL; W=p.origW; desc=(p.label||'Panel');     // non-laminated: unchanged
+  const CO=(p.company||'').replace(/\s*[-—]\s*Rev\s*\d+\s*$/i,'');
+  const NUM=(p.panelNum&&p.panelTotal)?(p.panelNum+'/'+p.panelTotal):'';
+  if(p._lam){
+    // A laminated panel prints TWO labels as a pair, both in the normal format:
+    //  1) laminate/cut label — flagged ·LAM x2, at the oversize CUT size, no edges.
+    //  2) finished label — finished size + edgebanding (as always).
+    // Either of the panel's two pieces produces the pair (handleConfirm dedupes so it
+    // prints once), so it never matters which identical piece you confirm.
+    const nm=cleanLamName(p.label);
+    const lamXml=fillTemplate({ MATERIAL:p.sheetName||'', COMPANY:CO,
+      LENGTH:(p.origL!=null?p.origL:''), WIDTH:(p.origW!=null?p.origW:''),
+      NUM:NUM, DESC:nm+'  ·LAM x2', L1:'',W1:'',W2:'',L2:'' });
+    const eb=p._ebLabel||p.eb||{};
+    const e=s=>(eb&&eb[s])?ebCodeFor((eb.tk&&eb.tk[s])||'1'):'';
+    const finXml=fillTemplate({ MATERIAL:p.sheetName||'', COMPANY:CO,
+      LENGTH:(p._finL!=null?p._finL:p.origL), WIDTH:(p._finW!=null?p._finW:p.origW),
+      NUM:NUM, DESC:nm, L1:e('L1'),W1:e('W1'),W2:e('W2'),L2:e('L2') });
+    enqueueLabelXml(lamXml,'laminate label sent ✓');
+    enqueueLabelXml(finXml,'finished label sent ✓');
+    if(p.door) printDoorLabel(p.door);
+    return;
   }
-  const xml=fillTemplate({
-    MATERIAL:p.sheetName||'', COMPANY:(p.company||'').replace(/\s*[-—]\s*Rev\s*\d+\s*$/i,''),
-    LENGTH:(L!=null?L:''), WIDTH:(W!=null?W:''),
-    NUM:(p.panelNum&&p.panelTotal)?(p.panelNum+'/'+p.panelTotal):'',
-    DESC:desc,
-    L1:ebc('L1'), W1:ebc('W1'), W2:ebc('W2'), L2:ebc('L2')
-  });
+  const ebc=s=>(p.eb&&p.eb[s])?ebCodeFor((p.eb.tk&&p.eb.tk[s])||'1'):'';
+  const xml=fillTemplate({ MATERIAL:p.sheetName||'', COMPANY:CO,
+    LENGTH:(p.origL!=null?p.origL:''), WIDTH:(p.origW!=null?p.origW:''),
+    NUM:NUM, DESC:(p.label||'Panel'),
+    L1:ebc('L1'), W1:ebc('W1'), W2:ebc('W2'), L2:ebc('L2') });
   enqueueLabelXml(xml,'sent to printer ✓');
   if(p.door) printDoorLabel(p.door);
 }
