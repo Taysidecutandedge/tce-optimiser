@@ -1025,6 +1025,7 @@ async function cloudSaveJob(){
     projectName:name, library, jobSheets, parts,
     ids:{libId,jsid,pid,ci},
     lastResult,
+    quoteBasis:_quoteBasis,   // fresh-board count with offcuts OFF — the admin quotes from this
     customer: savedCustomer || null,
     customerTier: savedCustomerTier
   };
@@ -1073,6 +1074,7 @@ async function cloudLoadJob(id){
       _lastSheets=d.lastResult.sheets||[];
       _lastEbMap=d.lastResult.ebMap||{};
     }
+    _quoteBasis=d.quoteBasis||null;   // the offcuts-off count the admin prices from
     _loadedCloudJobId=id; // remember which job we loaded so Save updates rather than creates
     save();renderJobSheets();renderParts();
     document.getElementById('mainArea').innerHTML='<div style="padding:40px;text-align:center;color:var(--txt3);font-family:var(--mono)">Job loaded — press Calculate to generate layout</div>';
@@ -2223,9 +2225,18 @@ async function undoOffcutsUsed(btn){
   await sbLoadOffcuts();
   if(btn){ btn.textContent='✓ Put back '+ok+(fail?(' · '+fail+' failed'):''); btn.style.background='#555'; }
 }
+let _quoteBasis=null;   // per-material FRESH board count with offcuts OFF — the customer quote is priced from this, so offcuts never affect it
 function renderResults(sheets,unplaced){
   // Store for print
   _lastSheets=sheets; _lastUnplaced=unplaced;
+  // Capture the quote basis whenever a result uses NO offcuts (i.e. offcuts were off):
+  // this is the true count of fresh boards the job needs, which the admin prices from.
+  try{
+    if(!sheets.some(s=>s._isOffcut)){
+      const qb={}; sheets.forEach(s=>{ if(!s._isOffcut) qb[s.name]=(qb[s.name]||0)+1; });
+      _quoteBasis=qb;
+    }
+  }catch(e){}
   document.querySelector('.app')?.classList.add('results'); // narrow the input panel so the cut diagrams get room
   // Show cutting mode button now we have results
   document.getElementById('cutModeBtn').style.display='inline-flex';
