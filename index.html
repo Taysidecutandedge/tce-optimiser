@@ -4159,9 +4159,12 @@ function cmStep(dir){
   _cmIdx=idx; cmRender();
 }
 
-async function cmEmitCutEvent(p){
+async function cmEmitCutEvent(p, opts){
   // Fire-and-forget: publish this confirmed panel to the offload screen.
   // Fully wrapped so it can NEVER affect cutting if anything fails (offline, error).
+  // opts.reprint → action 'reprint', which the station always prints (bypassing the
+  // 90s double-print guard that would otherwise swallow a reprint of a just-cut panel).
+  opts=opts||{};
   try{
     if(!_sbToken) return;            // only when signed in
     // Per-part numbering: which copy of THIS exact part, out of how many in the job
@@ -4174,7 +4177,7 @@ async function cmEmitCutEvent(p){
     if(_pTotal===0){ _pTotal=1; _pNum=1; }
     const body={
       session_id:_cmSession||(projectName||'job'),
-      action:'confirm',
+      action:opts.reprint?'reprint':'confirm',
       panel:{
         label:p.label, origL:p.origL, origW:p.origW,
         eb:p.eb, grain:p.grain, company:p.company||projectName||'',
@@ -4797,7 +4800,7 @@ function cmReprint(){
   // to the print hub (cmEmitCutEvent), which is what actually prints the label.
   printLabelForPanel(p,p.sheetIdx);
   const dd=_shakerDoorForPanel(p); if(dd) printShakerDoorLabel(dd);
-  cmEmitCutEvent(p);
+  cmEmitCutEvent(p,{reprint:true});
 }
 function cmToast(msg,bad){
   let el=document.getElementById('cmToast');

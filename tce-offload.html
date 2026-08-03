@@ -168,6 +168,13 @@ function handleConfirm(r, fromRealtime){
   _seenIds.add(r.id);
   if(r.id>_lastCutId) _lastCutId=r.id;
   render(r); pushRecent(r, !!fromRealtime);
+  if(r.action==='reprint'){
+    // Explicit reprint from the saw side — always print, ignoring the auto-print
+    // toggle and the 90s double-print guard (that guard is for accidental re-confirms).
+    _panelTs[_panelKey(r)]=Date.now();
+    printLabel(r.panel);
+    return;
+  }
   if(autoPrint && r.action==='confirm'){
     const k=_panelKey(r), now=Date.now();
     if(_panelTs[k] && (now-_panelTs[k])<90000) return;   // same panel re-confirmed within 90s → don't double-print
@@ -180,7 +187,7 @@ async function pollCutEvents(){
   if(_cutPollBusy) return; _cutPollBusy=true;
   try{
     const since=new Date(Date.now()-15*60000).toISOString();
-    const {data}=await sb.from('tce_cut_events').select('*').eq('action','confirm').gte('created_at',since).order('id',{ascending:true}).limit(200);
+    const {data}=await sb.from('tce_cut_events').select('*').in('action',['confirm','reprint']).gte('created_at',since).order('id',{ascending:true}).limit(200);
     if(data) for(const r of data) handleConfirm(r,false);   // dedup gate stops any re-print
   }catch(e){}
   _cutPollBusy=false;
@@ -204,7 +211,7 @@ async function startApp(){
     // Load recent history: remember every id so the backup poll won't reprint it,
     // but only auto-print things that arrive AFTER we're up (via realtime/poll).
     const since=new Date(Date.now()-15*60000).toISOString();
-    const {data}=await sb.from('tce_cut_events').select('*').eq('action','confirm').gte('created_at',since).order('id',{ascending:true}).limit(200);
+    const {data}=await sb.from('tce_cut_events').select('*').in('action',['confirm','reprint']).gte('created_at',since).order('id',{ascending:true}).limit(200);
     if(data&&data.length){
       data.forEach(r=>{ _seenIds.add(r.id); if(r.id>_lastCutId)_lastCutId=r.id; });
       data.slice(-10).forEach(r=>pushRecent(r,false));
