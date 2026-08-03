@@ -346,9 +346,30 @@ async function printLamLabel(p){
     return r.ok;
   }catch(e){ _dymoBase=null; setPrintStat('printer not reachable'); return false; }
 }
+// Serialised print queue. The DYMO 550 silently drops a job if two are POSTed
+// back-to-back (e.g. the two labels of a laminated panel arriving together). We
+// send one at a time and space them ~600ms so no label is ever lost.
+let _printQ=[]; let _printQBusy=false;
+function enqueueLabelXml(xml, okMsg){ _printQ.push({xml, okMsg:okMsg||'sent to printer ✓'}); runPrintQ(); }
+async function runPrintQ(){
+  if(_printQBusy) return; _printQBusy=true;
+  while(_printQ.length){
+    const job=_printQ[0];
+    const base=await ensureDymo();
+    if(!base){ setPrintStat('printer not reachable — open DYMO Connect & accept certificate'); _printQBusy=false; return; }  // leave job queued; retries on next print
+    _printQ.shift();
+    setPrintStat('printing…');
+    try{
+      const r=await fetch(base+'PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body:'printerName='+encodeURIComponent(_dymoPrinter)+'&labelXml='+encodeURIComponent(job.xml)+'&printParamsXml=&labelSetXml='});
+      setPrintStat(r.ok?job.okMsg:'printer error '+r.status);
+    }catch(e){ _dymoBase=null; setPrintStat('printer not reachable'); }
+    if(_printQ.length) await new Promise(res=>setTimeout(res,600));   // space jobs so the 550 doesn't drop rapid prints
+  }
+  _printQBusy=false;
+}
 async function printLabel(p){
   if(!p) return;
-  setPrintStat('printing…');
   const ebc=s=>(p.eb&&p.eb[s])?ebCodeFor((p.eb.tk&&p.eb.tk[s])||'1'):'';
   // Two labels for a laminated panel, BOTH in the normal format:
   //  • 'lam' layer  → the laminate/cut label: normal label at the oversize CUT size,
@@ -372,12 +393,7 @@ async function printLabel(p){
     DESC:desc,
     L1:ebc('L1'), W1:ebc('W1'), W2:ebc('W2'), L2:ebc('L2')
   });
-  const base=await ensureDymo();
-  if(!base){ setPrintStat('printer not reachable — open DYMO Connect & accept certificate'); return; }
-  fetch(base+'PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
-    body:'printerName='+encodeURIComponent(_dymoPrinter)+'&labelXml='+encodeURIComponent(xml)+'&printParamsXml=&labelSetXml='})
-    .then(r=>setPrintStat(r.ok?'sent to printer ✓':'printer error '+r.status))
-    .catch(()=>{ _dymoBase=null; setPrintStat('printer not reachable'); });
+  enqueueLabelXml(xml,'sent to printer ✓');
   if(p.door) printDoorLabel(p.door);
 }
 async function printDoorLabel(d){
@@ -388,11 +404,7 @@ async function printDoorLabel(d){
     NUM:'', DESC:'SHAKER DOOR '+(d.ref||''),
     L1:'',W1:'',W2:'',L2:''
   });
-  const base=await ensureDymo();
-  if(!base){ setPrintStat('printer not reachable — open DYMO Connect & accept certificate'); return; }
-  fetch(base+'PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'printerName='+encodeURIComponent(_dymoPrinter)+'&labelXml='+encodeURIComponent(xml)+'&printParamsXml=&labelSetXml='})
-    .then(r=>setPrintStat(r.ok?'door label sent ✓':'printer error '+r.status))
-    .catch(()=>{ _dymoBase=null; setPrintStat('printer not reachable'); });
+  enqueueLabelXml(xml,'door label sent ✓');
 }
 
 // ── Offcut capture (Phase 3) ───────────────────────────────────────────────
