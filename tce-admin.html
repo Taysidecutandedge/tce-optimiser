@@ -933,9 +933,13 @@ async function buildQuote() {
     const ebRateTotal = ebBaseRate + ebMatRate * (surcharge ? 1.08 : 1);
     const ebM = (data.ebMm||0)/1000;
 
-    const boardBase = data.sheets * boardPrice;
+    // Price from the OFFCUTS-OFF board count (the true material the job needs) when
+    // the optimiser saved it — so offcuts never inflate a customer quote.
+    const qb=(jobData&&jobData.quoteBasis)||null;
+    const shts=(qb && qb[mat]!=null) ? qb[mat] : data.sheets;
+    const boardBase = shts * boardPrice;
     const boardTotal = surcharge ? boardBase * 1.08 : boardBase;
-    const cutTotal = data.sheets * cutRate;
+    const cutTotal = shts * cutRate;
     const ebTotal = ebM * ebRateTotal;
     const matTotal = boardTotal + cutTotal + ebTotal;
     grandEx += matTotal;
@@ -948,7 +952,7 @@ async function buildQuote() {
     <tr class="mat-head"><td colspan="6">${mat}</td></tr>
     <tr>
       <td>Boards</td>
-      <td class="override-label">${data.sheets} sheets × <input type="number" class="override-input" value="${boardPrice.toFixed(2)}"
+      <td class="override-label">${shts} sheets × <input type="number" class="override-input" value="${boardPrice.toFixed(2)}"
         onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},boardPrice:parseFloat(this.value)||0};buildQuote()" step="0.01">
         <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#6b8f7e;margin-left:8px">
           <input type="checkbox" ${surcharge?'checked':''} onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},surcharge:this.checked};buildQuote()"> +8% surcharge
@@ -960,7 +964,7 @@ async function buildQuote() {
     </tr>
     <tr>
       <td>Cutting</td>
-      <td class="override-label">${data.sheets} sheets × <input type="number" class="override-input" value="${cutRate.toFixed(2)}"
+      <td class="override-label">${shts} sheets × <input type="number" class="override-input" value="${cutRate.toFixed(2)}"
         onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},cutRate:parseFloat(this.value)||0};buildQuote()" step="0.01">/sheet</td>
       <td></td><td></td><td></td>
       <td class="r">£${cutTotal.toFixed(2)}</td>
@@ -1100,17 +1104,19 @@ function printQuote() {
     const ebBaseRate=ebRate?parseFloat(ebRate.base_rate):2.90;
     const ebRateTotal=ebBaseRate+ebMatRate*(surcharge?1.08:1);
     const ebM=(data.ebMm||0)/1000;
-    const boardBase=data.sheets*boardPrice;
+    const qb=(jobData&&jobData.quoteBasis)||null;
+    const shts=(qb && qb[mat]!=null) ? qb[mat] : data.sheets;   // offcuts-off count
+    const boardBase=shts*boardPrice;
     const boardTotal=surcharge?boardBase*1.08:boardBase;
-    const cutTotal=data.sheets*cutRate;
+    const cutTotal=shts*cutRate;
     const ebTotal=ebM*ebRateTotal;
     const matTotal=boardTotal+cutTotal+ebTotal;
     grandEx+=matTotal;
 
     rows+=`
       <tr class="mat-row"><td colspan="3"><strong>${mat}</strong></td></tr>
-      <tr><td>Boards (${data.sheets} × £${boardPrice.toFixed(2)}${surcharge?' +8%':''})</td><td></td><td class="amt">£${boardTotal.toFixed(2)}</td></tr>
-      <tr><td>Cutting (${data.sheets} sheets × £${cutRate.toFixed(2)})</td><td></td><td class="amt">£${cutTotal.toFixed(2)}</td></tr>
+      <tr><td>Boards (${shts} × £${boardPrice.toFixed(2)}${surcharge?' +8%':''})</td><td></td><td class="amt">£${boardTotal.toFixed(2)}</td></tr>
+      <tr><td>Cutting (${shts} sheets × £${cutRate.toFixed(2)})</td><td></td><td class="amt">£${cutTotal.toFixed(2)}</td></tr>
       ${ebM>0?`<tr><td>Edgebanding (${ebM.toFixed(2)}m × £${ebRateTotal.toFixed(2)}/lm)</td><td></td><td class="amt">£${ebTotal.toFixed(2)}</td></tr>`:''}
       <tr class="sub-row"><td colspan="2">Subtotal</td><td class="amt">£${matTotal.toFixed(2)}</td></tr>`;
   });
