@@ -889,19 +889,28 @@ async function buildQuote() {
   if (jobData?.parts) {
     // Estimate from parts — count unique materials
     const matNames = [...new Set(jobData.parts.map(p=>p.matName))];
-    matNames.forEach(m => { if(m) matData[m] = {sheets:0, ebMm:0}; });
+    matNames.forEach(m => { if(m) matData[m] = {sheets:0, ebMm:0, ebMmLam:0}; });
   }
+  const _ebExtra = [];   // edgebanding not tied to a board (e.g. MDF Card) — charged as its own line, never dropped
 
   // Note: actual sheet/EB counts come from the optimiser run
   // If job was saved with results, use those; otherwise show estimate
   if (jobData?.lastResult) {
     jobData.lastResult.sheets?.forEach(s => {
-      if(!matData[s.name]) matData[s.name]={sheets:0,ebMm:0};
+      if(!matData[s.name]) matData[s.name]={sheets:0,ebMm:0,ebMmLam:0};
       matData[s.name].sheets++;
     });
     Object.entries(jobData.lastResult.ebMap||{}).forEach(([key,mm])=>{
-      const mat = key.split(' · ').slice(1).join(' · ');
-      if(matData[mat]) matData[mat].ebMm = (matData[mat].ebMm||0)+mm;
+      const isLam=/LAMINATED/i.test(key);
+      let mat=key.split(' · ').slice(1).join(' · ');
+      if(isLam) mat=mat.replace(/\s*·\s*LAMINATED.*$/i,'').trim();   // laminated edge on a known board → wide-tape line
+      if(matData[mat]){
+        if(isLam) matData[mat].ebMmLam=(matData[mat].ebMmLam||0)+mm;
+        else matData[mat].ebMm=(matData[mat].ebMm||0)+mm;
+      } else {
+        // decor isn't a board in this job (e.g. "Mdf Card") — charge as a standalone edging line
+        _ebExtra.push({ label:key.replace(/^\s*\d+(\.\d+)?mm\s*·\s*/,''), mm, isLam });
+      }
     });
   } else {
     // No results saved — show note
@@ -920,7 +929,7 @@ async function buildQuote() {
 
   Object.entries(matData).forEach(([mat, data]) => {
     if (shaker.pureDoorMats.has(mat)) return;   // priced as shaker doors below
-    if (!data.sheets && !data.ebMm) return;
+    if (!data.sheets && !data.ebMm && !data.ebMmLam) return;
     const ov = _quoteOverrides[mat] || {};
     const autoPrice = lookupBoardPrice(mat, tier);
     const boardPrice = ov.boardPrice !== undefined ? ov.boardPrice : (autoPrice ?? 0);
@@ -941,7 +950,15 @@ async function buildQuote() {
     const boardTotal = surcharge ? boardBase * 1.08 : boardBase;
     const cutTotal = shts * cutRate;
     const ebTotal = ebM * ebRateTotal;
-    const matTotal = boardTotal + cutTotal + ebTotal;
+    // Laminated edges = a thick glued-up edge → WIDER tape, priced separately.
+    const ebMLam = (data.ebMmLam||0)/1000;
+    const lamTapeKey = ov.lamTapeKey || '43x1 ABS';
+    const lamRate = _ebRates.find(r=>r.tape_key===lamTapeKey);
+    const lamMatRate = lamRate ? parseFloat(lamRate.mat_rate) : 1.2;
+    const lamBaseRate = lamRate ? parseFloat(lamRate.base_rate) : 2.9;
+    const lamRateTotal = lamBaseRate + lamMatRate * (surcharge ? 1.08 : 1);
+    const lamTotal = ebMLam * lamRateTotal;
+    const matTotal = boardTotal + cutTotal + ebTotal + lamTotal;
     grandEx += matTotal;
 
     const priceNote = autoPrice !== null
@@ -981,10 +998,56 @@ async function buildQuote() {
       <td class="r" style="font-size:11px;color:#6b8f7e">@ £${ebRateTotal.toFixed(2)}/lm${surcharge?" <span style=\"color:#f0a500\">(+8% mat)</span>":""}</td>
       <td class="r">£${ebTotal.toFixed(2)}</td>
     </tr>` : ''}
+    ${ebMLam > 0 ? `<tr>
+      <td>Edgebanding <span style="color:#f0a500;font-size:11px">· laminated (wide)</span></td>
+      <td class="override-label">${ebMLam.toFixed(2)}m ×
+        <select style="width:auto;display:inline;padding:2px 4px;font-size:11px;margin:0 4px"
+          onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},lamTapeKey:this.value};buildQuote()">
+          ${_ebRates.map(r=>`<option value="${r.tape_key}" ${r.tape_key===lamTapeKey?'selected':''}>${r.tape_label}</option>`).join('')}
+        </select>
+      </td>
+      <td></td><td></td>
+      <td class="r" style="font-size:11px;color:#6b8f7e">@ £${lamRateTotal.toFixed(2)}/lm</td>
+      <td class="r">£${lamTotal.toFixed(2)}</td>
+    </tr>` : ''}
     <tr class="subtotal">
       <td colspan="5">${mat} subtotal</td>
       <td class="r">£${matTotal.toFixed(2)}</td>
     </tr>`;
+  });
+
+  // Edgebanding on a decor that isn't a board in this job (e.g. "Mdf Card").
+  // In a job WITH shaker doors this is door-component edging, which is already
+  // included in the shaker door unit price (see edgeCost in shakerDoorPrice) —
+  // so we show it as a note, NOT a charge, to avoid double-counting.
+  // In a door-less job it's real carcass edging that would otherwise be dropped,
+  // so there we charge it as its own line.
+  _ebExtra.forEach(ex=>{
+    const m=ex.mm/1000; if(m<=0) return;
+    if(shaker.doors.length){
+      rows += `<tr><td colspan="5" style="font-size:11px;color:#6b8f7e;padding-left:12px">↳ ${ex.label} edging ${m.toFixed(2)}m — included in shaker door price (not charged separately)</td><td class="r" style="color:#6b8f7e">—</td></tr>`;
+      return;
+    }
+    const key='__eb_'+ex.label.replace(/[^a-z0-9]/gi,'_');
+    const ov=_quoteOverrides[key]||{};
+    const tk=ov.ebTapeKey||'23x1 ABS';
+    const rt=_ebRates.find(r=>r.tape_key===tk);
+    const mr=rt?parseFloat(rt.mat_rate):0.6, br=rt?parseFloat(rt.base_rate):2.9;
+    const rate=br+mr; const tot=m*rate; grandEx+=tot;
+    rows += `<tr class="mat-head"><td colspan="6">${ex.label}${ex.isLam?' · laminated (wide)':''} — edgebanding</td></tr>
+    <tr>
+      <td>Edgebanding</td>
+      <td class="override-label">${m.toFixed(2)}m ×
+        <select style="width:auto;display:inline;padding:2px 4px;font-size:11px;margin:0 4px"
+          onchange="_quoteOverrides['${key}']={..._quoteOverrides['${key}']||{},ebTapeKey:this.value};buildQuote()">
+          ${_ebRates.map(r=>`<option value="${r.tape_key}" ${r.tape_key===tk?'selected':''}>${r.tape_label}</option>`).join('')}
+        </select>
+      </td>
+      <td></td><td></td>
+      <td class="r" style="font-size:11px;color:#6b8f7e">@ £${rate.toFixed(2)}/lm</td>
+      <td class="r">£${tot.toFixed(2)}</td>
+    </tr>
+    <tr class="subtotal"><td colspan="5">${ex.label} subtotal</td><td class="r">£${tot.toFixed(2)}</td></tr>`;
   });
 
   // Shaker doors — priced as finished units (material + labour + overhead, ÷ margin)
@@ -1077,13 +1140,17 @@ function printQuote() {
   try { jobData = typeof _currentJob.job_data==='string'?JSON.parse(_currentJob.job_data):_currentJob.job_data; } catch(e){return;}
 
   const matData = {};
+  const _ebExtra = [];
   jobData?.lastResult?.sheets?.forEach(s=>{
-    if(!matData[s.name]) matData[s.name]={sheets:0,ebMm:0};
+    if(!matData[s.name]) matData[s.name]={sheets:0,ebMm:0,ebMmLam:0};
     matData[s.name].sheets++;
   });
   Object.entries(jobData?.lastResult?.ebMap||{}).forEach(([key,mm])=>{
-    const mat=key.split(' · ').slice(1).join(' · ');
-    if(matData[mat]) matData[mat].ebMm=(matData[mat].ebMm||0)+mm;
+    const isLam=/LAMINATED/i.test(key);
+    let mat=key.split(' · ').slice(1).join(' · ');
+    if(isLam) mat=mat.replace(/\s*·\s*LAMINATED.*$/i,'').trim();
+    if(matData[mat]){ if(isLam) matData[mat].ebMmLam=(matData[mat].ebMmLam||0)+mm; else matData[mat].ebMm=(matData[mat].ebMm||0)+mm; }
+    else _ebExtra.push({label:key.replace(/^\s*\d+(\.\d+)?mm\s*·\s*/,''), mm, isLam});
   });
 
   const defaultCutRate = getDefaultCutRate(jobData, tier);
@@ -1092,7 +1159,7 @@ function printQuote() {
 
   Object.entries(matData).forEach(([mat,data])=>{
     if(shaker.pureDoorMats.has(mat)) return;
-    if(!data.sheets&&!data.ebMm) return;
+    if(!data.sheets&&!data.ebMm&&!data.ebMmLam) return;
     const ov=_quoteOverrides[mat]||{};
     const autoPrice=lookupBoardPrice(mat,tier);
     const boardPrice=ov.boardPrice!==undefined?ov.boardPrice:(autoPrice??0);
@@ -1104,13 +1171,21 @@ function printQuote() {
     const ebBaseRate=ebRate?parseFloat(ebRate.base_rate):2.90;
     const ebRateTotal=ebBaseRate+ebMatRate*(surcharge?1.08:1);
     const ebM=(data.ebMm||0)/1000;
+    // Laminated (wide-tape) edging on this material — separate rate
+    const ebMLam=(data.ebMmLam||0)/1000;
+    const lamTapeKey=ov.lamTapeKey||'43x1 ABS';
+    const lamRate=_ebRates.find(r=>r.tape_key===lamTapeKey);
+    const lamMatRate=lamRate?parseFloat(lamRate.mat_rate):1.20;
+    const lamBaseRate=lamRate?parseFloat(lamRate.base_rate):2.90;
+    const lamRateTotal=lamBaseRate+lamMatRate*(surcharge?1.08:1);
+    const lamTotal=ebMLam*lamRateTotal;
     const qb=(jobData&&jobData.quoteBasis)||null;
     const shts=(qb && qb[mat]!=null) ? qb[mat] : data.sheets;   // offcuts-off count
     const boardBase=shts*boardPrice;
     const boardTotal=surcharge?boardBase*1.08:boardBase;
     const cutTotal=shts*cutRate;
     const ebTotal=ebM*ebRateTotal;
-    const matTotal=boardTotal+cutTotal+ebTotal;
+    const matTotal=boardTotal+cutTotal+ebTotal+lamTotal;
     grandEx+=matTotal;
 
     rows+=`
@@ -1118,7 +1193,26 @@ function printQuote() {
       <tr><td>Boards (${shts} × £${boardPrice.toFixed(2)}${surcharge?' +8%':''})</td><td></td><td class="amt">£${boardTotal.toFixed(2)}</td></tr>
       <tr><td>Cutting (${shts} sheets × £${cutRate.toFixed(2)})</td><td></td><td class="amt">£${cutTotal.toFixed(2)}</td></tr>
       ${ebM>0?`<tr><td>Edgebanding (${ebM.toFixed(2)}m × £${ebRateTotal.toFixed(2)}/lm)</td><td></td><td class="amt">£${ebTotal.toFixed(2)}</td></tr>`:''}
+      ${ebMLam>0?`<tr><td>Edgebanding — laminated (${ebMLam.toFixed(2)}m × £${lamRateTotal.toFixed(2)}/lm)</td><td></td><td class="amt">£${lamTotal.toFixed(2)}</td></tr>`:''}
       <tr class="sub-row"><td colspan="2">Subtotal</td><td class="amt">£${matTotal.toFixed(2)}</td></tr>`;
+  });
+
+  // Edgebanding on a decor that isn't a board here. In a door job it's already
+  // in the shaker door price — skip it (don't double-charge). Only a door-less
+  // job charges it as real standalone carcass edging.
+  _ebExtra.forEach(ex=>{
+    const m=ex.mm/1000; if(m<=0) return;
+    if(shaker.doors.length) return;   // included in shaker door price
+    const key='__eb_'+ex.label.replace(/[^a-z0-9]/gi,'_');
+    const ov=_quoteOverrides[key]||{};
+    const tk=ov.ebTapeKey||'23x1 ABS';
+    const rt=_ebRates.find(r=>r.tape_key===tk);
+    const mr=rt?parseFloat(rt.mat_rate):0.6, br=rt?parseFloat(rt.base_rate):2.9;
+    const rate=br+mr; const tot=m*rate; grandEx+=tot;
+    rows+=`
+      <tr class="mat-row"><td colspan="3"><strong>${ex.label}${ex.isLam?' · laminated (wide)':''} — edgebanding</strong></td></tr>
+      <tr><td>Edgebanding (${m.toFixed(2)}m × £${rate.toFixed(2)}/lm)</td><td></td><td class="amt">£${tot.toFixed(2)}</td></tr>
+      <tr class="sub-row"><td colspan="2">Subtotal</td><td class="amt">£${tot.toFixed(2)}</td></tr>`;
   });
 
   if(shaker.doors.length){
