@@ -4045,8 +4045,12 @@ function cmResetCuts(){
 // size) and copy count — independent of the current nest layout order.
 async function cmReconcileFromCloud(){
   if(!_sbToken || !_cmPanels.length) return {ok:false,count:0};
-  const since=new Date(Math.max(_cmSince||0, Date.now()-48*3600*1000)).toISOString();
-  const url=SB_URL+'/rest/v1/tce_cut_events?select=panel,created_at&action=eq.confirm&created_at=gte.'+encodeURIComponent(since)+'&order=id.desc&limit=2000';
+  // Key recovery to the JOB NAME (every confirm carries it), not a short time
+  // window — a paused job resumes correctly however many days later. A generous
+  // 180-day window just bounds the query; "Reset cuts" ignores confirms before it.
+  const proj=String(projectName||'').trim().toLowerCase();
+  const winStart=new Date(Math.max(_cmSince||0, Date.now()-180*24*3600*1000)).toISOString();
+  const url=SB_URL+'/rest/v1/tce_cut_events?select=panel,created_at&action=eq.confirm&created_at=gte.'+encodeURIComponent(winStart)+'&order=id.desc&limit=5000';
   let rows;
   try{
     let r=await fetch(url,{headers:sbAuthH()});
@@ -4056,6 +4060,8 @@ async function cmReconcileFromCloud(){
   }catch(e){ return {ok:false,count:0}; }
   const uniq=new Set(), cnt={};
   rows.forEach(x=>{ const p=x.panel||{};
+    // Only THIS job's confirms (match by job name), so nothing bleeds across jobs.
+    if(proj && String(p.company||'').trim().toLowerCase()!==proj) return;
     const uk=(p.label||'')+'|'+(p.panelNum||'')+'|'+(p.origL||'')+'|'+(p.origW||'');
     if(uniq.has(uk)) return; uniq.add(uk);
     const ck=(p.label||'')+'|'+(p.origL||'')+'|'+(p.origW||''); cnt[ck]=(cnt[ck]||0)+1; });
