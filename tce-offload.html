@@ -273,10 +273,10 @@ function render(r){
   let _dimsHTML, _lamBanner='';
   if(_isLam && _role==='lam'){
     _dimsHTML=esc(p.origL)+' × '+esc(p.origW)+' mm <span class="tag">CUT · oversize</span>';
-    _lamBanner='<div class="panel-num" style="color:#2e7d46;font-weight:800">⧉ LAMINATE ×2 — glue 2 layers, trim to '+esc(p._finL)+'×'+esc(p._finW)+'</div>';
+    _lamBanner='<div class="panel-num" style="color:#2e7d46;font-weight:800">⧉ Laminated part — laminate label (trim to '+esc(p._finL)+'×'+esc(p._finW)+')</div>';
   } else if(_isLam && _role==='finish'){
     _dimsHTML=esc(p._finL)+' × '+esc(p._finW)+' mm <span class="tag">finished</span>';
-    _lamBanner='<div class="panel-num" style="color:#2e7d46;font-weight:800">⧉ Laminated panel — finished label</div>';
+    _lamBanner='<div class="panel-num" style="color:#2e7d46;font-weight:800">⧉ Laminated part — finished label + edgebanding</div>';
   } else {
     _dimsHTML=esc(p.origL)+' × '+esc(p.origW)+' mm';
   }
@@ -337,24 +337,34 @@ function lamLabelXml(p){
 async function printLamLabel(p){
   setPrintStat('printing laminate label…');
   const base=await ensureDymo();
-  if(!base){ setPrintStat('printer not reachable — open DYMO Connect & accept certificate'); return; }
+  if(!base){ setPrintStat('printer not reachable — open DYMO Connect & accept certificate'); return false; }
   const xml=lamLabelXml(p);
-  fetch(base+'PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
-    body:'printerName='+encodeURIComponent(_dymoPrinter)+'&labelXml='+encodeURIComponent(xml)+'&printParamsXml=&labelSetXml='})
-    .then(r=>setPrintStat(r.ok?'laminate label sent ✓':'printer error '+r.status))
-    .catch(()=>{ _dymoBase=null; setPrintStat('printer not reachable'); });
+  try{
+    const r=await fetch(base+'PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:'printerName='+encodeURIComponent(_dymoPrinter)+'&labelXml='+encodeURIComponent(xml)+'&printParamsXml=&labelSetXml='});
+    setPrintStat(r.ok?'laminate label sent ✓':'printer error '+r.status);
+    return r.ok;
+  }catch(e){ _dymoBase=null; setPrintStat('printer not reachable'); return false; }
 }
 async function printLabel(p){
   if(!p) return;
-  // Laminated 'lam' layer → the glue-up label (oversize/cut size), not a panel label.
-  if(p._lam && p._lamRole==='lam'){ return printLamLabel(p); }
   setPrintStat('printing…');
   const ebc=s=>(p.eb&&p.eb[s])?ebCodeFor((p.eb.tk&&p.eb.tk[s])||'1'):'';
-  // Laminated 'finish' layer → finished (trim) size + clean name = the normal panel label.
-  const isFinishLam = p._lam && p._lamRole==='finish';
-  const L = (isFinishLam && p._finL!=null) ? p._finL : p.origL;
-  const W = (isFinishLam && p._finW!=null) ? p._finW : p.origW;
-  const desc = isFinishLam ? cleanLamName(p.label) : (p.label||'Panel');
+  // Two labels for a laminated panel, BOTH in the normal format:
+  //  • 'lam' layer  → the laminate/cut label: normal label at the oversize CUT size,
+  //                    just flagged "·LAM x2" so you know it's a laminated piece.
+  //  • 'finish' layer → the finished label, exactly as always: FINISHED size + edgebanding.
+  const isLam=p._lam, role=p._lamRole;
+  let L,W,desc;
+  if(isLam && role==='finish'){
+    L=(p._finL!=null?p._finL:p.origL); W=(p._finW!=null?p._finW:p.origW);
+    desc=cleanLamName(p.label);                       // clean name = the normal finished label
+  } else if(isLam){
+    L=p.origL; W=p.origW;                              // oversize cut size
+    desc=cleanLamName(p.label)+'  ·LAM x2';            // laminate indication, ASCII-safe
+  } else {
+    L=p.origL; W=p.origW; desc=(p.label||'Panel');     // non-laminated: unchanged
+  }
   const xml=fillTemplate({
     MATERIAL:p.sheetName||'', COMPANY:(p.company||'').replace(/\s*[-—]\s*Rev\s*\d+\s*$/i,''),
     LENGTH:(L!=null?L:''), WIDTH:(W!=null?W:''),
