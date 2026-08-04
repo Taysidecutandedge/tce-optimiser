@@ -464,6 +464,10 @@ async function doAdminLogin() {
     const d = await r.json();
     if (d.access_token) {
       SB_TOKEN = d.access_token;
+      // Remember the session so a refresh (or the ↻ button) doesn't kick you back to sign-in.
+      try{ localStorage.setItem('tce_admin_token', d.access_token);
+        if(d.refresh_token) localStorage.setItem('tce_admin_refresh', d.refresh_token);
+        localStorage.setItem('tce_admin_email', email); }catch(e){}
       document.getElementById('pinScreen').style.display = 'none';
       document.getElementById('app').style.display = 'block';
       document.getElementById('topbarUser').textContent = email;
@@ -483,6 +487,7 @@ function lockApp() {
   document.getElementById('loginError').textContent = '';
   SB_TOKEN = null;
   _jobs = [];
+  try{ localStorage.removeItem('tce_admin_token'); localStorage.removeItem('tce_admin_refresh'); }catch(e){}
 }
 
 function changePin() {
@@ -1899,6 +1904,32 @@ setTimeout(()=>document.getElementById('adminPassword')?.focus(), 100);
 document.addEventListener('keydown', e => {
   if (e.key==='Enter' && document.getElementById('pinScreen').style.display!=='none') doAdminLogin();
 });
+
+// Auto-restore the session on load (so refresh / the ↻ button keeps you signed in).
+async function tryAutoLogin(){
+  let rt; try{ rt=localStorage.getItem('tce_admin_refresh'); }catch(e){}
+  if(!rt) return;
+  try{
+    const r=await fetch(`${SB_URL}/auth/v1/token?grant_type=refresh_token`,{
+      method:'POST', headers:{'Content-Type':'application/json','apikey':SB_KEY},
+      body:JSON.stringify({refresh_token:rt})
+    });
+    const d=await r.json();
+    if(d && d.access_token){
+      SB_TOKEN=d.access_token;
+      try{ localStorage.setItem('tce_admin_token', d.access_token);
+        if(d.refresh_token) localStorage.setItem('tce_admin_refresh', d.refresh_token); }catch(e){}
+      document.getElementById('pinScreen').style.display='none';
+      document.getElementById('app').style.display='block';
+      document.getElementById('topbarUser').textContent=(localStorage.getItem('tce_admin_email')||'');
+      await loadAllData();
+    } else {
+      // refresh token no longer valid → clear it and stay on the sign-in screen
+      try{ localStorage.removeItem('tce_admin_refresh'); localStorage.removeItem('tce_admin_token'); }catch(e){}
+    }
+  }catch(e){}
+}
+tryAutoLogin();
 </script>
 <script>
 (function(){
