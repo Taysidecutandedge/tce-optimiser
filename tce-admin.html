@@ -286,7 +286,7 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
       <div style="margin-top:16px;border-top:1px solid #2b4a40;padding-top:12px">
         <div style="font-size:12px;color:#f0a500;margin-bottom:8px">+ Add Custom Board</div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:8px;align-items:end">
-          <div><label>Board Type</label><input type="text" id="newBoardName" placeholder="e.g. MR MDF"></div>
+          <div><label>Board Type</label><input type="text" id="newBoardName" list="boardTypeList" placeholder="e.g. Oak Veneer MDF"><datalist id="boardTypeList"></datalist><div style="font-size:10px;color:#6b8f7e;margin-top:2px">Reuse an existing type to group thicknesses together — don't put the mm in the name</div></div>
           <div><label>Thickness (mm)</label><input type="number" id="newBoardThick" placeholder="18"></div>
           <div><label>Sheet Size</label>
             <select id="newBoardSize">
@@ -1731,23 +1731,32 @@ function renderSuppliers() {
     </tbody></table>`;
 }
 
+// Category = board name with any leading thickness ("13mm ") stripped and
+// "Veneered"→"Veneer" unified, so all thicknesses of one board type group together.
+function _boardCat(name){ return String(name||'').replace(/^\s*\d+(?:\.\d+)?\s*mm\s*/i,'').replace(/veneered/ig,'Veneer').replace(/\s+/g,' ').trim(); }
 function renderCustomBoards() {
   const wrap = document.getElementById('customBoardsWrap');
   if (!wrap) return;
+  // Suggestions for the "Board Type" box = existing categories, so new thicknesses reuse a name.
+  const cats={};
+  _customBoards.forEach(b=>{ const c=_boardCat(b.board_name); if(c) cats[c.toLowerCase()]=cats[c.toLowerCase()]||c; });
+  const dl=document.getElementById('boardTypeList');
+  if(dl) dl.innerHTML=Object.values(cats).sort().map(c=>`<option value="${c}">`).join('');
   if (!_customBoards.length) { wrap.innerHTML='<div style="color:#6b8f7e;font-size:12px">No boards yet — add one below.</div>'; return; }
 
-  // Group by board_name then sheet_size
+  // Group by normalized category (thickness in the name ignored) then sheet_size
   const groups = {};
   _customBoards.forEach(b => {
-    if (!groups[b.board_name]) groups[b.board_name] = {};
-    if (!groups[b.board_name][b.sheet_size]) groups[b.board_name][b.sheet_size] = [];
-    groups[b.board_name][b.sheet_size].push(b);
+    const catKey = (_boardCat(b.board_name)||'other').toLowerCase();
+    if (!groups[catKey]) groups[catKey] = { label:(_boardCat(b.board_name)||b.board_name), sizes:{} };
+    if (!groups[catKey].sizes[b.sheet_size]) groups[catKey].sizes[b.sheet_size] = [];
+    groups[catKey].sizes[b.sheet_size].push(b);
   });
 
   let html = '';
-  Object.entries(groups).forEach(([boardName, sizes]) => {
+  Object.values(groups).forEach(({label, sizes}) => {
     html += `<div style="margin-bottom:20px">
-      <div style="font-size:13px;font-weight:bold;color:#f0a500;margin-bottom:8px">${boardName}</div>`;
+      <div style="font-size:13px;font-weight:bold;color:#f0a500;margin-bottom:8px">${label}</div>`;
     Object.entries(sizes).forEach(([size, boards]) => {
       html += `<div style="margin-bottom:8px">
         <div style="font-size:11px;color:#6b8f7e;margin-bottom:4px">${size}</div>
