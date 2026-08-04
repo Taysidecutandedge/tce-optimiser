@@ -620,6 +620,20 @@ function jobDisplay(name){
   if(/\[recovered\]/i.test(name)) s='↩ '+s;
   return s||jobBase(name);
 }
+// Customer accounts (from tce_customers). A job whose client_name matches an account
+// groups under that account; otherwise it falls back to the name parsed from the title.
+function _accountList(){ return (_customers||[]).map(c=>c.company_name||c.name).filter(Boolean); }
+function jobAccount(j){ return (j.client_name && _accountList().includes(j.client_name)) ? j.client_name : jobCustomer(j.job_name); }
+async function assignAccount(idsCSV, value){
+  const ids=(idsCSV||'').split(',').map(x=>parseInt(x)).filter(Boolean);
+  try{
+    for(const id of ids){
+      await sbFetch(`tce_jobs?id=eq.${id}`, {method:'PATCH', headers:{'Prefer':'return=minimal'}, body:{client_name:value||null}});
+      const j=_jobs.find(x=>x.id===id); if(j) j.client_name=value||null;
+    }
+    renderJobsList();
+  }catch(e){ alert('Could not assign: '+e.message); }
+}
 async function loadJobs() {
   try {
     _jobs = (await sbFetch('tce_jobs','?select=id,job_name,client_name,saved_at,archived&order=saved_at.desc')) || [];
@@ -676,7 +690,7 @@ function renderJobsList(){
   if(q) jobs=jobs.filter(j=>((j.job_name||'')+' '+jobCustomer(j.job_name)).toLowerCase().includes(q));
   if(!jobs.length){ body.innerHTML=`<div class="no-data" style="padding:16px">${q?'No jobs match “'+_attr(q)+'”.':(SB_TOKEN?'No saved jobs.':'Not signed in.')}</div>`; return; }
   const groups={};
-  jobs.forEach(j=>{ const c=jobCustomer(j.job_name), b=jobBase(j.job_name).toLowerCase();
+  jobs.forEach(j=>{ const c=jobAccount(j), b=jobBase(j.job_name).toLowerCase();
     (groups[c]=groups[c]||{}); (groups[c][b]=groups[c][b]||[]).push(j); });
   let html='';
   Object.keys(groups).sort((a,b)=>a.localeCompare(b)).forEach(cust=>{
@@ -693,11 +707,14 @@ function renderJobsList(){
       baseArr.sort((a,b)=>new Date(b.revs[0].saved_at)-new Date(a.revs[0].saved_at));
       baseArr.forEach(({k,revs})=>{
         const L=revs[0], showRev=_openRev[k]===true;
-        html+=`<div style="padding:8px 12px;border-top:1px solid #1a2a24;display:flex;align-items:center;gap:8px">
-          <div class="jl-open" data-id="${L.id}" style="flex:1;cursor:pointer">
+        const _ids=revs.map(r=>r.id).join(','), _curAcc=_accountList().includes(L.client_name)?L.client_name:'';
+        const _acctSel=`<select class="jl-acct" data-ids="${_ids}" title="Assign to a customer account" style="font-size:11px;background:#0d1f1a;border:1px solid #2b4a40;color:#8fae9f;border-radius:5px;padding:3px 4px;max-width:130px"><option value="">— account —</option>${_accountList().map(a=>`<option value="${_attr(a)}" ${a===_curAcc?'selected':''}>${_attr(a)}</option>`).join('')}</select>`;
+        html+=`<div style="padding:8px 12px;border-top:1px solid #1a2a24;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <div class="jl-open" data-id="${L.id}" style="flex:1;min-width:140px;cursor:pointer">
             <div style="font-size:13px;color:#e8f0ec">${_attr(jobDisplay(L.job_name))}${L.archived?' <span style="font-size:10px;color:#6b8f7e">(archived)</span>':''}</div>
             <div style="font-size:11px;color:#6b8f7e">${L.saved_at?new Date(L.saved_at).toLocaleDateString('en-GB'):''}${revs.length>1?' · latest of '+revs.length:''}</div>
           </div>
+          ${_acctSel}
           ${revs.length>1?`<button class="jl-revs btn btn-secondary btn-sm" data-base="${_attr(k)}" title="Show older saves">${showRev?'▾':'▸'} ${revs.length-1} older</button>`:''}
           <button class="jl-open btn btn-secondary btn-sm" data-id="${L.id}">Open →</button>
           ${_hasArchived?`<button class="jl-arch btn btn-secondary btn-sm" data-id="${L.id}" data-val="${L.archived?'false':'true'}" title="${L.archived?'Unarchive':'Archive (mark done)'}">${L.archived?'↩':'📦'}</button>`:''}
@@ -723,6 +740,7 @@ function renderJobsList(){
     const ar=e.target.closest('.jl-arch'); if(ar){ archiveJob(parseInt(ar.dataset.id), ar.dataset.val==='true'); return; }
     const op=e.target.closest('.jl-open'); if(op){ openJob(parseInt(op.dataset.id)); return; }
   };
+  body.onchange=function(e){ const s=e.target.closest('.jl-acct'); if(s) assignAccount(s.dataset.ids, s.value); };
 }
 
 async function openJob(id) {

@@ -978,6 +978,19 @@ function cjAttr(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&am
 function cjBase(name){ return String(name||'').replace(/\s*[-—]\s*Rev\s*\d+\s*$/i,'').trim() || String(name||'Untitled'); }
 function cjCustomer(name){ let b=cjBase(name).replace(/^\s*\[recovered\]\s*/i,'').replace(/^tayside cut (and|&) edge(\s+cutlist)?\s*[-:]?\s*/i,'').replace(/^the\s+/i,'').trim(); const w=(b.split(/\s+/)[0]||'Other'); return w.charAt(0).toUpperCase()+w.slice(1); }
 function cjDisplay(name){ let s=cjBase(name).replace(/^\s*\[recovered\]\s*/i,'').replace(/^tayside cut (and|&) edge(\s+cutlist)?\s*[-:]?\s*/i,'').replace(/\s+/g,' ').trim(); if(/\[recovered\]/i.test(name)) s='↩ '+s; return s||cjBase(name); }
+let _cjAccounts=[];
+function cjAccountList(){ return _cjAccounts||[]; }
+function cjAccount(j){ return (j.client_name && cjAccountList().includes(j.client_name)) ? j.client_name : cjCustomer(j.job_name); }
+async function cjAssign(idsCSV,value){
+  const ids=(idsCSV||'').split(',').map(x=>parseInt(x)).filter(Boolean);
+  try{
+    for(const id of ids){
+      await fetch(SB_URL+'/rest/v1/tce_jobs?id=eq.'+id,{method:'PATCH',headers:{...sbAuthH(),'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({client_name:value||null})});
+      const j=(_cjJobs||[]).find(x=>x.id===id); if(j) j.client_name=value||null;
+    }
+    renderCjList();
+  }catch(e){}
+}
 async function loadCloudJobList(){
   const list=document.getElementById('cloudJobList');
   if(!document.getElementById('cjBody')){
@@ -992,6 +1005,7 @@ async function loadCloudJobList(){
     let r=await fetch(SB_URL+'/rest/v1/tce_jobs?select=id,job_name,client_name,saved_at,archived&order=saved_at.desc',{headers:sbAuthH()});
     if(!r.ok){ r=await fetch(SB_URL+'/rest/v1/tce_jobs?select=id,job_name,client_name,saved_at&order=saved_at.desc',{headers:sbAuthH()}); _cjHasArch=false; }
     _cjJobs=await r.json();
+    try{ const ac=await fetch(SB_URL+'/rest/v1/tce_customers?select=company_name&order=company_name',{headers:sbAuthH()}); if(ac.ok) _cjAccounts=(await ac.json()).map(c=>c.company_name).filter(Boolean); }catch(e){}
   }catch(e){ const b=document.getElementById('cjBody'); if(b) b.innerHTML='<div class="cj-empty" style="color:var(--err)">Could not load jobs</div>'; return; }
   const aw=document.getElementById('cjArchWrap'); if(aw) aw.style.display=_cjHasArch?'inline-flex':'none';
   renderCjList();
@@ -1003,7 +1017,7 @@ function renderCjList(){
   if(q) jobs=jobs.filter(j=>((j.job_name||'')+' '+cjCustomer(j.job_name)).toLowerCase().includes(q));
   if(!jobs.length){ body.innerHTML='<div class="cj-empty">'+(q?'No jobs match.':'No saved jobs yet. Save your first job above.')+'</div>'; return; }
   const groups={};
-  jobs.forEach(j=>{ const c=cjCustomer(j.job_name), b=cjBase(j.job_name).toLowerCase(); (groups[c]=groups[c]||{}); (groups[c][b]=groups[c][b]||[]).push(j); });
+  jobs.forEach(j=>{ const c=cjAccount(j), b=cjBase(j.job_name).toLowerCase(); (groups[c]=groups[c]||{}); (groups[c][b]=groups[c][b]||[]).push(j); });
   let html='';
   Object.keys(groups).sort((a,b)=>a.localeCompare(b)).forEach(cust=>{
     const bases=groups[cust]; const total=Object.values(bases).reduce((a,r)=>a+r.length,0);
@@ -1019,11 +1033,14 @@ function renderCjList(){
       arr.forEach(({k,revs})=>{
         const L=revs[0], showRev=_cjOpenRev[k]===true;
         const dt=L.saved_at?new Date(L.saved_at).toLocaleDateString('en-GB'):'';
-        html+=`<div style="padding:7px 11px;border-top:1px solid #1a2a24;display:flex;align-items:center;gap:6px">
-          <div class="cj-open" data-id="${L.id}" style="flex:1;cursor:pointer">
+        const _ids=revs.map(r=>r.id).join(','), _curAcc=cjAccountList().includes(L.client_name)?L.client_name:'';
+        const _acctSel=cjAccountList().length?`<select class="cj-acct" data-ids="${_ids}" title="Assign to a customer account" style="font-size:11px;background:#0d1f1a;border:1px solid #2b4a40;color:#8fae9f;border-radius:5px;padding:2px 3px;max-width:110px"><option value="">— account —</option>${cjAccountList().map(a=>`<option value="${cjAttr(a)}" ${a===_curAcc?'selected':''}>${cjAttr(a)}</option>`).join('')}</select>`:'';
+        html+=`<div style="padding:7px 11px;border-top:1px solid #1a2a24;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <div class="cj-open" data-id="${L.id}" style="flex:1;min-width:130px;cursor:pointer">
             <div class="cj-item-name">${cjAttr(cjDisplay(L.job_name))}${L.archived?' <span style="font-size:10px;color:#6b8f7e">(archived)</span>':''}</div>
             <div class="cj-item-meta">${dt}${revs.length>1?' · latest of '+revs.length:''}</div>
           </div>
+          ${_acctSel}
           ${revs.length>1?`<button class="cj-revs" data-base="${cjAttr(k)}" style="background:none;border:1px solid #2b4a40;color:#8fae9f;border-radius:6px;font-size:11px;padding:3px 7px;cursor:pointer">${showRev?'▾':'▸'} ${revs.length-1}</button>`:''}
           ${_cjHasArch?`<button class="cj-arch" data-id="${L.id}" data-val="${L.archived?'false':'true'}" title="${L.archived?'Unarchive':'Archive'}" style="background:none;border:1px solid #2b4a40;color:#8fae9f;border-radius:6px;font-size:12px;padding:3px 7px;cursor:pointer">${L.archived?'↩':'📦'}</button>`:''}
           <button class="cj-del" data-id="${L.id}" title="Delete" style="background:none;border:none;color:#c66;font-size:14px;cursor:pointer">🗑</button>
@@ -1051,6 +1068,7 @@ function renderCjList(){
     const dl=e.target.closest('.cj-del'); if(dl){ cloudDeleteJob(parseInt(dl.dataset.id), e); return; }
     const op=e.target.closest('.cj-open'); if(op){ cloudLoadJob(parseInt(op.dataset.id)); return; }
   };
+  body.onchange=function(e){ const s=e.target.closest('.cj-acct'); if(s) cjAssign(s.dataset.ids, s.value); };
 }
 async function cjArchive(id,val){
   if(!_cjHasArch) return;
@@ -1109,7 +1127,7 @@ async function cloudSaveJob(){
       body:JSON.stringify({
         user_id:_sbUser.id,
         job_name:name,
-        client_name:projectName||'',
+        client_name: savedCustomer || (isUpdate ? undefined : null),   // store the chosen account; leave existing assignment alone on re-save
         job_data:jobData,
         saved_at:new Date().toISOString()
       })
