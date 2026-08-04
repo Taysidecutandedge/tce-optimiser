@@ -972,30 +972,93 @@ function closeCloudJobs(){
   document.getElementById('cloudJobsModal').classList.remove('active');
 }
 
+let _cjSearch='', _cjShowArch=false, _cjHasArch=true, _cjJobs=[];
+const _cjOpenCust={}, _cjOpenRev={};
+function cjAttr(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function cjBase(name){ return String(name||'').replace(/\s*[-—]\s*Rev\s*\d+\s*$/i,'').trim() || String(name||'Untitled'); }
+function cjCustomer(name){ let b=cjBase(name).replace(/^\s*\[recovered\]\s*/i,'').replace(/^tayside cut (and|&) edge(\s+cutlist)?\s*[-:]?\s*/i,'').replace(/^the\s+/i,'').trim(); const w=(b.split(/\s+/)[0]||'Other'); return w.charAt(0).toUpperCase()+w.slice(1); }
+function cjDisplay(name){ let s=cjBase(name).replace(/^\s*\[recovered\]\s*/i,'').replace(/^tayside cut (and|&) edge(\s+cutlist)?\s*[-:]?\s*/i,'').replace(/\s+/g,' ').trim(); if(/\[recovered\]/i.test(name)) s='↩ '+s; return s||cjBase(name); }
 async function loadCloudJobList(){
   const list=document.getElementById('cloudJobList');
-  list.innerHTML='<div class="cj-empty">Loading…</div>';
-  try{
-    const r=await fetch(SB_URL+'/rest/v1/tce_jobs?select=id,job_name,client_name,saved_at&order=saved_at.desc',{headers:sbAuthH()});
-    if(!r.ok)throw new Error('Failed to load');
-    const jobs=await r.json();
-    if(!jobs.length){list.innerHTML='<div class="cj-empty">No saved jobs yet. Save your first job above.</div>';return;}
-    list.innerHTML='';
-    jobs.forEach(j=>{
-      const item=document.createElement('div');
-      item.className='cj-item';
-      const dt=new Date(j.saved_at).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
-      item.innerHTML=`
-        <div onclick="cloudLoadJob(${j.id})" style="flex:1;cursor:pointer">
-          <div class="cj-item-name">${esc(j.job_name||'Unnamed Job')}</div>
-          <div class="cj-item-meta">${j.client_name?esc(j.client_name)+' · ':''}${dt}</div>
-        </div>
-        <button class="cj-item-del" onclick="cloudDeleteJob(${j.id},event)" title="Delete">🗑</button>`;
-      list.appendChild(item);
-    });
-  }catch(e){
-    list.innerHTML='<div class="cj-empty" style="color:var(--err)">Could not load jobs: '+e.message+'</div>';
+  if(!document.getElementById('cjBody')){
+    list.innerHTML=`
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        <input id="cjSearch" type="text" placeholder="🔍 Search jobs or customers…" value="${cjAttr(_cjSearch)}" oninput="_cjSearch=this.value;renderCjList()" style="flex:1;min-width:160px;padding:7px 9px;font-size:13px;background:#0d1f1a;border:1px solid #2b4a40;border-radius:6px;color:#e8f0ec">
+        <label id="cjArchWrap" style="display:${_cjHasArch?'inline-flex':'none'};align-items:center;gap:5px;font-size:12px;color:#6b8f7e"><input type="checkbox" ${_cjShowArch?'checked':''} onchange="_cjShowArch=this.checked;renderCjList()"> Show archived</label>
+      </div>
+      <div id="cjBody"><div class="cj-empty">Loading…</div></div>`;
   }
+  try{
+    let r=await fetch(SB_URL+'/rest/v1/tce_jobs?select=id,job_name,client_name,saved_at,archived&order=saved_at.desc',{headers:sbAuthH()});
+    if(!r.ok){ r=await fetch(SB_URL+'/rest/v1/tce_jobs?select=id,job_name,client_name,saved_at&order=saved_at.desc',{headers:sbAuthH()}); _cjHasArch=false; }
+    _cjJobs=await r.json();
+  }catch(e){ const b=document.getElementById('cjBody'); if(b) b.innerHTML='<div class="cj-empty" style="color:var(--err)">Could not load jobs</div>'; return; }
+  const aw=document.getElementById('cjArchWrap'); if(aw) aw.style.display=_cjHasArch?'inline-flex':'none';
+  renderCjList();
+}
+function renderCjList(){
+  const body=document.getElementById('cjBody'); if(!body) return;
+  const q=_cjSearch.trim().toLowerCase();
+  let jobs=(_cjJobs||[]).filter(j=>_cjShowArch || !j.archived);
+  if(q) jobs=jobs.filter(j=>((j.job_name||'')+' '+cjCustomer(j.job_name)).toLowerCase().includes(q));
+  if(!jobs.length){ body.innerHTML='<div class="cj-empty">'+(q?'No jobs match.':'No saved jobs yet. Save your first job above.')+'</div>'; return; }
+  const groups={};
+  jobs.forEach(j=>{ const c=cjCustomer(j.job_name), b=cjBase(j.job_name).toLowerCase(); (groups[c]=groups[c]||{}); (groups[c][b]=groups[c][b]||[]).push(j); });
+  let html='';
+  Object.keys(groups).sort((a,b)=>a.localeCompare(b)).forEach(cust=>{
+    const bases=groups[cust]; const total=Object.values(bases).reduce((a,r)=>a+r.length,0);
+    const open=q?true:(_cjOpenCust[cust]!==false);
+    html+=`<div style="margin-bottom:6px;border:1px solid #1e332c;border-radius:8px;overflow:hidden">
+      <div class="cj-cust" data-cust="${cjAttr(cust)}" style="cursor:pointer;background:#12241e;padding:7px 11px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:bold;color:#f0a500">${cjAttr(cust)}</span>
+        <span style="font-size:11px;color:#6b8f7e">${total} job${total>1?'s':''} ${open?'▾':'▸'}</span>
+      </div>`;
+    if(open){
+      const arr=Object.entries(bases).map(([k,revs])=>{revs.sort((a,b)=>new Date(b.saved_at)-new Date(a.saved_at));return {k,revs};});
+      arr.sort((a,b)=>new Date(b.revs[0].saved_at)-new Date(a.revs[0].saved_at));
+      arr.forEach(({k,revs})=>{
+        const L=revs[0], showRev=_cjOpenRev[k]===true;
+        const dt=L.saved_at?new Date(L.saved_at).toLocaleDateString('en-GB'):'';
+        html+=`<div style="padding:7px 11px;border-top:1px solid #1a2a24;display:flex;align-items:center;gap:6px">
+          <div class="cj-open" data-id="${L.id}" style="flex:1;cursor:pointer">
+            <div class="cj-item-name">${cjAttr(cjDisplay(L.job_name))}${L.archived?' <span style="font-size:10px;color:#6b8f7e">(archived)</span>':''}</div>
+            <div class="cj-item-meta">${dt}${revs.length>1?' · latest of '+revs.length:''}</div>
+          </div>
+          ${revs.length>1?`<button class="cj-revs" data-base="${cjAttr(k)}" style="background:none;border:1px solid #2b4a40;color:#8fae9f;border-radius:6px;font-size:11px;padding:3px 7px;cursor:pointer">${showRev?'▾':'▸'} ${revs.length-1}</button>`:''}
+          ${_cjHasArch?`<button class="cj-arch" data-id="${L.id}" data-val="${L.archived?'false':'true'}" title="${L.archived?'Unarchive':'Archive'}" style="background:none;border:1px solid #2b4a40;color:#8fae9f;border-radius:6px;font-size:12px;padding:3px 7px;cursor:pointer">${L.archived?'↩':'📦'}</button>`:''}
+          <button class="cj-del" data-id="${L.id}" title="Delete" style="background:none;border:none;color:#c66;font-size:14px;cursor:pointer">🗑</button>
+        </div>`;
+        if(showRev) revs.slice(1).forEach(r=>{
+          const d2=r.saved_at?new Date(r.saved_at).toLocaleDateString('en-GB'):'';
+          html+=`<div style="padding:5px 11px 5px 24px;border-top:1px dashed #1a2a24;display:flex;align-items:center;gap:6px;background:#0d1f1a">
+            <div class="cj-open" data-id="${r.id}" style="flex:1;cursor:pointer">
+              <div class="cj-item-name" style="font-size:12px">${cjAttr(r.job_name)}</div>
+              <div class="cj-item-meta">${d2}</div>
+            </div>
+            ${_cjHasArch?`<button class="cj-arch" data-id="${r.id}" data-val="${r.archived?'false':'true'}" style="background:none;border:1px solid #2b4a40;color:#8fae9f;border-radius:6px;font-size:12px;padding:2px 6px;cursor:pointer">${r.archived?'↩':'📦'}</button>`:''}
+            <button class="cj-del" data-id="${r.id}" style="background:none;border:none;color:#c66;font-size:13px;cursor:pointer">🗑</button>
+          </div>`;
+        });
+      });
+    }
+    html+=`</div>`;
+  });
+  body.innerHTML=html;
+  body.onclick=function(e){
+    const cu=e.target.closest('.cj-cust'); if(cu){ const c=cu.dataset.cust; _cjOpenCust[c]=(_cjOpenCust[c]===false); renderCjList(); return; }
+    const rv=e.target.closest('.cj-revs'); if(rv){ const b=rv.dataset.base; _cjOpenRev[b]=!_cjOpenRev[b]; renderCjList(); return; }
+    const ar=e.target.closest('.cj-arch'); if(ar){ cjArchive(parseInt(ar.dataset.id), ar.dataset.val==='true'); return; }
+    const dl=e.target.closest('.cj-del'); if(dl){ cloudDeleteJob(parseInt(dl.dataset.id), e); return; }
+    const op=e.target.closest('.cj-open'); if(op){ cloudLoadJob(parseInt(op.dataset.id)); return; }
+  };
+}
+async function cjArchive(id,val){
+  if(!_cjHasArch) return;
+  try{
+    await fetch(SB_URL+'/rest/v1/tce_jobs?id=eq.'+id,{method:'PATCH',headers:{...sbAuthH(),'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({archived:!!val})});
+    const j=(_cjJobs||[]).find(x=>x.id===id); if(j) j.archived=!!val;
+    renderCjList();
+  }catch(e){}
 }
 
 async function cloudSaveAsRevision(){

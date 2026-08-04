@@ -606,16 +606,37 @@ async function loadCustomers() {
   populateCustomerDropdown();
 }
 
+let _jobSearch='', _showArchived=false, _hasArchived=true;
+const _openCust={}, _openRev={};
+function _attr(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// Parse job names into customer / base (revisions collapse under the base).
+function jobBase(name){ return String(name||'').replace(/\s*[-—]\s*Rev\s*\d+\s*$/i,'').trim() || String(name||'Untitled'); }
+function jobCustomer(name){
+  let b=jobBase(name).replace(/^\s*\[recovered\]\s*/i,'').replace(/^tayside cut (and|&) edge(\s+cutlist)?\s*[-:]?\s*/i,'').replace(/^the\s+/i,'').trim();
+  const w=(b.split(/\s+/)[0]||'Other'); return w.charAt(0).toUpperCase()+w.slice(1);
+}
+function jobDisplay(name){
+  let s=jobBase(name).replace(/^\s*\[recovered\]\s*/i,'').replace(/^tayside cut (and|&) edge(\s+cutlist)?\s*[-:]?\s*/i,'').replace(/\s+/g,' ').trim();
+  if(/\[recovered\]/i.test(name)) s='↩ '+s;
+  return s||jobBase(name);
+}
 async function loadJobs() {
   try {
-    const rows = await sbFetch('tce_jobs','?select=id,job_name,client_name,saved_at&order=saved_at.desc');
-    _jobs = rows || [];
-    console.log('Jobs loaded:', _jobs.length, 'auth:', SB_TOKEN?'yes':'no (anon)');
+    _jobs = (await sbFetch('tce_jobs','?select=id,job_name,client_name,saved_at,archived&order=saved_at.desc')) || [];
+    _hasArchived=true;
   } catch(e) {
-    console.warn('loadJobs error:', e.message);
-    _jobs = [];
+    try { _jobs = (await sbFetch('tce_jobs','?select=id,job_name,client_name,saved_at&order=saved_at.desc')) || []; _hasArchived=false; }
+    catch(e2){ _jobs=[]; }
   }
   renderJobsTable();
+}
+async function archiveJob(id, val){
+  if(!_hasArchived) return;
+  try{
+    await sbFetch(`tce_jobs?id=eq.${id}`, {method:'PATCH', headers:{'Prefer':'return=minimal'}, body:{archived:!!val}});
+    const j=_jobs.find(x=>x.id===id); if(j) j.archived=!!val;
+    renderJobsList();
+  }catch(e){ alert('Could not update: '+e.message); }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -631,35 +652,77 @@ function showTab(name) {
 // ═══════════════════════════════════════════════════════════
 function renderJobsTable() {
   const wrap = document.getElementById('jobsTableWrap');
-  if (!_jobs.length) {
-    wrap.innerHTML=`<div class="no-data">
-      <p>No saved jobs found.</p>
-      <p style="font-size:11px;color:#6b8f7e;margin-top:8px">
-        Make sure you: (1) ran Calculate in the optimiser, (2) clicked Cloud Jobs → Save Job.<br>
-        Auth status: ${SB_TOKEN ? '✓ Authenticated' : '⚠ Not authenticated — jobs may not be visible'}<br>
-        <button onclick="loadJobs()" class="btn btn-secondary btn-sm" style="margin-top:8px">↻ Retry</button>
-      </p>
-    </div>`;
-    return;
+  if(!wrap) return;
+  if(!document.getElementById('jobsListBody')){
+    wrap.innerHTML = `
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+        <input id="jobSearch" type="text" placeholder="🔍 Search jobs or customers…" value="${_attr(_jobSearch)}"
+          oninput="_jobSearch=this.value;renderJobsList()"
+          style="flex:1;min-width:200px;padding:8px 10px;font-size:13px;background:#0d1f1a;border:1px solid #2b4a40;border-radius:6px;color:#e8f0ec">
+        <label id="showArchWrap" style="display:${_hasArchived?'inline-flex':'none'};align-items:center;gap:6px;font-size:12px;color:#6b8f7e">
+          <input type="checkbox" ${_showArchived?'checked':''} onchange="_showArchived=this.checked;renderJobsList()"> Show archived
+        </label>
+      </div>
+      <div id="jobsListBody"></div>`;
   }
-  wrap.innerHTML = `<table class="jobs-table" id="jobsTable">
-    <thead><tr><th>Job Name</th><th>Client</th><th>Saved</th><th></th></tr></thead>
-    <tbody>${_jobs.map(j=>`
-      <tr data-jobid="${j.id}" style="cursor:pointer">
-        <td><div class="job-name">${j.job_name||'Untitled'}</div></td>
-        <td><div class="job-meta">${j.client_name||'—'}</div></td>
-        <td><div class="job-meta">${j.saved_at?new Date(j.saved_at).toLocaleDateString('en-GB'):''}</div></td>
-        <td><button class="btn btn-secondary btn-sm" data-jobid="${j.id}">Open →</button></td>
-      </tr>`).join('')}
-    </tbody>
-  </table>`;
-  // Use event delegation — handles clicks on button or anywhere in the row
-  document.getElementById('jobsTable').addEventListener('click', function(e) {
-    const btn = e.target.closest('button[data-jobid]');
-    if (btn) { openJob(btn.dataset.jobid); return; }
-    const row = e.target.closest('tr[data-jobid]');
-    if (row) openJob(row.dataset.jobid);
+  const sa=document.getElementById('showArchWrap'); if(sa) sa.style.display=_hasArchived?'inline-flex':'none';
+  renderJobsList();
+}
+function renderJobsList(){
+  const body=document.getElementById('jobsListBody');
+  if(!body) return;
+  const q=_jobSearch.trim().toLowerCase();
+  let jobs=_jobs.filter(j=>_showArchived || !j.archived);
+  if(q) jobs=jobs.filter(j=>((j.job_name||'')+' '+jobCustomer(j.job_name)).toLowerCase().includes(q));
+  if(!jobs.length){ body.innerHTML=`<div class="no-data" style="padding:16px">${q?'No jobs match “'+_attr(q)+'”.':(SB_TOKEN?'No saved jobs.':'Not signed in.')}</div>`; return; }
+  const groups={};
+  jobs.forEach(j=>{ const c=jobCustomer(j.job_name), b=jobBase(j.job_name).toLowerCase();
+    (groups[c]=groups[c]||{}); (groups[c][b]=groups[c][b]||[]).push(j); });
+  let html='';
+  Object.keys(groups).sort((a,b)=>a.localeCompare(b)).forEach(cust=>{
+    const bases=groups[cust];
+    const total=Object.values(bases).reduce((a,r)=>a+r.length,0);
+    const open = q ? true : (_openCust[cust]!==false);
+    html+=`<div style="margin-bottom:6px;border:1px solid #1e332c;border-radius:8px;overflow:hidden">
+      <div class="jl-cust" data-cust="${_attr(cust)}" style="cursor:pointer;background:#12241e;padding:8px 12px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:bold;color:#f0a500">${_attr(cust)}</span>
+        <span style="font-size:11px;color:#6b8f7e">${total} job${total>1?'s':''} ${open?'▾':'▸'}</span>
+      </div>`;
+    if(open){
+      const baseArr=Object.entries(bases).map(([k,revs])=>{ revs.sort((a,b)=>new Date(b.saved_at)-new Date(a.saved_at)); return {k,revs}; });
+      baseArr.sort((a,b)=>new Date(b.revs[0].saved_at)-new Date(a.revs[0].saved_at));
+      baseArr.forEach(({k,revs})=>{
+        const L=revs[0], showRev=_openRev[k]===true;
+        html+=`<div style="padding:8px 12px;border-top:1px solid #1a2a24;display:flex;align-items:center;gap:8px">
+          <div class="jl-open" data-id="${L.id}" style="flex:1;cursor:pointer">
+            <div style="font-size:13px;color:#e8f0ec">${_attr(jobDisplay(L.job_name))}${L.archived?' <span style="font-size:10px;color:#6b8f7e">(archived)</span>':''}</div>
+            <div style="font-size:11px;color:#6b8f7e">${L.saved_at?new Date(L.saved_at).toLocaleDateString('en-GB'):''}${revs.length>1?' · latest of '+revs.length:''}</div>
+          </div>
+          ${revs.length>1?`<button class="jl-revs btn btn-secondary btn-sm" data-base="${_attr(k)}" title="Show older saves">${showRev?'▾':'▸'} ${revs.length-1} older</button>`:''}
+          <button class="jl-open btn btn-secondary btn-sm" data-id="${L.id}">Open →</button>
+          ${_hasArchived?`<button class="jl-arch btn btn-secondary btn-sm" data-id="${L.id}" data-val="${L.archived?'false':'true'}" title="${L.archived?'Unarchive':'Archive (mark done)'}">${L.archived?'↩':'📦'}</button>`:''}
+        </div>`;
+        if(showRev) revs.slice(1).forEach(r=>{
+          html+=`<div style="padding:5px 12px 5px 28px;border-top:1px dashed #1a2a24;display:flex;align-items:center;gap:8px;background:#0d1f1a">
+            <div class="jl-open" data-id="${r.id}" style="flex:1;cursor:pointer">
+              <div style="font-size:12px;color:#b8c8c0">${_attr(r.job_name)}</div>
+              <div style="font-size:10px;color:#6b8f7e">${r.saved_at?new Date(r.saved_at).toLocaleDateString('en-GB'):''}</div>
+            </div>
+            <button class="jl-open btn btn-secondary btn-sm" data-id="${r.id}">Open →</button>
+            ${_hasArchived?`<button class="jl-arch btn btn-secondary btn-sm" data-id="${r.id}" data-val="${r.archived?'false':'true'}">${r.archived?'↩':'📦'}</button>`:''}
+          </div>`;
+        });
+      });
+    }
+    html+=`</div>`;
   });
+  body.innerHTML=html;
+  body.onclick=function(e){
+    const cu=e.target.closest('.jl-cust'); if(cu){ const c=cu.dataset.cust; _openCust[c]=(_openCust[c]===false); renderJobsList(); return; }
+    const rv=e.target.closest('.jl-revs'); if(rv){ const b=rv.dataset.base; _openRev[b]=!_openRev[b]; renderJobsList(); return; }
+    const ar=e.target.closest('.jl-arch'); if(ar){ archiveJob(parseInt(ar.dataset.id), ar.dataset.val==='true'); return; }
+    const op=e.target.closest('.jl-open'); if(op){ openJob(parseInt(op.dataset.id)); return; }
+  };
 }
 
 async function openJob(id) {
