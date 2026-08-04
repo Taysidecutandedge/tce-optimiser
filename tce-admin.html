@@ -834,7 +834,22 @@ const SHAKER_RATES = {
   labBase:33, labDiv:3, labPanel:1, labRate:40,   // labour mins + £/hr
   overhead:6, margin:0.40
 };
-function shakerDoorPrice(door){
+// Is this door part plain MR MDF (keeps the existing shaker rate) vs a named
+// board like oak veneer / Medite / Finsa (priced from the board price list)?
+function _isMrMdfDoorMat(m){ const s=(m||'').toLowerCase();
+  return s.includes('mdf') && !['oak','walnut','veneer','birch','ply','melamine','hpl','medite','finsa','valch','sonoma'].some(w=>s.includes(w)); }
+// £/m² for a door's sheet material. MR MDF → the shaker rate (respects overrides).
+// Any other board → its cost per sheet ÷ sheet area, straight from your prices.
+function doorSheetRate(matName, fallbackRate, tier){
+  if(_isMrMdfDoorMat(matName)) return fallbackRate;
+  const price=lookupBoardPrice(matName, tier||'retail');
+  if(price!=null && price>0){
+    const AREA=/3050/.test(matName)?(3.05*1.22):(2.44*1.22);
+    return price/AREA;
+  }
+  return fallbackRate;   // board not found (e.g. thickness mismatch) → fall back
+}
+function shakerDoorPrice(door, tier){
   // Matches the calculator's "Door List" tab formula exactly (verified to £0.00).
   const R=SHAKER_RATES;
   const H=parseFloat(door.h)||0, W=parseFloat(door.w)||0;
@@ -844,8 +859,10 @@ function shakerDoorPrice(door){
   const panelThk=parseInt((door.panelMat||'').match(/(\d+)\s*mm/i)?.[1])||9;
   const OR=R.rail, MID=R.rail;            // outer rail width + mid/divider rail width
   const div=Math.max(panels-1,0);
-  const frameRate=shakerRate(frameThk>=25?25:22,(frameThk>=25)?R.frame25:R.frame22);
-  const panelRate=shakerRate(panelThk>=12?12:9,(panelThk>=12)?R.panel12:R.panel9);
+  // Frame/panel priced from the ACTUAL material: MR MDF keeps the shaker rate;
+  // oak veneer / Medite / Finsa use their board cost per m² from the price list.
+  const frameRate=doorSheetRate(door.frameMat, shakerRate(frameThk>=25?25:22,(frameThk>=25)?R.frame25:R.frame22), tier);
+  const panelRate=doorSheetRate(door.panelMat, shakerRate(panelThk>=12?12:9,(panelThk>=12)?R.panel12:R.panel9), tier);
   const outerPerimLM=(2*H+2*(W-2*OR))/1000;
   const frameCost=( outerPerimLM*((OR+R.oversize)/1000)
                   + (div*((W-2*OR)/1000)*R.wDiv)*(MID/1000) ) * frameRate * R.wBoard;
@@ -1085,7 +1102,7 @@ async function buildQuote() {
     rows += `<tr class="mat-head"><td colspan="6">SHAKER DOORS</td></tr>`;
     let doorTotal=0;
     shaker.doors.forEach((d,i)=>{
-      const each=shakerDoorPrice(d); const qty=parseInt(d.qty)||1; const line=each*qty;
+      const each=shakerDoorPrice(d, tier); const qty=parseInt(d.qty)||1; const line=each*qty;
       grandEx+=line; doorTotal+=line;
       const fm=(d.frameMat||'').replace(/\s*MR MDF/i,'');
       const desc=`${d.h}×${d.w}mm${d.panels>1?', '+d.panels+'-panel':''}${fm?', '+fm+' frame':''}`;
@@ -1261,7 +1278,7 @@ function printQuote() {
     rows+=`<tr class="mat-row"><td colspan="3"><strong>Shaker Doors</strong></td></tr>`;
     let doorTotal=0;
     shaker.doors.forEach((d,i)=>{
-      const each=shakerDoorPrice(d); const qty=parseInt(d.qty)||1; const line=each*qty; grandEx+=line; doorTotal+=line;
+      const each=shakerDoorPrice(d, tier); const qty=parseInt(d.qty)||1; const line=each*qty; grandEx+=line; doorTotal+=line;
       rows+=`<tr><td>Door ${i+1} — ${d.h}×${d.w}mm${d.panels>1?', '+d.panels+'-panel':''} (${qty} × £${each.toFixed(2)})</td><td></td><td class="amt">£${line.toFixed(2)}</td></tr>`;
     });
     rows+=`<tr class="sub-row"><td colspan="2">Shaker doors subtotal</td><td class="amt">£${doorTotal.toFixed(2)}</td></tr>`;
