@@ -1018,8 +1018,10 @@ function renderCjList(){
   if(!jobs.length){ body.innerHTML='<div class="cj-empty">'+(q?'No jobs match.':'No saved jobs yet. Save your first job above.')+'</div>'; return; }
   const groups={};
   jobs.forEach(j=>{ const c=cjAccount(j), b=cjBase(j.job_name).toLowerCase(); (groups[c]=groups[c]||{}); (groups[c][b]=groups[c][b]||[]).push(j); });
+  const _custLatest={};
+  Object.entries(groups).forEach(([c,bs])=>{ let mx=0; Object.values(bs).forEach(rv=>rv.forEach(j=>{ const t=new Date(j.saved_at).getTime()||0; if(t>mx)mx=t; })); _custLatest[c]=mx; });
   let html='';
-  Object.keys(groups).sort((a,b)=>a.localeCompare(b)).forEach(cust=>{
+  Object.keys(groups).sort((a,b)=>(_custLatest[b]-_custLatest[a])||a.localeCompare(b)).forEach(cust=>{
     const bases=groups[cust]; const total=Object.values(bases).reduce((a,r)=>a+r.length,0);
     const open=q?true:(_cjOpenCust[cust]!==false);
     html+=`<div style="margin-bottom:6px;border:1px solid #1e332c;border-radius:8px;overflow:hidden">
