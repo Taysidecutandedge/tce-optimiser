@@ -48,6 +48,8 @@
 </head>
 <body>
 
+<button onclick="location.replace(location.pathname+'?r='+Date.now())" title="Refresh — loads the latest saved version" aria-label="Refresh page" style="position:fixed;bottom:12px;left:12px;z-index:2147483000;width:42px;height:42px;border-radius:50%;border:none;background:rgba(31,122,77,.92);color:#fff;font-size:20px;line-height:42px;text-align:center;padding:0;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3)">↻</button>
+
 <div id="login">
   <h1>TCE — Offload Station</h1>
   <input id="email" type="email" placeholder="Email" autocomplete="username" value="cutlist@taysidecutandedge.co.uk">

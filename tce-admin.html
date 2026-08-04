@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TCE Admin — Tayside Cut & Edge</title>
 <style>
@@ -123,6 +126,8 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
 </style>
 </head>
 <body>
+
+<button onclick="location.replace(location.pathname+'?r='+Date.now())" title="Refresh — loads the latest saved version" aria-label="Refresh page" style="position:fixed;bottom:12px;left:12px;z-index:2147483000;width:42px;height:42px;border-radius:50%;border:none;background:rgba(31,122,77,.92);color:#fff;font-size:20px;line-height:42px;text-align:center;padding:0;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3)">↻</button>
 
 <!-- LOGIN SCREEN -->
 <div id="pinScreen">
