@@ -1182,6 +1182,19 @@ async function cloudLoadJob(id){
     save();renderJobSheets();renderParts();
     document.getElementById('mainArea').innerHTML='<div style="padding:40px;text-align:center;color:var(--txt3);font-family:var(--mono)">Job loaded — press Calculate to generate layout</div>';
     closeCloudJobs();
+    // Jobs from the website submit arrive with raw materials (e.g. "mr mdf") that never
+    // went through the import mapping. Offer to map any generic/unrecognised board on open.
+    setTimeout(()=>{ try{
+      const boards=_matMapBoards(); const norm=s=>String(s||'').toLowerCase().replace(/\s+/g,' ').trim();
+      const generic=(jobSheets||[]).filter(s=>{
+        if(s.libRef) return false;                        // already a real library board
+        const nm=s.name||''; if(!nm) return false;
+        if(/[A-Z]\d{3,4}/i.test(nm)) return false;         // Egger code → priced separately
+        if(boards.some(b=>norm(b.name)===norm(nm))) return false;   // matches a known board
+        return true;                                       // generic / unrecognised
+      }).map(s=>s.name);
+      if(generic.length){ _matMapPending=generic; openMatMapDialog(); }
+    }catch(e){} }, 500);
   }catch(e){alert('Could not load job: '+e.message);}
 }
 
