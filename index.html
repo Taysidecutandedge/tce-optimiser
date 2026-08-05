@@ -3668,6 +3668,7 @@ function applyImport(){
     openShakerModal(doors, ()=>{});
     if(normalAdded>0) alert('Imported '+normalAdded+' standard part'+(normalAdded!==1?'s':'')+'.'+sheetMsg+newMsg+pwsMsg+'\n\nReview your '+shakerRows.length+' shaker door'+(shakerRows.length!==1?'s':'')+' in the door review panel.');
     else if(pwsMsg) alert(pwsMsg.trim());
+    _matMapPending=autoCreated; if(autoCreated&&autoCreated.length) setTimeout(openMatMapDialog,60);
     return;
   }
 
@@ -3675,6 +3676,7 @@ function applyImport(){
   const added=processNormalRows();
   save();renderParts();cm('importModal');
   alert('Imported '+added+' part'+(added!==1?'s':'')+' successfully.'+sheetMsg+newMsg+pwsMsg);
+  _matMapPending=autoCreated; if(autoCreated&&autoCreated.length) setTimeout(openMatMapDialog,60);
 }
 
 // ═══════════════════════════════════════════════
@@ -3711,6 +3713,55 @@ function showPwsOrder(){
   document.body.appendChild(ov);
   ov.addEventListener('click',e=>{ if(e.target===ov) ov.remove(); });
   document.getElementById('pwsCopyBtn').onclick=function(){ try{ navigator.clipboard.writeText(plain); this.textContent='Copied ✓'; }catch(e){ this.textContent='Copy failed'; } };
+}
+// ── Material mapping on import (map an unrecognised material to a real board) ──
+let _matMapPending=[];
+function openMatMapDialog(){
+  const mats=(_matMapPending||[]).filter(Boolean);
+  if(!mats.length) return;
+  const libAll=(typeof library!=='undefined'?library:[]).filter(l=>!l.is_offcut);
+  const seen=new Set();
+  const libs=libAll.filter(l=>{ const k=(l.name||'')+'|'+l.thick+'|'+l.l+'x'+l.w; if(seen.has(k))return false; seen.add(k); return true; });
+  const optsFor=(mn)=>{
+    const thM=String(mn).match(/(\d+(?:\.\d+)?)\s*mm/i); const thk=thM?parseFloat(thM[1]):null;
+    const sorted=libs.slice().sort((a,b)=>{
+      const am=(thk&&Math.abs((a.thick||0)-thk)<0.6)?0:1, bm=(thk&&Math.abs((b.thick||0)-thk)<0.6)?0:1;
+      return am-bm || String(a.name).localeCompare(String(b.name));
+    });
+    return '<option value="">— keep as new board —</option>'+sorted.map(l=>`<option value="${l.id}">${esc(l.name)} · ${l.thick||'?'}mm · ${l.l}×${l.w}</option>`).join('');
+  };
+  let ov=document.getElementById('matMapOverlay'); if(ov) ov.remove();
+  ov=document.createElement('div'); ov.id='matMapOverlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2147483000;display:flex;align-items:center;justify-content:center';
+  const rows=mats.map(mn=>`<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid #1a2a24">
+    <div style="flex:0 0 42%;font-size:13px;color:#e8f0ec;word-break:break-word">${esc(mn)}</div>
+    <select class="matmap-sel" data-mat="${esc(mn)}" style="flex:1;font-size:12px;background:#0d1f1a;border:1px solid #2b4a40;color:#e8f0ec;border-radius:6px;padding:6px">${optsFor(mn)}</select>
+  </div>`).join('');
+  ov.innerHTML=`<div style="background:#12241e;border:1px solid #2b4a40;border-radius:12px;max-width:660px;width:94%;max-height:82vh;overflow:auto;padding:18px">
+    <div style="font-size:16px;font-weight:700;color:#f0a500;margin-bottom:6px">Map materials to your boards</div>
+    <div style="font-size:12px;color:#8fae9f;margin-bottom:8px">These weren't recognised from your library — pick the right board (e.g. Finsa or Medite MR MDF), or keep as a new one.</div>
+    ${rows}
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button onclick="applyMatMap()" style="background:#1f7a4d;color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:13px;cursor:pointer;font-weight:700">Apply</button>
+      <button onclick="document.getElementById('matMapOverlay').remove()" style="background:none;border:1px solid #2b4a40;color:#cfe7dd;border-radius:8px;padding:9px 16px;font-size:13px;cursor:pointer">Keep all as new</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+}
+function applyMatMap(){
+  document.querySelectorAll('#matMapOverlay .matmap-sel').forEach(sel=>{
+    const oldName=sel.dataset.mat, libId=sel.value;
+    if(!libId) return;
+    const B=(typeof library!=='undefined'?library:[]).find(l=>String(l.id)===String(libId));
+    if(!B) return;
+    const si=jobSheets.findIndex(s=>s.name===oldName);
+    if(si>=0){ const q=jobSheets[si].qty||1; jobSheets[si]={id:jobSheets[si].id,libRef:B.id,name:B.name,l:B.l,w:B.w,thick:B.thick,cost:B.cost,color:B.color,grainLen:B.grainLen,qty:q,trimT:15,trimB:15,trimL:15,trimR:15}; }
+    (parts||[]).forEach(p=>{ if(p.matName===oldName) p.matName=B.name; });
+  });
+  const ov=document.getElementById('matMapOverlay'); if(ov) ov.remove();
+  _matMapPending=[];
+  try{ save(); }catch(e){}
+  renderJobSheets(); renderParts();
 }
 let _lastSheets = [], _lastUnplaced = [], _lastEbMap = {}, _lastEbGT = 0, _lastEbDetail = [], _ebRolls = [], _lastBoardNeed = [], _boardStock = [];
 let _loadedCloudJobId = null; // tracks which cloud job is currently loaded
