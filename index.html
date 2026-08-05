@@ -925,6 +925,7 @@ async function initCloudLibrary(){
   await sbLoadOffcuts();
   await sbLoadEbRolls();
   await sbLoadBoardStock();
+  await sbLoadBoardCatalogue();   // admin board prices → available as mapping targets
   if(!loaded){
     // No cloud library yet — offer to migrate local library
     const local=localStorage.getItem('clp_lib');
@@ -3715,20 +3716,35 @@ function showPwsOrder(){
   document.getElementById('pwsCopyBtn').onclick=function(){ try{ navigator.clipboard.writeText(plain); this.textContent='Copied ✓'; }catch(e){ this.textContent='Copy failed'; } };
 }
 // ── Material mapping on import (map an unrecognised material to a real board) ──
-let _matMapPending=[];
+// Mapping targets come from BOTH the cutting library AND the admin board-price
+// catalogue (_cbCatalogue), so any board you've priced in admin is pickable here.
+let _matMapPending=[], _cbCatalogue=[];
+async function sbLoadBoardCatalogue(){
+  if(!_sbToken){ _cbCatalogue=[]; return; }
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/tce_custom_boards?select=id,board_name,thickness_mm,sheet_size,base_cost&order=board_name,thickness_mm',{headers:sbAuthH()});
+    _cbCatalogue = r.ok ? (await r.json()) : [];
+  }catch(e){ _cbCatalogue=[]; }
+}
+function _matMapBoards(){
+  const libAll=(typeof library!=='undefined'?library:[]).filter(l=>!l.is_offcut).map(l=>({name:l.name,thick:l.thick,l:l.l,w:l.w,cost:l.cost||0,color:l.color,grainLen:l.grainLen,ref:'lib:'+l.id}));
+  const cbAll=(_cbCatalogue||[]).map(b=>{ const sz=String(b.sheet_size||'2440x1220').match(/(\d+)\s*[x×]\s*(\d+)/i);
+    return {name:(b.thickness_mm+'mm '+b.board_name), thick:b.thickness_mm, l:sz?parseInt(sz[1]):2440, w:sz?parseInt(sz[2]):1220, cost:parseFloat(b.base_cost)||0, color:'#8aa', grainLen:false, ref:'cb:'+b.id}; });
+  const seen=new Set(), out=[];
+  [...cbAll,...libAll].forEach(o=>{ const k=(o.name||'').toLowerCase().replace(/\s+/g,' ').trim()+'|'+o.thick; if(seen.has(k))return; seen.add(k); out.push(o); });
+  return out;
+}
 function openMatMapDialog(){
   const mats=(_matMapPending||[]).filter(Boolean);
   if(!mats.length) return;
-  const libAll=(typeof library!=='undefined'?library:[]).filter(l=>!l.is_offcut);
-  const seen=new Set();
-  const libs=libAll.filter(l=>{ const k=(l.name||'')+'|'+l.thick+'|'+l.l+'x'+l.w; if(seen.has(k))return false; seen.add(k); return true; });
+  const boards=_matMapBoards();
   const optsFor=(mn)=>{
     const thM=String(mn).match(/(\d+(?:\.\d+)?)\s*mm/i); const thk=thM?parseFloat(thM[1]):null;
-    const sorted=libs.slice().sort((a,b)=>{
+    const sorted=boards.slice().sort((a,b)=>{
       const am=(thk&&Math.abs((a.thick||0)-thk)<0.6)?0:1, bm=(thk&&Math.abs((b.thick||0)-thk)<0.6)?0:1;
       return am-bm || String(a.name).localeCompare(String(b.name));
     });
-    return '<option value="">— keep as new board —</option>'+sorted.map(l=>`<option value="${l.id}">${esc(l.name)} · ${l.thick||'?'}mm · ${l.l}×${l.w}</option>`).join('');
+    return '<option value="">— keep as new board —</option>'+sorted.map(l=>`<option value="${l.ref}">${esc(l.name)} · ${l.thick||'?'}mm · ${l.l}×${l.w}</option>`).join('');
   };
   let ov=document.getElementById('matMapOverlay'); if(ov) ov.remove();
   ov=document.createElement('div'); ov.id='matMapOverlay';
@@ -3739,7 +3755,7 @@ function openMatMapDialog(){
   </div>`).join('');
   ov.innerHTML=`<div style="background:#12241e;border:1px solid #2b4a40;border-radius:12px;max-width:660px;width:94%;max-height:82vh;overflow:auto;padding:18px">
     <div style="font-size:16px;font-weight:700;color:#f0a500;margin-bottom:6px">Map materials to your boards</div>
-    <div style="font-size:12px;color:#8fae9f;margin-bottom:8px">These weren't recognised from your library — pick the right board (e.g. Finsa or Medite MR MDF), or keep as a new one.</div>
+    <div style="font-size:12px;color:#8fae9f;margin-bottom:8px">These weren't recognised — pick the right board (e.g. Finsa or Medite MR MDF), or keep as a new one.</div>
     ${rows}
     <div style="display:flex;gap:10px;margin-top:16px">
       <button onclick="applyMatMap()" style="background:#1f7a4d;color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:13px;cursor:pointer;font-weight:700">Apply</button>
@@ -3750,12 +3766,14 @@ function openMatMapDialog(){
 }
 function applyMatMap(){
   document.querySelectorAll('#matMapOverlay .matmap-sel').forEach(sel=>{
-    const oldName=sel.dataset.mat, libId=sel.value;
-    if(!libId) return;
-    const B=(typeof library!=='undefined'?library:[]).find(l=>String(l.id)===String(libId));
+    const oldName=sel.dataset.mat, ref=sel.value;
+    if(!ref) return;
+    let B=null;
+    if(ref.indexOf('lib:')===0){ const id=ref.slice(4); const l=(library||[]).find(x=>String(x.id)===id); if(l) B={name:l.name,l:l.l,w:l.w,thick:l.thick,cost:l.cost||0,color:l.color,grainLen:l.grainLen,libRef:l.id}; }
+    else if(ref.indexOf('cb:')===0){ const id=ref.slice(3); const b=(_cbCatalogue||[]).find(x=>String(x.id)===id); if(b){ const sz=String(b.sheet_size||'2440x1220').match(/(\d+)\s*[x×]\s*(\d+)/i); B={name:(b.thickness_mm+'mm '+b.board_name),l:sz?parseInt(sz[1]):2440,w:sz?parseInt(sz[2]):1220,thick:b.thickness_mm,cost:parseFloat(b.base_cost)||0,color:'#8aa',grainLen:false,libRef:null}; } }
     if(!B) return;
     const si=jobSheets.findIndex(s=>s.name===oldName);
-    if(si>=0){ const q=jobSheets[si].qty||1; jobSheets[si]={id:jobSheets[si].id,libRef:B.id,name:B.name,l:B.l,w:B.w,thick:B.thick,cost:B.cost,color:B.color,grainLen:B.grainLen,qty:q,trimT:15,trimB:15,trimL:15,trimR:15}; }
+    if(si>=0){ const q=jobSheets[si].qty||1; jobSheets[si]={id:jobSheets[si].id,libRef:B.libRef,name:B.name,l:B.l,w:B.w,thick:B.thick,cost:B.cost,color:B.color||'#8aa',grainLen:B.grainLen,qty:q,trimT:15,trimB:15,trimL:15,trimR:15}; }
     (parts||[]).forEach(p=>{ if(p.matName===oldName) p.matName=B.name; });
   });
   const ov=document.getElementById('matMapOverlay'); if(ov) ov.remove();
