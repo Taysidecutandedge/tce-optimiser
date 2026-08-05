@@ -1363,7 +1363,15 @@ function addBlankSheet(){
 
 function removeJobSheet(id){jobSheets=jobSheets.filter(x=>x.id!==id);save();renderJobSheets();}
 
-function jss(id,k,v){const s=jobSheets.find(x=>x.id===id);if(s){s[k]=v;save();renderJobSheets();}}
+function jss(id,k,v){
+  const s=jobSheets.find(x=>x.id===id); if(!s) return;
+  if(k==='name'){
+    const oldName=s.name; s.name=v;
+    if(oldName!==v){ let n=0; (parts||[]).forEach(p=>{ if(p.matName===oldName){ p.matName=v; n++; } }); if(n) renderParts(); }
+    save(); renderJobSheets(); return;
+  }
+  s[k]=v; save(); renderJobSheets();
+}
 
 function trimAll(id,v){const s=jobSheets.find(x=>x.id===id);if(!s)return;s.trimT=s.trimB=s.trimL=s.trimR=v;save();renderJobSheets();}
 
