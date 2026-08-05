@@ -3251,6 +3251,9 @@ function renderShakerDoors(){
   const list=document.getElementById('skDoorList'); list.innerHTML='';
   _shakerDoors.forEach((door,di)=>{
     const cfg=door.cfg, mr=cfg.midRail||cfg.outerRail, ref='D'+(di+1);
+    const _tk=_shakerThkOptions(cfg.mat);
+    const _fthk=_tk.frame.includes(cfg.frameThk)?cfg.frameThk:_tk.fdef;
+    const _pthk=_tk.panel.includes(cfg.panelThk)?cfg.panelThk:_tk.pdef;
     const card=document.createElement('div'); card.className='sk-door';
     card.innerHTML=
       '<div class="sk-door-hdr"><span class="sk-door-ref">'+ref+'</span>'+
@@ -3264,9 +3267,9 @@ function renderShakerDoors(){
         '<div class="sk-field"><label>Panels</label><select id="sk-panels-'+di+'" onchange="updateShakerPreview('+di+')">'
         +[1,2,3,4].map(n=>'<option value="'+n+'"'+(cfg.panels===n?' selected':'')+'>'+n+(n>1?' panels':' panel')+'</option>').join('')+'</select></div>'+
         '<div class="sk-field" id="sk-cw-'+di+'" style="'+(cfg.panels>1?'':'display:none')+'"><label>Rail centre(s) from bottom (mm)</label><input type="text" id="sk-centres-'+di+'" value="'+cfg.centres.join(', ')+'" placeholder="e.g. 800" oninput="updateShakerPreview('+di+')" onchange="updateShakerPreview('+di+')"></div>'+
-        '<div class="sk-field"><label>Material</label><select id="sk-mat-'+di+'" onchange="updateShakerPreview('+di+')"><option value="mdf"'+((cfg.mat||'mdf')==='mdf'?' selected':'')+'>MR MDF (paint)</option><option value="oak"'+((cfg.mat)==='oak'?' selected':'')+'>Oak Veneer</option></select></div>'+
-        '<div class="sk-field"><label>Frame thk</label><select id="sk-fthk-'+di+'" onchange="updateShakerPreview('+di+')">'+[18,22,25].map(n=>'<option value="'+n+'"'+((cfg.frameThk||22)===n?' selected':'')+'>'+n+'mm</option>').join('')+'</select></div>'+
-        '<div class="sk-field"><label>Panel thk</label><select id="sk-pthk-'+di+'" onchange="updateShakerPreview('+di+')">'+[6,9,12].map(n=>'<option value="'+n+'"'+((cfg.panelThk||9)===n?' selected':'')+'>'+n+'mm</option>').join('')+'</select></div>'+
+        '<div class="sk-field"><label>Material</label><select id="sk-mat-'+di+'" onchange="onShakerMatChange('+di+')"><option value="mdf"'+((cfg.mat||'mdf')==='mdf'?' selected':'')+'>MR MDF (paint)</option><option value="oak"'+((cfg.mat)==='oak'?' selected':'')+'>Oak Veneer</option></select></div>'+
+        '<div class="sk-field"><label>Frame thk</label><select id="sk-fthk-'+di+'" onchange="updateShakerPreview('+di+')">'+_tk.frame.map(n=>'<option value="'+n+'"'+(_fthk===n?' selected':'')+'>'+n+'mm</option>').join('')+'</select></div>'+
+        '<div class="sk-field"><label>Panel thk</label><select id="sk-pthk-'+di+'" onchange="updateShakerPreview('+di+')">'+_tk.panel.map(n=>'<option value="'+n+'"'+(_pthk===n?' selected':'')+'>'+n+'mm</option>').join('')+'</select></div>'+
         '<div class="sk-field"><label>Frame oversize (mm)</label><input type="number" id="sk-foversize-'+di+'" value="'+(cfg.frameOversize!=null?cfg.frameOversize:10)+'" min="0" max="50" title="Squaring allowance added to frame parts. Set 0 for exact size." oninput="updateShakerPreview('+di+')" onchange="updateShakerPreview('+di+')"></div>'+
         '<div class="sk-field"><label>Panel tongue (mm)</label><input type="number" id="sk-ptongue-'+di+'" value="'+(cfg.panelTongue!=null?cfg.panelTongue:10)+'" min="0" max="50" title="Tongue into the groove each side." oninput="updateShakerPreview('+di+')" onchange="updateShakerPreview('+di+')"></div>'+
       '</div>'+
@@ -3295,6 +3298,34 @@ function getShakerCfgFromUI(di){
 }
 // Material name suffix for a shaker door: painted MR MDF (default) or oak veneer.
 function _shakerMatSuffix(cfg){ return (cfg&&cfg.mat==='oak')?'mm Oak Veneer MDF':'mm MR MDF'; }
+// Oak veneer thicknesses actually in your board library (falls back to 13/19/26).
+function _oakThks(){
+  const s=new Set();
+  (typeof library!=='undefined'?library:[]).forEach(l=>{ const n=(l.name||'').toLowerCase();
+    if(/oak|veneer/.test(n)&&/mdf/.test(n)){ const t=parseInt(l.thick)||parseInt((n.match(/(\d+)\s*mm/)||[])[1]); if(t) s.add(t); } });
+  const arr=[...s].sort((a,b)=>a-b);
+  return arr.length?arr:[13,19,26];
+}
+// Frame/panel thickness options for the door material. Oak uses your real oak sizes;
+// MR MDF keeps the paint-grade sizes. Prevents non-existent sizes like 25mm oak.
+function _shakerThkOptions(mat){
+  if(mat==='oak'){
+    const t=_oakThks();
+    const frames=t.filter(x=>x>=18), panels=t.filter(x=>x<=15);
+    return { frame:frames.length?frames:t, panel:panels.length?panels:t,
+             fdef:(frames.includes(19)?19:(frames[0]||t[t.length-1])), pdef:(panels[0]||t[0]) };
+  }
+  return { frame:[18,22,25], panel:[6,9,12], fdef:22, pdef:9 };
+}
+// Switching material re-renders the card so the thickness options (and defaults) match.
+function onShakerMatChange(di){
+  const cfg=getShakerCfgFromUI(di);
+  const opt=_shakerThkOptions(cfg.mat);
+  if(!opt.frame.includes(cfg.frameThk)) cfg.frameThk=opt.fdef;
+  if(!opt.panel.includes(cfg.panelThk)) cfg.panelThk=opt.pdef;
+  if(_shakerDoors[di]) _shakerDoors[di].cfg=cfg;
+  renderShakerDoors(); checkShakerMaterials();
+}
 
 function updateShakerPreview(di){
   const door=_shakerDoors[di]; if(!door) return;
@@ -3306,7 +3337,8 @@ function updateShakerPreview(di){
   const ohs=getShakerOpeningHeights(door.h,cfg.outerRail,mr,cfg.panels,centres);
   const trim=(cfg.frameOversize!=null?cfg.frameOversize:10);
   const tongue=(cfg.panelTongue!=null?cfg.panelTongue:10);
-  const frameMat=(cfg.frameThk||22)+'mm MR MDF', panelMat=(cfg.panelThk||9)+'mm MR MDF';
+  const _suf=_shakerMatSuffix(cfg);
+  const frameMat=(cfg.frameThk||22)+_suf, panelMat=(cfg.panelThk||9)+_suf;
   const tbL=door.w-2*cfg.outerRail, panelW=door.w-2*cfg.outerRail+tongue*2;
   let html='<span>Stile</span> '+(door.h+trim*2)+'x'+(cfg.outerRail+trim)+' x'+(2*qty)+' <span style="color:var(--acc)">'+frameMat+'</span> &nbsp;';
   html+='<span>Top/Bot Rail</span> '+tbL+'x'+(cfg.outerRail+trim)+' x'+(2*qty)+' <span style="color:var(--acc)">'+frameMat+'</span>';
