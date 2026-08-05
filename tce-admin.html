@@ -878,12 +878,21 @@ function lookupBoardPrice(matName, tier) {
     const thickMm = thickMatch ? parseInt(thickMatch[1]) : null;
     const sizeMatch = matName.match(/(3050|2440)/);
     const sheetW = sizeMatch ? sizeMatch[1] : '2440';
-    const customMatch = _customBoards.find(b => {
-      const _bn=b.board_name.toLowerCase();let nameMatch=nameLower.includes(_bn);if(!nameMatch&&_bn==="mr mdf"&&nameLower.includes("mdf")&&!["oak","walnut","veneer","birch","ply","melamine","chip","particle","osb","hpl","laminate","valch","sonoma"].some(function(w){return nameLower.includes(w)}))nameMatch=true;
+    const _cands = _customBoards.filter(b => {
+      const _bn=b.board_name.toLowerCase();
+      let nameMatch=nameLower.includes(_bn);
+      // Generic MDF fallback → the default MR MDF board (Finsa). "Medite" is excluded
+      // so a Medite reference never grabs a plain MR MDF row.
+      if(!nameMatch && (_bn==="mr mdf"||_bn==="finsa mr mdf") && nameLower.includes("mdf")
+         && !["oak","walnut","veneer","birch","ply","melamine","chip","particle","osb","hpl","laminate","valch","sonoma","medite"].some(function(w){return nameLower.includes(w)}))
+        nameMatch=true;
       const thickOk = thickMm ? b.thickness_mm === thickMm : true;
       const sizeOk = b.sheet_size.startsWith(sheetW);
       return nameMatch && thickOk && sizeOk;
     });
+    // Most specific match wins — longest board_name (e.g. "Medite MR MDF"/"Finsa MR MDF" beat "Mdf").
+    _cands.sort((a,b)=> (b.board_name||'').length - (a.board_name||'').length);
+    const customMatch = _cands[0];
     if (customMatch) {
       basePrice = parseFloat(customMatch.base_cost) || 0;
       materialType = customMatch.board_name;
@@ -2121,7 +2130,7 @@ tryAutoLogin();
   window.shakerRate=function(t,fb){
     var o=window._shakerOverrides[t]; if(o!=null&&o!=='') return parseFloat(o);
     try{ var L=(typeof _customBoards!=='undefined'&&_customBoards)||[];
-      var b=L.find(function(x){return x.board_name&&x.board_name.toLowerCase().indexOf('mr mdf')>=0&&x.thickness_mm===t&&String(x.sheet_size).indexOf('2440')===0&&parseFloat(x.base_cost)>0;});
+      var b=L.find(function(x){return x.board_name&&x.board_name.toLowerCase().indexOf('mr mdf')>=0&&x.board_name.toLowerCase().indexOf('medite')<0&&x.thickness_mm===t&&String(x.sheet_size).indexOf('2440')===0&&parseFloat(x.base_cost)>0;});
       if(b) return parseFloat(b.base_cost)/AREA; }catch(e){}
     return fb;
   };
@@ -2139,7 +2148,7 @@ tryAutoLogin();
     var rows=[{k:22,l:'Frame - 22mm MR MDF',d:R.frame22},{k:25,l:'Frame - 25mm MR MDF',d:R.frame25},{k:12,l:'Panel - 12mm MDF',d:R.panel12},{k:9,l:'Panel - 9mm MDF',d:R.panel9}];
     var L=(typeof _customBoards!=='undefined'&&_customBoards)||[];
     var rowsHtml=rows.map(function(r){
-      var cb=L.find(function(b){return b.board_name&&b.board_name.toLowerCase().indexOf('mr mdf')>=0&&b.thickness_mm===r.k&&String(b.sheet_size).indexOf('2440')===0&&parseFloat(b.base_cost)>0;});
+      var cb=L.find(function(b){return b.board_name&&b.board_name.toLowerCase().indexOf('mr mdf')>=0&&b.board_name.toLowerCase().indexOf('medite')<0&&b.thickness_mm===r.k&&String(b.sheet_size).indexOf('2440')===0&&parseFloat(b.base_cost)>0;});
       var auto=cb?(parseFloat(cb.base_cost)/AREA):null;
       var ov=window._shakerOverrides[r.k];
       var used=window.shakerRate(r.k,r.d);

@@ -3281,7 +3281,11 @@ function renderShakerDoors(){
         '<div class="sk-field"><label>Panels</label><select id="sk-panels-'+di+'" onchange="updateShakerPreview('+di+')">'
         +[1,2,3,4].map(n=>'<option value="'+n+'"'+(cfg.panels===n?' selected':'')+'>'+n+(n>1?' panels':' panel')+'</option>').join('')+'</select></div>'+
         '<div class="sk-field" id="sk-cw-'+di+'" style="'+(cfg.panels>1?'':'display:none')+'"><label>Rail centre(s) from bottom (mm)</label><input type="text" id="sk-centres-'+di+'" value="'+cfg.centres.join(', ')+'" placeholder="e.g. 800" oninput="updateShakerPreview('+di+')" onchange="updateShakerPreview('+di+')"></div>'+
-        '<div class="sk-field"><label>Material</label><select id="sk-mat-'+di+'" onchange="onShakerMatChange('+di+')"><option value="mdf"'+((cfg.mat||'mdf')==='mdf'?' selected':'')+'>MR MDF (paint)</option><option value="oak"'+((cfg.mat)==='oak'?' selected':'')+'>Oak Veneer</option></select></div>'+
+        '<div class="sk-field"><label>Material</label><select id="sk-mat-'+di+'" onchange="onShakerMatChange('+di+')">'+
+          '<option value="finsa"'+((cfg.mat==='finsa'||cfg.mat==='mdf'||!cfg.mat)?' selected':'')+'>Finsa MR MDF (paint)</option>'+
+          '<option value="medite"'+(cfg.mat==='medite'?' selected':'')+'>Medite MR MDF</option>'+
+          '<option value="oak"'+(cfg.mat==='oak'?' selected':'')+'>Oak Veneer</option>'+
+        '</select></div>'+
         '<div class="sk-field"><label>Frame thk</label><select id="sk-fthk-'+di+'" onchange="updateShakerPreview('+di+')">'+_tk.frame.map(n=>'<option value="'+n+'"'+(_fthk===n?' selected':'')+'>'+n+'mm</option>').join('')+'</select></div>'+
         '<div class="sk-field"><label>Panel thk</label><select id="sk-pthk-'+di+'" onchange="updateShakerPreview('+di+')">'+_tk.panel.map(n=>'<option value="'+n+'"'+(_pthk===n?' selected':'')+'>'+n+'mm</option>').join('')+'</select></div>'+
         '<div class="sk-field"><label>Frame oversize (mm)</label><input type="number" id="sk-foversize-'+di+'" value="'+(cfg.frameOversize!=null?cfg.frameOversize:10)+'" min="0" max="50" title="Squaring allowance added to frame parts. Set 0 for exact size." oninput="updateShakerPreview('+di+')" onchange="updateShakerPreview('+di+')"></div>'+
@@ -3310,8 +3314,13 @@ function getShakerCfgFromUI(di){
     mat:(document.getElementById('sk-mat-'+di)?.value)||'mdf'
   };
 }
-// Material name suffix for a shaker door: painted MR MDF (default) or oak veneer.
-function _shakerMatSuffix(cfg){ return (cfg&&cfg.mat==='oak')?'mm Oak Veneer MDF':'mm MR MDF'; }
+// Material name suffix for a shaker door: Finsa MR MDF (default), Medite MR MDF, or oak veneer.
+function _shakerMatSuffix(cfg){
+  const m=cfg&&cfg.mat;
+  if(m==='oak') return 'mm Oak Veneer MDF';
+  if(m==='medite') return 'mm Medite MR MDF';
+  return 'mm Finsa MR MDF';   // 'finsa' (default) and legacy 'mdf'
+}
 // Oak veneer thicknesses actually in your board library (falls back to 13/19/26).
 function _oakThks(){
   const s=new Set();
@@ -3329,7 +3338,8 @@ function _shakerThkOptions(mat){
     return { frame:frames.length?frames:t, panel:panels.length?panels:t,
              fdef:(frames.includes(19)?19:(frames[0]||t[t.length-1])), pdef:(panels[0]||t[0]) };
   }
-  return { frame:[18,22,25], panel:[6,9,12], fdef:22, pdef:9 };
+  if(mat==='medite'){ return { frame:[18,25], panel:[6,9,12], fdef:18, pdef:9 }; }   // Medite stocks 18 & 25 for frames
+  return { frame:[18,22,25], panel:[6,9,12], fdef:22, pdef:9 };   // finsa / default
 }
 // Switching material re-renders the card so the thickness options (and defaults) match.
 function onShakerMatChange(di){
