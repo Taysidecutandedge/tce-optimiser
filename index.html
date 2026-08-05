@@ -1164,7 +1164,19 @@ async function cloudLoadJob(id){
       _lastEbMap=d.lastResult.ebMap||{};
     }
     _quoteBasis=d.quoteBasis||null;   // the offcuts-off count the admin prices from
-    _pwsOrder=d.pwsOrder||[]; renderPwsOrder();   // restore the PWS order list
+    _pwsOrder=d.pwsOrder||[];
+    // Safety net: pull any PWS parts out of the cut list on load — whatever the source
+    // (a website-submitted job may still contain them). PWS is supply-only, never cut.
+    (function(){
+      const isPws=x=>/\bpws\b/i.test(String((x&&x.matName)||''))||/\bpws\b/i.test(String((x&&x.label)||''));
+      const pull=(parts||[]).filter(isPws);
+      if(pull.length){
+        parts=parts.filter(p=>!isPws(p));
+        pull.forEach(p=>_pwsOrder.push({label:p.label||'PWS item',material:p.matName||'',l:p.l,w:p.w,qty:p.qty||1}));
+        jobSheets=(jobSheets||[]).filter(s=>!/\bpws\b/i.test(String((s&&s.name)||'')));
+      }
+    })();
+    renderPwsOrder();   // restore/refresh the PWS order list
     _loadedCloudJobId=id; // remember which job we loaded so Save updates rather than creates
     save();renderJobSheets();renderParts();
     document.getElementById('mainArea').innerHTML='<div style="padding:40px;text-align:center;color:var(--txt3);font-family:var(--mono)">Job loaded — press Calculate to generate layout</div>';
