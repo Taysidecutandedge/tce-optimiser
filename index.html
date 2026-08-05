@@ -3486,12 +3486,9 @@ function applyImport(){
   const num=v=>{const n=parseFloat(String(v).replace(/[^\d.-]/g,''));return isNaN(n)?0:n;};
 
   // PWS doors/parts are bought in from the supplier PWS — supply-only, never cut.
-  // Flagged by the part NAME/label (or material) containing "PWS".
-  const isPwsRow=(row)=>{
-    const lbl=lblC>=0?String(row[lblC]||''):'';
-    const mat=bC>=0?String(row[bC]||''):'';
-    return /\bpws\b/i.test(lbl) || /\bpws\b/i.test(mat);
-  };
+  // Flagged by "PWS" appearing anywhere in the row (usually the material column,
+  // e.g. "PWS Carbon black"), so it's caught even if that column isn't mapped.
+  const isPwsRow=(row)=> Array.isArray(row) && row.some(c=>/\bpws\b/i.test(String(c==null?'':c)));
 
   // ── PASS 1: collect all unique material names, carry forward blanks ──
   // The TCE spreadsheet auto-fills material only on the first row of each group;
