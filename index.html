@@ -665,6 +665,7 @@ select option{background:var(--surf2)}
 let library=[], jobSheets=[], parts=[];
 let _offcutStock=[]; // in-stock offcuts for the nester (Phase 2)
 let projectName='';
+let _jobContact=null;   // {name,email,phone,notes} from a website submission — who to message about the job
 let libId=1, jsid=1, pid=1, ci=0;
 let importHeaders=[], importRows=[], libEditingId=null;
 
@@ -1157,7 +1158,20 @@ async function cloudLoadJob(id){
     if(d.library)library=d.library;
     if(d.jobSheets)jobSheets=d.jobSheets;
     if(d.parts)parts=d.parts;
-    if(d.projectName){projectName=d.projectName;document.getElementById('projectNameInput').value=projectName;}
+    // Set the project name. Website submissions send the company as projectName and the
+    // customer's own job reference in contact.notes (e.g. "stephen office") — prefer that as
+    // the project name, and remember the company so the Save dialog pre-picks the account.
+    (function(){
+      const company=d.customer||d.projectName||'';
+      const note=(d.contact&&typeof d.contact.notes==='string')?d.contact.notes.trim():'';
+      let pn=d.projectName||'';
+      _jobContact=d.contact||null;      // keep contact (name/phone/email) for reference on the job
+      if(d.source==='website'){
+        pn=note||company||pn;
+        if(company) window._pendingImportCustomer=company;   // pre-select the customer on Save
+      }
+      if(pn){ projectName=pn; const ni=document.getElementById('projectNameInput'); if(ni) ni.value=pn; }
+    })();
     if(d.ids){libId=d.ids.libId||libId;jsid=d.ids.jsid||jsid;pid=d.ids.pid||pid;ci=d.ids.ci||ci;}
     // Restore lastResult so admin panel can generate quotes without recalculating
     if(d.lastResult){
@@ -1180,7 +1194,18 @@ async function cloudLoadJob(id){
     renderPwsOrder();   // restore/refresh the PWS order list
     _loadedCloudJobId=id; // remember which job we loaded so Save updates rather than creates
     save();renderJobSheets();renderParts();
-    document.getElementById('mainArea').innerHTML='<div style="padding:40px;text-align:center;color:var(--txt3);font-family:var(--mono)">Job loaded — press Calculate to generate layout</div>';
+    let _contactHtml='';
+    if(_jobContact&&(_jobContact.name||_jobContact.phone||_jobContact.notes)){
+      const c=_jobContact, esc2=s=>String(s||'').replace(/[<>&]/g,x=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[x]));
+      _contactHtml='<div style="margin:14px auto 0;max-width:420px;text-align:left;background:var(--surf2);border:1px solid var(--brd);border-radius:8px;padding:12px 14px;font-family:var(--sans);color:var(--txt2);font-size:13px">'
+        +'<div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--txt3);margin-bottom:6px">From the website</div>'
+        +(c.name?'<div><b>'+esc2(c.name)+'</b></div>':'')
+        +(c.notes?'<div style="color:var(--acc)">Project ref: '+esc2(c.notes)+'</div>':'')
+        +(c.phone?'<div>📞 '+esc2(c.phone)+'</div>':'')
+        +(c.email?'<div>✉ '+esc2(c.email)+'</div>':'')
+        +'</div>';
+    }
+    document.getElementById('mainArea').innerHTML='<div style="padding:40px;text-align:center;color:var(--txt3);font-family:var(--mono)">Job loaded — press Calculate to generate layout'+_contactHtml+'</div>';
     closeCloudJobs();
     // Jobs from the website submit arrive with raw materials (e.g. "mr mdf") that never
     // went through the import mapping. Offer to map any generic/unrecognised board on open.
