@@ -1409,6 +1409,7 @@ function renderJobSheets(){
       <div class="jsc-top">
         <div class="jsc-swatch" style="background:${s.color}"></div>
         <input type="text" value="${esc(s.name)}" onchange="jss(${s.id},'name',this.value)" style="font-weight:600;font-size:13px">
+        <button class="btn-ico" onclick="openSheetBoardPick(${s.id})" title="Change to a board from your system (sets size, thickness &amp; cost)">⇄</button>
         <button class="btn-ico" onclick="removeJobSheet(${s.id})">✕</button>
       </div>
       <div class="jsc-rows">
@@ -1434,6 +1435,65 @@ function renderJobSheets(){
       </div>
     </div>`;
   }).join('');
+}
+
+// ── Change a sheet to a real board from the system (size, thickness, cost + re-point parts) ──
+function openSheetBoardPick(sid){
+  const s=jobSheets.find(x=>x.id===sid); if(!s) return;
+  _matMapData=_matMapBoards();
+  if(!_matMapData.length && !_matMapCatTried && typeof sbLoadBoardCatalogue==='function'){
+    _matMapCatTried=true; try{ Promise.resolve(sbLoadBoardCatalogue()).then(()=>openSheetBoardPick(sid)); }catch(e){}
+  }
+  let ov=document.getElementById('sheetBoardOverlay'); if(ov) ov.remove();
+  ov=document.createElement('div'); ov.id='sheetBoardOverlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2147483000;display:flex;align-items:flex-start;justify-content:center;padding-top:12vh';
+  const thM=String(s.name).match(/(\d+(?:\.\d+)?)\s*mm/i); const thk=thM?parseFloat(thM[1]):'';
+  ov.innerHTML=`<div style="background:#12241e;border:1px solid #2b4a40;border-radius:12px;max-width:520px;width:92%;padding:18px">
+    <div style="font-size:15px;font-weight:700;color:#f0a500;margin-bottom:4px">Change board</div>
+    <div style="font-size:12px;color:#8fae9f;margin-bottom:10px">Pick a board from your system — sets the correct size, thickness and cost, and updates every part currently on &ldquo;${esc(s.name)}&rdquo;.</div>
+    <div style="position:relative">
+      <input id="sbp_in" data-sid="${sid}" data-thk="${thk}" data-ref="" autocomplete="off" placeholder="Search your boards… (e.g. finsa 22)"
+        oninput="sheetBoardFilter()" onfocus="sheetBoardFilter()"
+        style="width:100%;box-sizing:border-box;font-size:13px;background:#0d1f1a;border:1px solid #2b4a40;color:#e8f0ec;border-radius:6px;padding:9px 10px">
+      <div id="sbp_res" style="display:none;position:absolute;left:0;right:0;top:100%;margin-top:2px;z-index:10;background:#0d1f1a;border:1px solid #2b4a40;border-radius:6px;max-height:260px;overflow:auto"></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:14px">
+      <button onclick="document.getElementById('sheetBoardOverlay').remove()" style="background:none;border:1px solid #2b4a40;color:#cfe7dd;border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer">Cancel</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  setTimeout(()=>{const i=document.getElementById('sbp_in'); if(i){i.focus(); sheetBoardFilter();}},30);
+}
+function sheetBoardFilter(){
+  const inp=document.getElementById('sbp_in'); if(!inp) return;
+  const res=document.getElementById('sbp_res'); if(!res) return;
+  const q=(inp.value||'').toLowerCase().trim(); const thk=parseFloat(inp.dataset.thk)||null;
+  let list=_matMapData.slice();
+  if(q){ const toks=q.split(/\s+/); list=list.filter(b=>{ const s=(b.name+' '+(b.thick||'')+'mm '+b.l+'x'+b.w).toLowerCase(); return toks.every(t=>s.indexOf(t)>-1); }); }
+  list.sort((a,b)=>{ const am=(thk&&Math.abs((a.thick||0)-thk)<0.6)?0:1, bm=(thk&&Math.abs((b.thick||0)-thk)<0.6)?0:1; return am-bm||String(a.name).localeCompare(String(b.name)); });
+  list=list.slice(0,50);
+  if(!list.length){ res.innerHTML='<div style="padding:8px 9px;color:#8fae9f;font-size:12px">No match</div>'; res.style.display='block'; return; }
+  res.innerHTML=list.map(b=>{ const gi=_matMapData.indexOf(b);
+    return `<div onmousedown="applySheetBoard(${gi})" style="padding:8px 10px;font-size:12px;color:#e8f0ec;cursor:pointer;border-bottom:1px solid #17332b" onmouseover="this.style.background='#17332b'" onmouseout="this.style.background='transparent'">${esc(b.name)} · ${b.thick||'?'}mm · ${b.l}×${b.w} · £${(b.cost||0).toFixed(2)}</div>`;
+  }).join('');
+  res.style.display='block';
+}
+function applySheetBoard(gi){
+  const inp=document.getElementById('sbp_in'); if(!inp) return;
+  const sid=parseInt(inp.dataset.sid); const board=_matMapData[gi]; if(!board) return;
+  const ref=board.ref; const s=jobSheets.find(x=>x.id===sid); if(!s||!ref) return;
+  let B=null;
+  if(ref.indexOf('lib:')===0){ const id=ref.slice(4); const l=(library||[]).find(x=>String(x.id)===id); if(l) B={name:l.name,l:l.l,w:l.w,thick:l.thick,cost:l.cost||0,color:l.color,grainLen:l.grainLen,libRef:l.id}; }
+  else if(ref.indexOf('cb:')===0){ const id=ref.slice(3); const b=(_cbCatalogue||[]).find(x=>String(x.id)===id); if(b){ const sz=String(b.sheet_size||'2440x1220').match(/(\d+)\s*[x×]\s*(\d+)/i); B={name:(b.thickness_mm+'mm '+b.board_name),l:sz?parseInt(sz[1]):2440,w:sz?parseInt(sz[2]):1220,thick:b.thickness_mm,cost:parseFloat(b.base_cost)||0,color:'#8aa',grainLen:false,libRef:null}; } }
+  if(!B) return;
+  const oldName=s.name; const _on=String(oldName||'').toLowerCase().trim();
+  // update the sheet in place — keep qty and trims, replace board identity
+  s.libRef=B.libRef; s.name=B.name; s.l=B.l; s.w=B.w; s.thick=B.thick; s.cost=B.cost; s.color=B.color||s.color; s.grainLen=B.grainLen;
+  // re-point every part that was on the old material (case-insensitive)
+  let n=0; (parts||[]).forEach(p=>{ if(String(p.matName||'').toLowerCase().trim()===_on){ p.matName=B.name; n++; } });
+  const ov=document.getElementById('sheetBoardOverlay'); if(ov) ov.remove();
+  try{ save(); }catch(e){}
+  renderJobSheets(); if(n) renderParts();
 }
 
 // ═══════════════════════════════════════════════
