@@ -373,7 +373,7 @@ function _qrObj(b64,x,y,w,h){
   return '<ImageObject><Name>SampleQR</Name>'+
   '<Brushes><BackgroundBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></BackgroundBrush><BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush><StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush><FillBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush></Brushes>'+
   '<Rotation>Rotation0</Rotation><OutlineThickness>1</OutlineThickness><IsOutlined>False</IsOutlined><BorderStyle>SolidLine</BorderStyle><Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin>'+
-  '<Image>'+b64+'</Image><ScaleMode>Uniform</ScaleMode><BorderColor><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderColor><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment>'+
+  '<Data>'+b64+'</Data><ScaleMode>Uniform</ScaleMode><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment>'+
   '<ObjectLayout><DYMOPoint><X>'+x+'</X><Y>'+y+'</Y></DYMOPoint><Size><Width>'+w+'</Width><Height>'+h+'</Height></Size></ObjectLayout></ImageObject>';
 }
 function sampleLabelXml(company,board,edging){
