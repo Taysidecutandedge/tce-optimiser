@@ -115,6 +115,9 @@
     <div style="font-size:12px;color:#6b8f7e;margin-bottom:14px">Prints a sample label — company, board, edging and a QR that opens your submit-cutlist page.</div>
     <label style="font-size:12px;color:#a8b0bd">Company</label>
     <input id="smp-company" value="Tayside Cut &amp; Edge" style="width:100%;background:#1e2128;border:1px solid #2a2e38;color:#f0eeea;border-radius:8px;padding:10px;font-size:15px;margin-bottom:8px">
+    <label style="font-size:12px;color:#a8b0bd">Brand <span style="color:#6b7280">(optional)</span></label>
+    <input id="smp-brand" list="sampleBrandList" autocomplete="off" placeholder="type or pick… e.g. Egger" style="width:100%;background:#1e2128;border:1px solid #2a2e38;color:#f0eeea;border-radius:8px;padding:10px;font-size:15px;margin-bottom:8px">
+    <datalist id="sampleBrandList"></datalist>
     <label style="font-size:12px;color:#a8b0bd">Board material</label>
     <input id="smp-board" list="sampleBoardList" autocomplete="off" placeholder="type or pick… e.g. 18mm Finsa MR MDF" style="width:100%;background:#1e2128;border:1px solid #2a2e38;color:#f0eeea;border-radius:8px;padding:10px;font-size:15px;margin-bottom:8px">
     <datalist id="sampleBoardList"></datalist>
@@ -359,6 +362,9 @@ async function loadSampleLists(){
     const el=document.getElementById('sampleEdgeList');
     const edges=['1mm ABS matching','2mm ABS matching','0.6mm ABS','1mm PVC','2mm PVC','1mm ABS','2mm ABS','Iron-on melamine','Unedged'];
     if(el) el.innerHTML=edges.map(n=>`<option value="${esc(n)}"></option>`).join('');
+    const brl=document.getElementById('sampleBrandList');
+    const brands=['Egger','Kronospan','Kronodesign','Finsa','Medite','Cleaf','Xylocleaf','Formica','Duropal','Polyrey','Melamine Faced'];
+    if(brl) brl.innerHTML=brands.map(n=>`<option value="${esc(n)}"></option>`).join('');
     _sampleListsLoaded=true;
   }catch(e){}
 }
@@ -376,25 +382,26 @@ function _qrObj(b64,x,y,w,h){
   '<Data>'+b64+'</Data><ScaleMode>Uniform</ScaleMode><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment>'+
   '<ObjectLayout><DYMOPoint><X>'+x+'</X><Y>'+y+'</Y></DYMOPoint><Size><Width>'+w+'</Width><Height>'+h+'</Height></Size></ObjectLayout></ImageObject>';
 }
-function sampleLabelXml(company,board,edging){
+function sampleLabelXml(company,brand,board,edging){
   const body=
-    _qrObj(SAMPLE_QR_B64,0.10,0.11,0.84,0.84)+
-    _to('SmpCo',company||'Tayside Cut & Edge',12,'Left',1.02,0.12,1.12,0.24)+
-    _to('SmpBoard',board||'',11,'Left',1.02,0.40,1.12,0.34)+
-    _to('SmpEdgeLbl','Edging',7,'Left',1.02,0.74,1.12,0.14)+
-    _to('SmpEdge',edging||'—',11,'Left',1.02,0.86,1.12,0.22)+
-    _to('SmpScan','Scan to order ▸',7,'Center',0.06,0.96,0.92,0.13);
+    _qrObj(SAMPLE_QR_B64,0.10,0.13,0.80,0.80)+
+    _to('SmpCo',company||'Tayside Cut & Edge',11,'Left',1.02,0.09,1.12,0.19)+
+    _to('SmpBrand',brand||'',11,'Left',1.02,0.29,1.12,0.19)+
+    _to('SmpBoard',board||'',10,'Left',1.02,0.49,1.12,0.30)+
+    _to('SmpEdge','Edging: '+(edging||'—'),9,'Left',1.02,0.81,1.12,0.20)+
+    _to('SmpScan','Scan to order ▸',7,'Center',0.06,0.97,0.90,0.13);
   return '<?xml version="1.0" encoding="utf-8"?><DesktopLabel Version="1"><DYMOLabel Version="4"><Description>DYMO Label</Description><Orientation>Portrait</Orientation><LabelName>S0722540 multipurpose</LabelName><InitialLength>0</InitialLength><BorderStyle>SolidLine</BorderStyle><DYMORect><DYMOPoint><X>0.04</X><Y>0.06</Y></DYMOPoint><Size><Width>2.17</Width><Height>1.13</Height></Size></DYMORect><BorderColor><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderColor><BorderThickness>1</BorderThickness><Show_Border>False</Show_Border><HasFixedLength>False</HasFixedLength><FixedLengthValue>0</FixedLengthValue><DynamicLayoutManager><RotationBehavior>ClearObjects</RotationBehavior><LabelObjects>'+body+'</LabelObjects></DynamicLayoutManager></DYMOLabel></DesktopLabel>';
 }
 function printSampleLabel(){
   const co=(document.getElementById('smp-company').value||'Tayside Cut & Edge').trim();
+  const br=(document.getElementById('smp-brand').value||'').trim();
   const bd=(document.getElementById('smp-board').value||'').trim();
   const eg=(document.getElementById('smp-edge').value||'').trim();
   const err=document.getElementById('smp-err');
   if(!bd){ if(err) err.textContent='Enter or pick a board material.'; return; }
   if(err) err.textContent='';
   const n=Math.max(1,parseInt(document.getElementById('smp-qty').value)||1);
-  const xml=sampleLabelXml(co,bd,eg);
+  const xml=sampleLabelXml(co,br,bd,eg);
   for(let i=0;i<n;i++) enqueueLabelXml(xml,'sample label sent ✓');
   closeSampleForm();
 }
