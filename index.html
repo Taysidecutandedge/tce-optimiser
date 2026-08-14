@@ -3076,7 +3076,7 @@ function loadXLSXSheet(idx){
 // Smart header detection — skip intro rows, find the real header row
 // A "real" header row has multiple non-empty, non-numeric short strings
 function findHeaderRow(allRows){
-  const KEY_COLS = ['length','width','l1','l2','w1','w2','qty','quantity','label','name','material','company'];
+  const KEY_COLS = ['length','width','l1','l2','w1','w2','qty','quantity','label','name','material','company','thickness','designation'];
   for(let i=0;i<Math.min(allRows.length,6);i++){
     const row = allRows[i];
     const lower = row.map(c=>String(c).toLowerCase().trim());
@@ -3099,6 +3099,7 @@ const FIELDS=[
   {key:'w',    lbl:'Width (mm)',        req:true},
   {key:'qty',  lbl:'Quantity',          req:false},
   {key:'board',lbl:'Board / Material',  req:false},
+  {key:'thick',lbl:'Thickness (mm)',    req:false},
   {key:'company',lbl:'Customer Company',req:false},
   {key:'ebL1', lbl:'Edgeband L1',       req:false},
   {key:'ebL2', lbl:'Edgeband L2',       req:false},
@@ -3115,11 +3116,12 @@ function guessMap(headers){
   return{
     // Exact TCE column name matches first, then fuzzy fallbacks
     label: exact('label description') >= 0 ? exact('label description')
-           : contains(['label','name','panel','part','desc']),
+           : contains(['label','name','panel','part','desc','design']),
     l:     exact('length') >= 0 ? exact('length') : contains(['length','len']),
     w:     exact('width')  >= 0 ? exact('width')  : contains(['width','wid']),
     qty:   exact('quantity') >= 0 ? exact('quantity') : contains(['qty','quantity','count']),
-    board: exact('material') >= 0 ? exact('material') : contains(['board','material','mat']),
+    board: exact('material name') >= 0 ? exact('material name') : exact('material') >= 0 ? exact('material') : contains(['board','material','mat']),
+    thick: exact('thickness') >= 0 ? exact('thickness') : contains(['thickness','thick','thk']),
     company: exact('company') >= 0 ? exact('company') : contains(['company','customer','client']),
     // L1/L2/W1/W2 — exact match on your column names
     ebL1:  exact('l1') >= 0 ? exact('l1') : contains(['eb_l1','edge_l1','edgeband_l1']),
@@ -3575,7 +3577,7 @@ function applyImport(){
   const g=k=>{const el=document.getElementById(`map_${k}`);return el&&el.value!==''?+el.value:-1;};
   const lC=g('l'),wC=g('w'),lblC=g('label');
   if(lC<0||wC<0||lblC<0)return alert('Length, Width and Panel Name columns are required — please map them above.');
-  const qC=g('qty'),bC=g('board'),cC=g('company');
+  const qC=g('qty'),bC=g('board'),cC=g('company'),tC=g('thick');
   // Notes column — try to find it by header name "notes" if not already mapped
   const nC=(()=>{
     const mapped=[lC,wC,lblC,qC,bC,cC].filter(x=>x>=0);
@@ -3614,6 +3616,18 @@ function applyImport(){
   };
   const num=v=>{const n=parseFloat(String(v).replace(/[^\d.-]/g,''));return isNaN(n)?0:n;};
 
+  // When a Thickness column is mapped (e.g. OpenCutList / SketchUp exports), fold the
+  // thickness into the material name so ONE material used at several thicknesses splits
+  // into a separate board per thickness — otherwise 13/18/25mm oak all collapse onto one
+  // sheet. Names that already carry a thickness (e.g. "18mm Finsa MR MDF") are left alone.
+  const mkEffMat=(rawName,rowThk)=>{
+    const nm=String(rawName||'').trim();
+    if(!nm||tC<0) return nm;
+    if(/\b\d+(?:\.\d+)?\s*mm\b/i.test(nm)) return nm;   // already thickness-tagged
+    const t=num(rowThk);
+    return t>0 ? (Math.round(t)+'mm '+nm) : nm;
+  };
+
   // PWS doors/parts are bought in from the supplier PWS — supply-only, never cut.
   // Flagged by "PWS" appearing anywhere in the row (usually the material column,
   // e.g. "PWS Carbon black"), so it's caught even if that column isn't mapped.
@@ -3640,8 +3654,10 @@ function applyImport(){
   const rowBoards=importRows.map(row=>{
     if(!row.some(c=>c!==''))return '';
     const b=bC>=0?String(row[bC]||'').trim():'';
-    if(b&&looksLikeMaterial(b)) lastBoard=b;
-    return lastBoard;
+    // When a thickness column is mapped, every row carries its own material (OpenCutList
+    // style) so trust any non-empty cell; otherwise keep the TCE carry-forward guard.
+    if(b && (tC>=0 || looksLikeMaterial(b))) lastBoard=b;
+    return mkEffMat(lastBoard, tC>=0?row[tC]:'');
   });
   const matsFound=new Set(rowBoards.filter((b,ri)=>b && !isPwsRow(importRows[ri])));   // PWS rows never create a cut sheet
 
@@ -3649,8 +3665,21 @@ function applyImport(){
   // This ensures importResolveSheet finds them when resolving matName below.
   let sheetsAdded=0;
   const autoCreated=[];   // boards not in the library, created straight from the cutlist
+  const aliasMap={};      // effective material (key) -> mapped board name, from remembered aliases
+  let aliasedCount=0;
   matsFound.forEach(mn=>{
     if(/shaker\s*door/i.test(mn)) return;          // shaker doors handled separately
+    // Remembered from a previous import? Map straight to that board — no prompt.
+    const al=_matAliasGet(mn); const alB=al?_resolveBoardRef(al.ref):null;
+    if(alB){
+      aliasMap[_matAliasKey(mn)]=alB.name; aliasedCount++;
+      if(!jobSheets.some(js=>(js.name||'').toLowerCase()===alB.name.toLowerCase())){
+        jobSheets.push({id:jsid++,libRef:alB.libRef,name:alB.name,l:alB.l,w:alB.w,thick:alB.thick,
+          cost:alB.cost,color:alB.color||nc(),grainLen:alB.grainLen,qty:1,trimT:15,trimB:15,trimL:15,trimR:15});
+        sheetsAdded++;
+      }
+      return;
+    }
     const mat=importResolveLib(mn);
     if(mat){
       if(!jobSheets.some(js=>js.libRef===mat.id)){
@@ -3729,8 +3758,9 @@ function applyImport(){
           if(r.banded&&r.tk)eb.tk[s]=r.tk;
         }
       });
-      const matched=board?importResolveSheet(board):null;
-      const resolvedMat=matched?matched.name:(board||'');
+      const aliasName=aliasMap[_matAliasKey(board)];
+      const matched=(!aliasName&&board)?importResolveSheet(board):null;
+      const resolvedMat=aliasName||(matched?matched.name:(board||''));
       addPart({label,l,w,
         qty:qC>=0&&row[qC]!==''?Math.max(1,parseInt(row[qC])||1):1,
         grainOverride:null,matName:resolvedMat,company:company||'',eb});
@@ -3750,6 +3780,7 @@ function applyImport(){
   };
 
   const sheetMsg=sheetsAdded>0?'\n'+sheetsAdded+' sheet type'+(sheetsAdded!==1?'s':'')+' auto-added.':'';
+  const aliasMsg=aliasedCount>0?'\n'+aliasedCount+' material'+(aliasedCount!==1?'s':'')+' auto-mapped from memory.':'';
   const newMsg=autoCreated.length?'\n\nNote: '+autoCreated.length+' board'+(autoCreated.length!==1?'s were':' was')+' not in your library, so created from the cutlist at 2800 x 2070 - please check size/thickness/cost:\n- '+autoCreated.join('\n- '):'';
 
   if(shakerRows.length>0){
@@ -3773,7 +3804,7 @@ function applyImport(){
       return {h:l,w,label:rawL||board,qty,cfg,company,notes};
     });
     openShakerModal(doors, ()=>{});
-    if(normalAdded>0) alert('Imported '+normalAdded+' standard part'+(normalAdded!==1?'s':'')+'.'+sheetMsg+newMsg+pwsMsg+'\n\nReview your '+shakerRows.length+' shaker door'+(shakerRows.length!==1?'s':'')+' in the door review panel.');
+    if(normalAdded>0) alert('Imported '+normalAdded+' standard part'+(normalAdded!==1?'s':'')+'.'+sheetMsg+aliasMsg+newMsg+pwsMsg+'\n\nReview your '+shakerRows.length+' shaker door'+(shakerRows.length!==1?'s':'')+' in the door review panel.');
     else if(pwsMsg) alert(pwsMsg.trim());
     _matMapPending=autoCreated; if(autoCreated&&autoCreated.length) setTimeout(openMatMapDialog,60);
     return;
@@ -3782,7 +3813,7 @@ function applyImport(){
   // No shaker doors - standard flow
   const added=processNormalRows();
   save();renderParts();cm('importModal');
-  alert('Imported '+added+' part'+(added!==1?'s':'')+' successfully.'+sheetMsg+newMsg+pwsMsg);
+  alert('Imported '+added+' part'+(added!==1?'s':'')+' successfully.'+sheetMsg+aliasMsg+newMsg+pwsMsg);
   _matMapPending=autoCreated; if(autoCreated&&autoCreated.length) setTimeout(openMatMapDialog,60);
 }
 
@@ -3841,6 +3872,20 @@ function _matMapBoards(){
   return out;
 }
 let _matMapData=[], _matMapCatTried=false;
+// ── Remembered material aliases (source material name → board) ──────────────
+// So a material you've mapped once (e.g. "25mm White_Oak-v" → your 26mm oak board)
+// auto-maps on the next import. Stored per-browser in localStorage.
+function _matAliasAll(){ try{ return JSON.parse(localStorage.getItem('tce_mat_aliases')||'{}'); }catch(e){ return {}; } }
+function _matAliasKey(name){ return String(name||'').toLowerCase().replace(/\s+/g,' ').trim(); }
+function _matAliasGet(name){ const a=_matAliasAll(); return a[_matAliasKey(name)]||null; }
+function _matAliasSet(name,ref,target){ if(!name||!ref)return; const a=_matAliasAll(); a[_matAliasKey(name)]={ref,name:target}; try{ localStorage.setItem('tce_mat_aliases',JSON.stringify(a)); }catch(e){} }
+// Resolve a board reference ("lib:ID" or "cb:ID") to a usable board object, or null.
+function _resolveBoardRef(ref){
+  if(!ref) return null;
+  if(ref.indexOf('lib:')===0){ const id=ref.slice(4); const l=(library||[]).find(x=>String(x.id)===id); if(l) return {name:l.name,l:l.l,w:l.w,thick:l.thick,cost:l.cost||0,color:l.color,grainLen:l.grainLen,libRef:l.id}; }
+  else if(ref.indexOf('cb:')===0){ const id=ref.slice(3); const b=(_cbCatalogue||[]).find(x=>String(x.id)===id); if(b){ const sz=String(b.sheet_size||'2440x1220').match(/(\d+)\s*[x×]\s*(\d+)/i); return {name:(b.thickness_mm+'mm '+b.board_name),l:sz?parseInt(sz[1]):2440,w:sz?parseInt(sz[2]):1220,thick:b.thickness_mm,cost:parseFloat(b.base_cost)||0,color:'#8aa',grainLen:false,libRef:null}; } }
+  return null;
+}
 function openMatMapDialog(){
   const mats=(_matMapPending||[]).filter(Boolean);
   if(!mats.length) return;
@@ -3857,10 +3902,13 @@ function openMatMapDialog(){
   const rows=mats.map((mn,i)=>{
     const iid='mm_'+i;
     const thM=String(mn).match(/(\d+(?:\.\d+)?)\s*mm/i); const thk=thM?parseFloat(thM[1]):'';
+    const al=_matAliasGet(mn);                                  // remembered choice, if any
+    const preVal=al?esc(al.name+' (remembered)'):'';
+    const preRef=al?esc(al.ref):'';
     return `<div style="display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-top:1px solid #1a2a24">
       <div style="flex:0 0 38%;font-size:13px;color:#e8f0ec;word-break:break-word;padding-top:7px">${esc(mn)}</div>
       <div style="flex:1;position:relative">
-        <input id="${iid}" class="matmap-search" data-mat="${esc(mn)}" data-thk="${thk}" data-ref="" autocomplete="off"
+        <input id="${iid}" class="matmap-search" data-mat="${esc(mn)}" data-thk="${thk}" data-ref="${preRef}" value="${preVal}" autocomplete="off"
           placeholder="Search your boards… (e.g. medite 18)"
           oninput="matMapFilter('${iid}')" onfocus="matMapFilter('${iid}')"
           onblur="setTimeout(function(){var r=document.getElementById('${iid}_res');if(r)r.style.display='none';},180)"
@@ -3904,15 +3952,19 @@ function applyMatMap(){
   document.querySelectorAll('#matMapOverlay .matmap-search').forEach(sel=>{
     const oldName=sel.dataset.mat, ref=sel.dataset.ref;
     if(!ref) return;
-    let B=null;
-    if(ref.indexOf('lib:')===0){ const id=ref.slice(4); const l=(library||[]).find(x=>String(x.id)===id); if(l) B={name:l.name,l:l.l,w:l.w,thick:l.thick,cost:l.cost||0,color:l.color,grainLen:l.grainLen,libRef:l.id}; }
-    else if(ref.indexOf('cb:')===0){ const id=ref.slice(3); const b=(_cbCatalogue||[]).find(x=>String(x.id)===id); if(b){ const sz=String(b.sheet_size||'2440x1220').match(/(\d+)\s*[x×]\s*(\d+)/i); B={name:(b.thickness_mm+'mm '+b.board_name),l:sz?parseInt(sz[1]):2440,w:sz?parseInt(sz[2]):1220,thick:b.thickness_mm,cost:parseFloat(b.base_cost)||0,color:'#8aa',grainLen:false,libRef:null}; } }
+    const B=_resolveBoardRef(ref);
     if(!B) return;
+    _matAliasSet(oldName, ref, B.name);   // remember this choice for next time
     const _on=String(oldName||'').toLowerCase().trim();
     const si=jobSheets.findIndex(s=>String(s.name||'').toLowerCase().trim()===_on);
     if(si>=0){ const q=jobSheets[si].qty||1; jobSheets[si]={id:jobSheets[si].id,libRef:B.libRef,name:B.name,l:B.l,w:B.w,thick:B.thick,cost:B.cost,color:B.color||'#8aa',grainLen:B.grainLen,qty:q,trimT:15,trimB:15,trimL:15,trimR:15}; }
     (parts||[]).forEach(p=>{ if(String(p.matName||'').toLowerCase().trim()===_on) p.matName=B.name; });
   });
+  // Merge any sheets that now share a name (e.g. -h and -v both mapped to the same board).
+  for(let i=jobSheets.length-1;i>=1;i--){
+    const nm=String(jobSheets[i].name||'').toLowerCase().trim();
+    if(jobSheets.slice(0,i).some(s=>String(s.name||'').toLowerCase().trim()===nm)) jobSheets.splice(i,1);
+  }
   const ov=document.getElementById('matMapOverlay'); if(ov) ov.remove();
   _matMapPending=[];
   try{ save(); }catch(e){}
