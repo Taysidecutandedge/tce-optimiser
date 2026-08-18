@@ -927,6 +927,7 @@ async function initCloudLibrary(){
   await sbLoadEbRolls();
   await sbLoadBoardStock();
   await sbLoadBoardCatalogue();   // admin board prices → available as mapping targets
+  await sbLoadEggerCodes();       // Egger decor list → recognised on import + pickable in the mapper
   if(!loaded){
     // No cloud library yet — offer to migrate local library
     const local=localStorage.getItem('clp_lib');
@@ -3680,6 +3681,17 @@ function applyImport(){
       }
       return;
     }
+    // Egger decor code (e.g. U638) — a standard 2800×2070 MFC board, priced from the Egger
+    // list. Create it directly at the right size/price; don't force a "not in library" prompt.
+    if(_isEggerCode(mn)){
+      if(!jobSheets.some(js=>(js.name||'').toLowerCase()===mn.toLowerCase())){
+        const thM=mn.match(/(\d+(?:\.\d+)?)\s*mm/i); const thick=thM?parseFloat(thM[1]):18;
+        jobSheets.push({id:jsid++,libRef:null,name:mn,l:2800,w:2070,thick,
+          cost:_eggerPrice(mn),color:nc(),grainLen:true,qty:1,trimT:15,trimB:15,trimL:15,trimR:15});
+        sheetsAdded++;
+      }
+      return;
+    }
     const mat=importResolveLib(mn);
     if(mat){
       if(!jobSheets.some(js=>js.libRef===mat.id)){
@@ -3863,12 +3875,35 @@ async function sbLoadBoardCatalogue(){
     _cbCatalogue = r.ok ? (await r.json()) : [];
   }catch(e){ _cbCatalogue=[]; }
 }
+// ── Egger decor list (from admin pricing) ───────────────────────────────────
+// Egger MFC is a standard 2800×2070 board; the pricing table holds the decor code
+// and £/sheet. We load it so Egger codes are (a) recognised on import (no needless
+// "not in library" prompt) and (b) pickable as mapping targets.
+let _eggerCodes=[];   // [{egger_code, price_retail}]
+async function sbLoadEggerCodes(){
+  if(!_sbToken){ _eggerCodes=[]; return; }
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/tce_pricing?select=egger_code,price_retail&order=egger_code',{headers:sbAuthH()});
+    _eggerCodes = r.ok ? (await r.json()).filter(x=>x&&x.egger_code) : [];
+  }catch(e){ _eggerCodes=[]; }
+}
+function _eggerCore(mn){ return String(mn||'').replace(/^\s*\d+(?:\.\d+)?\s*mm\s+/i,'').replace(/_/g,' ').replace(/\s+/g,' ').trim(); }   // drop a leading "18mm ", underscores→spaces
+function _eggerPrice(mn){ const c=_eggerCore(mn).toUpperCase(); const e=(_eggerCodes||[]).find(x=>String(x.egger_code).toUpperCase()===c); return e?parseFloat(e.price_retail)||0:0; }
+function _isEggerCode(mn){
+  const core=_eggerCore(mn);
+  if(!core) return false;
+  if((_eggerCodes||[]).some(e=>String(e.egger_code).toUpperCase()===core.toUpperCase())) return true;   // exact decor match
+  const first=core.split(/\s+/)[0].toUpperCase();
+  if((_eggerCodes||[]).some(e=>String(e.egger_code).toUpperCase().split(/\s+/)[0]===first)) return true; // "U638" matches "U638 ST9"
+  return /^[A-Z]{1,2}\d{3,4}$/.test(first);   // fallback pattern: U638, H3170, W980, F235
+}
 function _matMapBoards(){
   const libAll=(typeof library!=='undefined'?library:[]).filter(l=>!l.is_offcut).map(l=>({name:l.name,thick:l.thick,l:l.l,w:l.w,cost:l.cost||0,color:l.color,grainLen:l.grainLen,ref:'lib:'+l.id}));
   const cbAll=(_cbCatalogue||[]).map(b=>{ const sz=String(b.sheet_size||'2440x1220').match(/(\d+)\s*[x×]\s*(\d+)/i);
     return {name:(b.thickness_mm+'mm '+b.board_name), thick:b.thickness_mm, l:sz?parseInt(sz[1]):2440, w:sz?parseInt(sz[2]):1220, cost:parseFloat(b.base_cost)||0, color:'#8aa', grainLen:false, ref:'cb:'+b.id}; });
+  const egAll=(_eggerCodes||[]).map(e=>({name:e.egger_code, thick:18, l:2800, w:2070, cost:parseFloat(e.price_retail)||0, color:'#c39b7b', grainLen:true, ref:'eg:'+e.egger_code}));
   const seen=new Set(), out=[];
-  [...cbAll,...libAll].forEach(o=>{ const k=(o.name||'').toLowerCase().replace(/\s+/g,' ').trim()+'|'+o.thick; if(seen.has(k))return; seen.add(k); out.push(o); });
+  [...cbAll,...libAll,...egAll].forEach(o=>{ const k=(o.name||'').toLowerCase().replace(/\s+/g,' ').trim()+'|'+o.thick; if(seen.has(k))return; seen.add(k); out.push(o); });
   return out;
 }
 let _matMapData=[], _matMapCatTried=false;
@@ -3884,6 +3919,7 @@ function _resolveBoardRef(ref){
   if(!ref) return null;
   if(ref.indexOf('lib:')===0){ const id=ref.slice(4); const l=(library||[]).find(x=>String(x.id)===id); if(l) return {name:l.name,l:l.l,w:l.w,thick:l.thick,cost:l.cost||0,color:l.color,grainLen:l.grainLen,libRef:l.id}; }
   else if(ref.indexOf('cb:')===0){ const id=ref.slice(3); const b=(_cbCatalogue||[]).find(x=>String(x.id)===id); if(b){ const sz=String(b.sheet_size||'2440x1220').match(/(\d+)\s*[x×]\s*(\d+)/i); return {name:(b.thickness_mm+'mm '+b.board_name),l:sz?parseInt(sz[1]):2440,w:sz?parseInt(sz[2]):1220,thick:b.thickness_mm,cost:parseFloat(b.base_cost)||0,color:'#8aa',grainLen:false,libRef:null}; } }
+  else if(ref.indexOf('eg:')===0){ const code=ref.slice(3); const e=(_eggerCodes||[]).find(x=>String(x.egger_code)===code); return {name:code,l:2800,w:2070,thick:18,cost:e?parseFloat(e.price_retail)||0:0,color:'#c39b7b',grainLen:true,libRef:null}; }
   return null;
 }
 function openMatMapDialog(){
