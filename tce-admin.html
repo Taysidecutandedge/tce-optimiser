@@ -1159,7 +1159,7 @@ async function buildQuote() {
     grandEx += matTotal;
 
     const priceNote = autoPrice !== null
-      ? `£${autoPrice.toFixed(2)}/sheet${tier==='trade'?' (incl. 7%)':''}`
+      ? `£${boardPrice.toFixed(2)}/sheet${surcharge?` <span style="color:#f0a500">&rarr; £${(boardPrice*1.08).toFixed(2)} incl. +8%</span>`:''}${tier==='trade'?' (incl. 7%)':''}`
       : '<span style="color:#f87171">Not in price list</span>';
 
     rows += `

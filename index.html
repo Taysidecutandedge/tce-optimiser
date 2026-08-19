@@ -405,6 +405,7 @@ select option{background:var(--surf2)}
     <button class="btn btn-ghost btn-sm" onclick="exportCSV()">📤 Export CSV</button>
     <button class="btn btn-ghost btn-sm" id="dxfBtn" style="display:none" onclick="exportDXF()" title="Export each sheet layout as a DXF for CNC (Vectric etc.)">📐 Export DXF</button>
     <button class="btn btn-ghost btn-sm" onclick="openPrintLayout()">🖨 Print / Preview</button>
+    <button class="btn btn-ghost btn-sm" onclick="openPalletPlan()" title="Stacking plan for collection — bundles, pallet layout, weights & sizes for the haulier" style="border-color:#7a4d1f;color:#d9a066">📦 Pallet Plan</button>
     <button class="btn btn-ghost btn-sm" onclick="openApprovalSheet()" title="Clean item sheet to send the customer for sign-off — doors & panels, sizes, orientation & edged edges, no cut diagrams">✅ Customer Approval</button>
     <button class="btn btn-ghost btn-sm" onclick="openMaterialsOrder()" title="What to order per supplier for this job — board & roll stock already subtracted, ready to copy into an email or the supplier website">📋 Materials Order</button>
     <button class="btn btn-sm" id="cutModeBtn" style="background:var(--ok);color:#000;font-weight:700;display:none" onclick="openCuttingMode()">✂ Cutting Mode</button>
@@ -4022,6 +4023,220 @@ function closePrintLayout(){
   document.getElementById('printLayout').style.display='none';
   document.body.style.overflow='';
   if(window._optTitle) document.title=window._optTitle;   // restore app title
+}
+
+// ═══════════════════════════════════════════════
+// PALLET PLAN — stack the job's panels onto pallets for collection.
+// Bundles small panels (stacks of ~4, matched size), lays the big ones as a
+// base, packs up to a height/weight cap, and prints a build-order plan + a
+// weight/size manifest for the haulier.
+// ═══════════════════════════════════════════════
+let _palletCfg={ bundleMax:4, smallMax:900, stripNarrow:200, maxHeight:1000, maxWeight:1000 };
+function _boardDensity(name){                 // kg/m³
+  const s=String(name||'').toLowerCase();
+  if(/mdf/.test(s)) return 750;               // MDF / MR MDF / veneered-MDF core
+  if(/mfc|melamine|egger|kronospan|chip|particle|\b[uhwf]\d{3}/.test(s)) return 695;
+  if(/ply|birch|oak|ash|walnut|beech|timber|hardwood|softwood/.test(s)) return 680;
+  return 720;
+}
+function _panelWeightKg(l,w,thick,mat){ return (Number(l)||0)*(Number(w)||0)*(Number(thick)||18)*_boardDensity(mat)/1e9; }
+function _partSheetFor(p){ const mn=String(p.matName||'').toLowerCase().trim(); return jobSheets.find(js=>String(js.name||'').toLowerCase().trim()===mn)||null; }
+
+function buildPalletPlan(){
+  const cfg=_palletCfg;
+  // 1) expand parts into individual physical pieces, each with weight
+  const pieces=[];
+  (parts||[]).forEach(p=>{
+    const sh=_partSheetFor(p);
+    const thick=sh?sh.thick:(p.thick||18);
+    const mat=sh?sh.name:(p.matName||'');
+    const l=Math.max(Number(p.l)||Number(p.origL)||0,1), w=Math.max(Number(p.w)||Number(p.origW)||0,1);
+    const wt=_panelWeightKg(l,w,thick,mat);
+    const n=Math.max(1,parseInt(p.qty)||1);
+    for(let i=0;i<n;i++) pieces.push({label:p.label||'Panel',l,w,thick,mat,wt});
+  });
+  if(!pieces.length) return null;
+  // 2) categorise each piece:
+  //    strip = long & narrow (drawer stretchers, rails, fillers…) → bundled LOOSE for the truck floor, not on the pallet
+  //    small = fits a wrapped stack → bundled, on the pallet
+  //    large = a proper panel → laid flat as the base, biggest first
+  const isStrip=pc=>Math.min(pc.l,pc.w)<=cfg.stripNarrow && Math.max(pc.l,pc.w)>=500;
+  const isSmall=pc=>Math.max(pc.l,pc.w)<=cfg.smallMax;
+  const strips=[], smalls=[], larges=[];
+  pieces.forEach(pc=>{ if(isStrip(pc)) strips.push(pc); else if(isSmall(pc)) smalls.push(pc); else larges.push(pc); });
+  // 3) bundle helper — group matching size+thickness into chunks of bundleMax
+  const bundle=arr=>{ const groups={}, out=[];
+    const key=pc=>Math.round(pc.l/10)+'x'+Math.round(pc.w/10)+'x'+Math.round(pc.thick);
+    arr.forEach(pc=>{ (groups[key(pc)]=groups[key(pc)]||[]).push(pc); });
+    Object.values(groups).forEach(g=>{ for(let i=0;i<g.length;i+=cfg.bundleMax){ const c=g.slice(i,i+cfg.bundleMax);
+      out.push({l:Math.max(...c.map(x=>x.l)), w:Math.max(...c.map(x=>x.w)), h:c.reduce((a,x)=>a+x.thick,0),
+        wt:c.reduce((a,x)=>a+x.wt,0), count:c.length, contents:c.map(x=>x.label), label:c[0].label}); } });
+    return out; };
+  const smallBundles=bundle(smalls).map(b=>({kind:'bundle',...b}));
+  const stripBundles=bundle(strips);
+  // 4) pack the base panels + small bundles onto pallet(s); strips stay loose
+  const panelItems=larges.map(pc=>({kind:'panel', l:pc.l, w:pc.w, h:pc.thick, wt:pc.wt, count:1, label:pc.label, contents:[pc.label]})).sort((a,b)=>(b.l*b.w)-(a.l*a.w)||b.wt-a.wt);
+  const bundleItems=smallBundles.slice().sort((a,b)=>(b.l*b.w)-(a.l*a.w)||b.wt-a.wt);
+  const allItems=panelItems.concat(bundleItems);
+  const Fw=allItems.length?Math.max(...allItems.map(x=>x.w)):0, Fl=allItems.length?Math.max(...allItems.map(x=>x.l)):0;
+  // Pack the base PANELS first, then the wrapped BUNDLES — so panels form the lower levels and
+  // bundles sit on top, and no single level mixes a thin panel with a thick bundle.
+  const layers=[...(panelItems.length?_packLayers(panelItems,Fw,Fl):[]), ...(bundleItems.length?_packLayers(bundleItems,Fw,Fl):[])];
+  const pallets=_sliceToPallets(layers, cfg.maxHeight, cfg.maxWeight);
+  const stripsWeight=stripBundles.reduce((a,b)=>a+b.wt,0);
+  return {pallets, stripBundles, stripsWeight, Fw, Fl, totalPieces:pieces.length, cfg};
+}
+// Pack items into levels within a Fw (x) × Fl (y) footprint using free-rectangle (guillotine)
+// bin-packing. For each piece we search the free space of EVERY level already started — in either
+// orientation (grain is irrelevant once cut) — and drop it into the tightest gap that fits, so
+// pieces back-fill voids in earlier levels instead of opening new ones. A new level opens only
+// when a piece fits nowhere. Overhang allowed for anything bigger than the footprint.
+function _packLayers(items, Fw, Fl){
+  const levels=[];
+  const newLevel=()=>{ const L={placements:[],free:[{x:0,y:0,w:Fw,h:Fl}],height:0,weight:0}; levels.push(L); return L; };
+  const place=(L,rect,it,ox,oy)=>{
+    L.placements.push({x:rect.x,y:rect.y,l:oy,w:ox,label:it.label,kind:it.kind,count:it.count,wt:it.wt,contents:it.contents});
+    L.height=Math.max(L.height,it.h); L.weight+=it.wt;
+    const i=L.free.indexOf(rect); if(i>=0) L.free.splice(i,1);
+    const right={x:rect.x+ox, y:rect.y, w:rect.w-ox, h:oy};        // gap to the right of the piece
+    const bottom={x:rect.x, y:rect.y+oy, w:rect.w, h:rect.h-oy};   // gap below (full width of the rect)
+    if(right.w>1 && right.h>1) L.free.push(right);
+    if(bottom.w>1 && bottom.h>1) L.free.push(bottom);
+  };
+  for(const it of items){
+    let best=null;
+    for(const L of levels){ for(const rect of L.free){
+      [[it.w,it.l],[it.l,it.w]].forEach(([ox,oy])=>{
+        if(ox<=rect.w+1 && oy<=rect.h+1){ const leftover=Math.min(rect.w-ox, rect.h-oy);   // tightest short-side fit
+          if(!best || leftover<best.leftover) best={L,rect,ox,oy,leftover}; }
+      });
+    }}
+    if(best){ place(best.L,best.rect,it,best.ox,best.oy); }
+    else { const L=newLevel(); place(L,L.free[0],it,it.w,it.l); }   // fits nowhere → fresh level (overhang if huge)
+  }
+  return levels;
+}
+function _sliceToPallets(layers, maxH, maxW){
+  const pallets=[]; let cur=null;
+  const open=()=>{ cur={layers:[],height:0,weight:0,pieces:0}; pallets.push(cur); };
+  open();
+  for(const L of layers){
+    if(cur.layers.length && (cur.height+L.height>maxH || cur.weight+L.weight>maxW)) open();
+    cur.layers.push(L); cur.height+=L.height; cur.weight+=L.weight;
+    cur.pieces+=L.placements.reduce((a,p)=>a+(p.count||1),0);
+  }
+  pallets.forEach(pl=>{
+    const xs=pl.layers.flatMap(L=>L.placements.map(p=>p.x+p.w));
+    const ys=pl.layers.flatMap(L=>L.placements.map(p=>p.y+p.l));
+    pl.Fw=xs.length?Math.max(...xs):0; pl.Fl=ys.length?Math.max(...ys):0;
+  });
+  return pallets;
+}
+
+function openPalletPlan(){
+  if(!parts||!parts.length){ alert('No panels yet — import or add a cutlist first.'); return; }
+  renderPalletPlan();
+  const _jn=projectName||(jobSheets.length?jobSheets[0].name:'Job');
+  if(!window._optTitle) window._optTitle=document.title;
+  document.title=_jn+' - Pallet Plan';
+  document.getElementById('printLayout').style.display='block';
+  document.body.style.overflow='hidden';
+}
+function _palletSet(k,v){ const n=parseFloat(v); if(!isNaN(n)&&n>0) _palletCfg[k]=n; renderPalletPlan(); }
+function renderPalletPlan(){
+  const el=document.getElementById('printPages');
+  const plan=buildPalletPlan();
+  if(!plan){ el.innerHTML='<div style="padding:30px;font-family:Arial">No panels to plan.</div>'; return; }
+  el.innerHTML=_palletParamsBar()+_palletSummary(plan)
+    +plan.pallets.map((pl,i)=>_palletStackHtml(pl,i,plan.pallets.length)).join('')
+    +_looseStripsHtml(plan);
+}
+function _palletParamsBar(){
+  const c=_palletCfg;
+  const f=(k,lbl,val,step)=>`<label style="font:12px Arial;color:#333;white-space:nowrap">${lbl} <input type="number" value="${val}" step="${step||1}" min="1" onchange="_palletSet('${k}',this.value)" style="width:66px;padding:3px"></label>`;
+  return `<div class="no-print" style="padding:10px 18px;background:#f2f4f7;border-bottom:1px solid #ddd;display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+    <span style="font:700 12px Arial;color:#555">Settings:</span>
+    ${f('bundleMax','Bundle size',c.bundleMax)}${f('smallMax','Bundle if ≤ (mm)',c.smallMax,10)}${f('stripNarrow','Loose strip if ≤ wide (mm)',c.stripNarrow,10)}${f('maxWeight','Max pallet wt (kg)',c.maxWeight,50)}${f('maxHeight','Max height (mm)',c.maxHeight,50)}
+    <span style="font:11px Arial;color:#888">weights are estimates — tune the caps to suit your forklift / haulier</span>
+  </div>`;
+}
+function _palletSummary(plan){
+  const rows=plan.pallets.map((pl,i)=>`<tr>
+    <td style="border:1px solid #ccc;padding:3px 8px">Pallet ${i+1}</td>
+    <td style="border:1px solid #ccc;padding:3px 8px">${Math.round(pl.Fw)} × ${Math.round(pl.Fl)}mm</td>
+    <td style="border:1px solid #ccc;padding:3px 8px">~${Math.round(pl.height+150)}mm</td>
+    <td style="border:1px solid #ccc;padding:3px 8px">${pl.pieces}</td>
+    <td style="border:1px solid #ccc;padding:3px 8px">~${Math.round(pl.weight+25)}kg</td></tr>`).join('');
+  const stripCount=plan.stripBundles.reduce((a,b)=>a+b.count,0);
+  const looseRow=plan.stripBundles.length?`<tr>
+    <td style="border:1px solid #ccc;padding:3px 8px">Loose strips</td>
+    <td style="border:1px solid #ccc;padding:3px 8px">${plan.stripBundles.length} bundle${plan.stripBundles.length!==1?'s':''} · truck floor</td>
+    <td style="border:1px solid #ccc;padding:3px 8px">—</td>
+    <td style="border:1px solid #ccc;padding:3px 8px">${stripCount}</td>
+    <td style="border:1px solid #ccc;padding:3px 8px">~${Math.round(plan.stripsWeight)}kg</td></tr>`:'';
+  const tot=Math.round(plan.pallets.reduce((a,p)=>a+p.weight+25,0)+plan.stripsWeight);
+  return `<div style="padding:14px 18px;font-family:Arial">
+    <div style="font:800 17px Arial">Pallet plan — ${esc(projectName||'job')}</div>
+    <div style="font:12px Arial;color:#555;margin:2px 0 8px">For the haulier: <b>${plan.pallets.length} pallet${plan.pallets.length!==1?'s':''}</b>${plan.stripBundles.length?' + loose long strips':''}, ~${tot}kg total.</div>
+    <table style="border-collapse:collapse;font:12px Arial"><thead><tr style="background:#eee">${['','Footprint','Height','Pieces','Gross wt'].map(h=>'<th style="border:1px solid #ccc;padding:3px 8px;text-align:left">'+h+'</th>').join('')}</tr></thead><tbody>${rows}${looseRow}</tbody></table>
+  </div>`;
+}
+// group identical panels (label + size) with a qty, biggest first
+function _groupPanels(items){
+  const g={};
+  items.forEach(it=>{ const k=it.label+'|'+Math.round(it.w)+'x'+Math.round(it.l);
+    if(!g[k]) g[k]={label:it.label,w:it.w,l:it.l,qty:0}; g[k].qty++; });
+  return Object.values(g).sort((a,b)=>(b.l*b.w)-(a.l*a.w));
+}
+function _layerSig(L){ return L.placements.slice().sort((a,b)=>a.y-b.y||a.x-b.x).map(p=>p.label+':'+Math.round(p.w)+'x'+Math.round(p.l)).join('|'); }
+function _palletDiagrams(pl){
+  // merge consecutive identical levels so same-size panels show as one "piled ×N" box, not dozens
+  const merged=[]; pl.layers.forEach(L=>{ const sig=_layerSig(L); const last=merged[merged.length-1];
+    if(last&&last.sig===sig) last.count++; else merged.push({sig,L,count:1}); });
+  const scale=Math.min(300/Math.max(pl.Fw,1), 420/Math.max(pl.Fl,1), 0.4);
+  return merged.map((m,idx)=>{
+    const L=m.L, w=Math.max(Math.round(pl.Fw*scale),36), h=Math.max(Math.round(pl.Fl*scale),36);
+    const rects=L.placements.map(p=>{
+      const x=Math.round(p.x*scale), y=Math.round(p.y*scale), pw=Math.max(Math.round(p.w*scale),8), ph=Math.max(Math.round(p.l*scale),8);
+      const fill=p.kind==='bundle'?'#eef4dd':'#dce9f7', stroke=p.kind==='bundle'?'#7a9a3a':'#3a6ea5';
+      return `<g><rect x="${x}" y="${y}" width="${pw}" height="${ph}" fill="${fill}" stroke="${stroke}" stroke-width="1.4"/>`+
+        `<text x="${x+pw/2}" y="${y+ph/2}" font-size="8" text-anchor="middle" dominant-baseline="middle" fill="#222" font-family="Arial">${esc(String(p.label||'').slice(0,14))}${p.kind==='bundle'?' ×'+p.count:''}</text></g>`;
+    }).join('');
+    return `<div style="display:inline-block;vertical-align:top;margin:4px 10px 4px 0;text-align:center">
+      <div style="font:600 10px Arial;color:#555;margin-bottom:2px">Level ${idx+1}${m.count>1?' · ×'+m.count+' piled':''}</div>
+      <svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="border:1px solid #999;background:#fafafa">${rects}</svg>
+    </div>`;
+  }).join('');
+}
+function _palletStackHtml(pl,i,n){
+  const placements=pl.layers.flatMap(L=>L.placements);
+  const panels=placements.filter(p=>p.kind==='panel');
+  const bundles=placements.filter(p=>p.kind==='bundle').sort((a,b)=>(b.l*b.w)-(a.l*a.w));
+  const panelRows=_groupPanels(panels).map(g=>`<li>${esc(g.label)} — ${Math.round(g.w)}×${Math.round(g.l)}mm${g.qty>1?' ×'+g.qty:''}</li>`).join('');
+  const bundleRows=bundles.map(b=>`<li>${esc(b.label)} — ${Math.round(b.w)}×${Math.round(b.l)}mm · wrapped ×${b.count}</li>`).join('');
+  return `<div style="padding:14px 18px;font-family:Arial;page-break-before:${i===0?'auto':'always'}">
+    <div style="font:800 16px Arial">Pallet ${i+1} of ${n}</div>
+    <div style="font:13px Arial;color:#333;margin:3px 0 10px">Footprint ${Math.round(pl.Fw)} × ${Math.round(pl.Fl)}mm (your biggest panel) · stack ~${Math.round(pl.height)}mm · ${pl.pieces} pieces · ~${Math.round(pl.weight+25)}kg gross</div>
+    <div style="font:700 13px Arial;color:#2a6">▼ Base — lay these flat, biggest at the bottom:</div>
+    <ul style="font:12px Arial;color:#222;margin:4px 0 12px 18px;columns:2;-webkit-columns:2">${panelRows||'<li>(none)</li>'}</ul>
+    ${bundles.length?`<div style="font:700 13px Arial;color:#7a9a3a">▲ Wrapped bundles — stack on top:</div>
+    <ul style="font:12px Arial;color:#222;margin:4px 0 12px 18px;columns:2;-webkit-columns:2">${bundleRows}</ul>`:''}
+    <div style="font:700 12px Arial;color:#555;margin-top:8px">Layout (top-down, build bottom-up):</div>
+    <div style="font:11px Arial;color:#888;margin-bottom:6px">Each box is a panel seen from above · side-by-side boxes share a level · levels stack up (panels first, bundles on top) · <span style="color:#3a6ea5">blue = panel</span>, <span style="color:#7a9a3a">green = wrapped bundle</span>. Pieces are rotated to fill gaps where they fit. Any leftover voids — pack with offcuts to support the level above.</div>
+    ${_palletDiagrams(pl)}
+  </div>`;
+}
+function _looseStripsHtml(plan){
+  if(!plan.stripBundles||!plan.stripBundles.length) return '';
+  const rows=plan.stripBundles.slice().sort((a,b)=>Math.max(b.l,b.w)-Math.max(a.l,a.w)).map(b=>`<tr>
+    <td style="border:1px solid #ccc;padding:3px 6px">${esc(b.label)}</td>
+    <td style="border:1px solid #ccc;padding:3px 6px">${Math.round(b.w)}×${Math.round(b.l)}mm</td>
+    <td style="border:1px solid #ccc;padding:3px 6px">×${b.count}</td></tr>`).join('');
+  return `<div style="padding:14px 18px;font-family:Arial;page-break-before:always">
+    <div style="font:800 15px Arial">Loose long strips</div>
+    <div style="font:12px Arial;color:#555;margin:2px 0 8px">Bundle these and lay them loose on top or on the truck floor — too long/narrow to stack on the pallet. ~${Math.round(plan.stripsWeight)}kg total.</div>
+    <table style="border-collapse:collapse;font:11px Arial"><thead><tr style="background:#eee">${['Item','Size','Qty'].map(h=>'<th style="border:1px solid #ccc;padding:3px 6px;text-align:left">'+h+'</th>').join('')}</tr></thead><tbody>${rows}</tbody></table>
+  </div>`;
 }
 
 // ═══════════════════════════════════════════════
