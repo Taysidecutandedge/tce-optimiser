@@ -72,8 +72,11 @@
     <span class="printstat" id="printStat"></span>
     <span class="printstat" id="pendStat" style="color:#e6a23c;cursor:pointer" onclick="pollPendingOffcuts()" title="Print queued offcut labels now"></span>
   </div>
-  <div class="now" id="now">
-    <div class="waiting">Waiting for the next cut…</div>
+  <div style="display:flex;align-items:flex-start;gap:18px">
+    <div class="now" id="now" style="flex:1;min-width:0">
+      <div class="waiting">Waiting for the next cut…</div>
+    </div>
+    <div id="sheetMap" style="display:none;flex:0 0 auto;padding:12px 14px;background:#15171e;border:1px solid #2a2e38;border-radius:12px;margin:10px 12px 0 0"></div>
   </div>
   <div class="recent">
     <h2>Recent — tap Reprint if a label is damaged</h2>
@@ -195,6 +198,9 @@ function handleConfirm(r, fromRealtime){
   if(!r || !r.id) return;
   // Offcut fully cut on the saw side → prompt HERE (the offloader's screen) to log the remainder.
   if(r.action==='offcut_remainder'){ if(_seenIds.has(r.id))return; _seenIds.add(r.id); showRemainderPrompt(r.panel||{}); return; }
+  // Saw has moved onto a sheet → show that sheet's layout so the offloader can see the
+  // whole board: what's already cut, what's still to come off it.
+  if(r.action==='sheet_layout'){ if(_seenIds.has(r.id))return; _seenIds.add(r.id); setSheetMap(r.panel||{}); return; }
   if(r.action!=='confirm' && r.action!=='reprint') return;
   if(_seenIds.has(r.id)) return;                 // already handled this exact row — never twice
   _seenIds.add(r.id);
@@ -219,7 +225,7 @@ async function pollCutEvents(){
   if(_cutPollBusy) return; _cutPollBusy=true;
   try{
     const since=new Date(Date.now()-15*60000).toISOString();
-    const {data}=await sb.from('tce_cut_events').select('*').in('action',['confirm','reprint']).gte('created_at',since).order('id',{ascending:true}).limit(200);
+    const {data}=await sb.from('tce_cut_events').select('*').in('action',['confirm','reprint','sheet_layout']).gte('created_at',since).order('id',{ascending:true}).limit(200);
     if(data) for(const r of data) handleConfirm(r,false);   // dedup gate stops any re-print
   }catch(e){}
   _cutPollBusy=false;
@@ -243,7 +249,7 @@ async function startApp(){
     // Load recent history: remember every id so the backup poll won't reprint it,
     // but only auto-print things that arrive AFTER we're up (via realtime/poll).
     const since=new Date(Date.now()-15*60000).toISOString();
-    const {data}=await sb.from('tce_cut_events').select('*').in('action',['confirm','reprint']).gte('created_at',since).order('id',{ascending:true}).limit(200);
+    const {data}=await sb.from('tce_cut_events').select('*').in('action',['confirm','reprint','sheet_layout']).gte('created_at',since).order('id',{ascending:true}).limit(200);
     if(data&&data.length){
       data.forEach(r=>{ _seenIds.add(r.id); if(r.id>_lastCutId)_lastCutId=r.id; });
       data.slice(-10).forEach(r=>pushRecent(r,false));
@@ -288,9 +294,57 @@ function subscribe(){
     });
 }
 
+// ── Live sheet map ─────────────────────────────────────────────────────────
+// Mirrors the saw screen: the sheet being broken down, what's cut, what's still to
+// come off it — so a big piece landing on the bench is obviously "more to cut from this"
+// rather than a mystery until its label prints.
+let _sheetMap=null;                 // {sheetIdx,sheetName,fullL,fullW,placements[],totalSheets}
+let _sheetDone=new Set();           // "x,y" of panels confirmed on the current sheet
+function setSheetMap(m){
+  if(!m||!m.placements) return;
+  if(!_sheetMap || _sheetMap.sheetIdx!==m.sheetIdx) _sheetDone=new Set();
+  _sheetMap=m;
+  (m.done||[]).forEach(k=>_sheetDone.add(String(k)));
+  drawSheetMap();
+}
+function markSheetDone(p){
+  if(!_sheetMap||p==null||p.x==null) return;
+  if(p.sheetIdx!=null && _sheetMap.sheetIdx!=null && p.sheetIdx!==_sheetMap.sheetIdx) return;
+  _sheetDone.add(Math.round(p.x)+','+Math.round(p.y));
+  drawSheetMap();
+}
+function drawSheetMap(){
+  const box=document.getElementById('sheetMap'); if(!box) return;
+  const m=_sheetMap;
+  if(!m){ box.innerHTML=''; box.style.display='none'; return; }
+  box.style.display='block';
+  const L=m.fullL||2440, W=m.fullW||1220;
+  const maxH=460, sc=Math.min(maxH/L, 250/W);
+  const sw=Math.max(Math.round(W*sc),60), sh=Math.max(Math.round(L*sc),60);
+  const cur=_current||{};
+  let todo=0;
+  const rects=(m.placements||[]).map(pl=>{
+    const key=Math.round(pl.x)+','+Math.round(pl.y);
+    const isDone=_sheetDone.has(key);
+    const isCur=cur.x!=null && Math.round(cur.x)===Math.round(pl.x) && Math.round(cur.y)===Math.round(pl.y);
+    if(!isDone) todo++;
+    const x=Math.round(pl.x*sc), y=Math.round(pl.y*sc), w=Math.max(Math.round(pl.w*sc),3), h=Math.max(Math.round(pl.h*sc),3);
+    const fill=isCur?'#d4820a':(isDone?'#27ae60':'#3a3f4a'), stroke=isCur?'#fff':(isDone?'#1a7a40':'#5a616e');
+    const showTxt=w>34&&h>16;
+    return `<g><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`+
+      (showTxt?`<text x="${x+w/2}" y="${y+h/2}" font-size="${Math.max(7,Math.min(11,w/6))}" text-anchor="middle" dominant-baseline="middle" fill="#fff" font-family="Arial">${isDone?'✓ ':''}${esc(String(pl.label||'').slice(0,12))}</text>`:'')+
+      '</g>';
+  }).join('');
+  box.innerHTML=
+    `<div style="font:700 12px system-ui;color:#a8b0bd;margin-bottom:6px">SHEET ${(m.sheetIdx||0)+1}${m.totalSheets?' / '+m.totalSheets:''} · ${esc(m.sheetName||'')}</div>`+
+    `<svg width="${sw}" height="${sh}" viewBox="0 0 ${sw} ${sh}" style="background:#0f1116;border:1px solid #2a2e38;border-radius:6px">${rects}</svg>`+
+    `<div style="font:12px system-ui;color:${todo?'#e6a23c':'#7fe3a8'};margin-top:6px;font-weight:700">${todo?todo+' still to cut from this sheet':'sheet complete ✓'}</div>`+
+    `<div style="font:10px system-ui;color:#6b7280;margin-top:3px"><span style="color:#d4820a">■</span> on saw &nbsp;<span style="color:#27ae60">■</span> cut &nbsp;<span style="color:#5a616e">■</span> to come</div>`;
+}
 function render(r){
   const p=(r&&r.panel)||{};
   _current=p;
+  markSheetDone(p);
   const ebSides=['L1','L2','W1','W2'].filter(s=>p.eb&&p.eb[s]);
   const tk=s=>(p.eb&&p.eb.tk&&p.eb.tk[s])||'1';
   const code=t=>t==='2'?' (O)':(t==='0.6'?' (P)':'');

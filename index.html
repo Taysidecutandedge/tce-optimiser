@@ -4875,6 +4875,24 @@ function cmStep(dir){
   _cmIdx=idx; cmRender();
 }
 
+// Mirror the sheet being broken down to the print station, so the offloader can see the whole
+// sheet — what's cut, what's coming — instead of only learning about a panel when its label
+// prints. Published when the saw moves onto a different sheet (and on open).
+let _cmPublishedSheet=null;
+async function cmPublishSheetLayout(si){
+  try{
+    if(!_sbToken) return;
+    if(si==null || !_lastSheets || !_lastSheets[si]) return;
+    const sheet=_lastSheets[si];
+    const done=[];
+    _cmPanels.forEach((cp,i)=>{ if(cp.sheetIdx===si && _cmDone.has(i)) done.push(Math.round(cp.x)+','+Math.round(cp.y)); });
+    const body={ session_id:_cmSession||(projectName||'job'), action:'sheet_layout',
+      panel:{ sheetIdx:si, sheetName:sheet.name, fullL:sheet.fullL, fullW:sheet.fullW, uw:sheet.uw, uh:sheet.uh,
+        totalSheets:_lastSheets.length, company:projectName||'', done,
+        placements:(sheet.placements||[]).map(pl=>({label:pl.label, x:pl.x, y:pl.y, w:pl.w, h:pl.h, origL:pl.origL, origW:pl.origW})) } };
+    await fetch(SB_URL+'/rest/v1/tce_cut_events',{method:'POST',headers:{...sbAuthH(),'Prefer':'return=minimal'},body:JSON.stringify(body)}).catch(()=>{});
+  }catch(e){}
+}
 async function cmEmitCutEvent(p, opts){
   // Fire-and-forget: publish this confirmed panel to the offload screen.
   // Fully wrapped so it can NEVER affect cutting if anything fails (offline, error).
@@ -4898,6 +4916,7 @@ async function cmEmitCutEvent(p, opts){
         label:p.label, origL:p.origL, origW:p.origW,
         eb:p.eb, grain:p.grain, company:p.company||projectName||'',
         sheetName:p.sheetName, sheetIdx:p.sheetIdx,
+        x:p.x, y:p.y, w:p.w, h:p.h,          // position on the sheet → station marks it off on the map
         panelNum:_pNum, panelTotal:_pTotal,
         _lam:p._lam||false, _lamRole:p._lamRole||null, _finL:p._finL, _finW:p._finW, _lamOv:p._lamOv, _ebLabel:p._ebLabel||null,
         door:_shakerDoorForPanel(p)
@@ -5052,6 +5071,8 @@ function cmRender(){
 
   const p=_cmPanels[_cmIdx];
   const confirmed=_cmDone.has(_cmIdx);
+  // Moved onto a different sheet → mirror that sheet's layout to the print station
+  if(p.sheetIdx!==_cmPublishedSheet){ _cmPublishedSheet=p.sheetIdx; cmPublishSheetLayout(p.sheetIdx); }
 
   // Fence
   const fence=p.w;
