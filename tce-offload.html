@@ -201,6 +201,9 @@ function handleConfirm(r, fromRealtime){
   // Saw has moved onto a sheet → show that sheet's layout so the offloader can see the
   // whole board: what's already cut, what's still to come off it.
   if(r.action==='sheet_layout'){ if(_seenIds.has(r.id))return; _seenIds.add(r.id); setSheetMap(r.panel||{}); return; }
+  // Saw operator has moved onto a panel (not cut yet) → highlight it so the offloader can see
+  // which one is being worked on right now.
+  if(r.action==='sheet_focus'){ if(_seenIds.has(r.id))return; _seenIds.add(r.id); setSheetFocus(r.panel||{}); return; }
   if(r.action!=='confirm' && r.action!=='reprint') return;
   if(_seenIds.has(r.id)) return;                 // already handled this exact row — never twice
   _seenIds.add(r.id);
@@ -225,7 +228,7 @@ async function pollCutEvents(){
   if(_cutPollBusy) return; _cutPollBusy=true;
   try{
     const since=new Date(Date.now()-15*60000).toISOString();
-    const {data}=await sb.from('tce_cut_events').select('*').in('action',['confirm','reprint','sheet_layout']).gte('created_at',since).order('id',{ascending:true}).limit(200);
+    const {data}=await sb.from('tce_cut_events').select('*').in('action',['confirm','reprint','sheet_layout','sheet_focus']).gte('created_at',since).order('id',{ascending:true}).limit(200);
     if(data) for(const r of data) handleConfirm(r,false);   // dedup gate stops any re-print
   }catch(e){}
   _cutPollBusy=false;
@@ -249,7 +252,7 @@ async function startApp(){
     // Load recent history: remember every id so the backup poll won't reprint it,
     // but only auto-print things that arrive AFTER we're up (via realtime/poll).
     const since=new Date(Date.now()-15*60000).toISOString();
-    const {data}=await sb.from('tce_cut_events').select('*').in('action',['confirm','reprint','sheet_layout']).gte('created_at',since).order('id',{ascending:true}).limit(200);
+    const {data}=await sb.from('tce_cut_events').select('*').in('action',['confirm','reprint','sheet_layout','sheet_focus']).gte('created_at',since).order('id',{ascending:true}).limit(200);
     if(data&&data.length){
       data.forEach(r=>{ _seenIds.add(r.id); if(r.id>_lastCutId)_lastCutId=r.id; });
       data.slice(-10).forEach(r=>pushRecent(r,false));
@@ -300,6 +303,7 @@ function subscribe(){
 // rather than a mystery until its label prints.
 let _sheetMap=null;                 // {sheetIdx,sheetName,fullL,fullW,placements[],totalSheets}
 let _sheetDone=new Set();           // "x,y" of panels confirmed on the current sheet
+let _sheetFocus=null;               // panel selected on the saw right now (not cut yet)
 function setSheetMap(m){
   if(!m||!m.placements) return;
   if(!_sheetMap || _sheetMap.sheetIdx!==m.sheetIdx) _sheetDone=new Set();
@@ -307,6 +311,7 @@ function setSheetMap(m){
   (m.done||[]).forEach(k=>_sheetDone.add(String(k)));
   drawSheetMap();
 }
+function setSheetFocus(f){ _sheetFocus=(f&&f.x!=null)?f:null; drawSheetMap(); }
 function markSheetDone(p){
   if(!_sheetMap||p==null||p.x==null) return;
   if(p.sheetIdx!=null && _sheetMap.sheetIdx!=null && p.sheetIdx!==_sheetMap.sheetIdx) return;
@@ -321,25 +326,27 @@ function drawSheetMap(){
   const L=m.fullL||2440, W=m.fullW||1220;
   const maxH=460, sc=Math.min(maxH/L, 250/W);
   const sw=Math.max(Math.round(W*sc),60), sh=Math.max(Math.round(L*sc),60);
-  const cur=_current||{};
+  // "on saw now" = the panel selected on the iPad (sheet_focus); falls back to the last
+  // confirmed panel if no focus has arrived (e.g. older saw-side build).
+  const foc=(_sheetFocus&&(_sheetFocus.sheetIdx==null||m.sheetIdx==null||_sheetFocus.sheetIdx===m.sheetIdx))?_sheetFocus:(_current||{});
   let todo=0;
   const rects=(m.placements||[]).map(pl=>{
     const key=Math.round(pl.x)+','+Math.round(pl.y);
     const isDone=_sheetDone.has(key);
-    const isCur=cur.x!=null && Math.round(cur.x)===Math.round(pl.x) && Math.round(cur.y)===Math.round(pl.y);
+    const isCur=foc.x!=null && Math.round(foc.x)===Math.round(pl.x) && Math.round(foc.y)===Math.round(pl.y);
     if(!isDone) todo++;
     const x=Math.round(pl.x*sc), y=Math.round(pl.y*sc), w=Math.max(Math.round(pl.w*sc),3), h=Math.max(Math.round(pl.h*sc),3);
     const fill=isCur?'#d4820a':(isDone?'#27ae60':'#3a3f4a'), stroke=isCur?'#fff':(isDone?'#1a7a40':'#5a616e');
     const showTxt=w>34&&h>16;
-    return `<g><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`+
-      (showTxt?`<text x="${x+w/2}" y="${y+h/2}" font-size="${Math.max(7,Math.min(11,w/6))}" text-anchor="middle" dominant-baseline="middle" fill="#fff" font-family="Arial">${isDone?'✓ ':''}${esc(String(pl.label||'').slice(0,12))}</text>`:'')+
+    return `<g><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}" stroke="${stroke}" stroke-width="${isCur?3:1.5}"/>`+
+      (showTxt?`<text x="${x+w/2}" y="${y+h/2}" font-size="${Math.max(7,Math.min(11,w/6))}" text-anchor="middle" dominant-baseline="middle" fill="#fff" font-family="Arial">${isCur?'▶ ':(isDone?'✓ ':'')}${esc(String(pl.label||'').slice(0,12))}</text>`:'')+
       '</g>';
   }).join('');
   box.innerHTML=
     `<div style="font:700 12px system-ui;color:#a8b0bd;margin-bottom:6px">SHEET ${(m.sheetIdx||0)+1}${m.totalSheets?' / '+m.totalSheets:''} · ${esc(m.sheetName||'')}</div>`+
     `<svg width="${sw}" height="${sh}" viewBox="0 0 ${sw} ${sh}" style="background:#0f1116;border:1px solid #2a2e38;border-radius:6px">${rects}</svg>`+
     `<div style="font:12px system-ui;color:${todo?'#e6a23c':'#7fe3a8'};margin-top:6px;font-weight:700">${todo?todo+' still to cut from this sheet':'sheet complete ✓'}</div>`+
-    `<div style="font:10px system-ui;color:#6b7280;margin-top:3px"><span style="color:#d4820a">■</span> on saw &nbsp;<span style="color:#27ae60">■</span> cut &nbsp;<span style="color:#5a616e">■</span> to come</div>`;
+    `<div style="font:10px system-ui;color:#6b7280;margin-top:3px"><span style="color:#d4820a">■</span> ▶ on the saw now &nbsp;<span style="color:#27ae60">■</span> ✓ cut &nbsp;<span style="color:#5a616e">■</span> to come</div>`;
 }
 function render(r){
   const p=(r&&r.panel)||{};

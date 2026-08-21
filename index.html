@@ -4893,6 +4893,20 @@ async function cmPublishSheetLayout(si){
     await fetch(SB_URL+'/rest/v1/tce_cut_events',{method:'POST',headers:{...sbAuthH(),'Prefer':'return=minimal'},body:JSON.stringify(body)}).catch(()=>{});
   }catch(e){}
 }
+// Tell the station which panel is selected on the saw RIGHT NOW (before it's confirmed), so
+// the offloader can see what's being worked on, not just what's already been cut.
+let _cmFocusKey=null;
+async function cmPublishFocus(p){
+  try{
+    if(!_sbToken||!p) return;
+    const key=p.sheetIdx+','+Math.round(p.x)+','+Math.round(p.y);
+    if(key===_cmFocusKey) return;               // only when the selection actually moves
+    _cmFocusKey=key;
+    const body={ session_id:_cmSession||(projectName||'job'), action:'sheet_focus',
+      panel:{ sheetIdx:p.sheetIdx, x:p.x, y:p.y, label:p.label, origL:p.origL, origW:p.origW } };
+    await fetch(SB_URL+'/rest/v1/tce_cut_events',{method:'POST',headers:{...sbAuthH(),'Prefer':'return=minimal'},body:JSON.stringify(body)}).catch(()=>{});
+  }catch(e){}
+}
 async function cmEmitCutEvent(p, opts){
   // Fire-and-forget: publish this confirmed panel to the offload screen.
   // Fully wrapped so it can NEVER affect cutting if anything fails (offline, error).
@@ -5073,6 +5087,7 @@ function cmRender(){
   const confirmed=_cmDone.has(_cmIdx);
   // Moved onto a different sheet → mirror that sheet's layout to the print station
   if(p.sheetIdx!==_cmPublishedSheet){ _cmPublishedSheet=p.sheetIdx; cmPublishSheetLayout(p.sheetIdx); }
+  cmPublishFocus(p);   // highlight the panel you're on now, live on the station
 
   // Fence
   const fence=p.w;
