@@ -37,6 +37,11 @@
   .sheet-line{font-size:clamp(14px,3vw,22px);color:var(--txt2);font-family:monospace}
   .panel-num{font-size:clamp(14px,3vw,20px);color:var(--txt3)}
   .reprint-now{margin-top:10px;padding:12px 22px;font-size:clamp(15px,3.4vw,20px);font-weight:700;border:1px solid var(--brd);border-radius:10px;background:var(--surf2);color:var(--txt);cursor:pointer}
+  /* Full-height working area: panel + recent on the left, live sheet map filling the right —
+     no dead space at the bottom, and the map big enough to read across the workshop. */
+  .mainrow{flex:1;display:flex;gap:14px;min-height:0;padding:0 12px 10px 0}
+  .maincol{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+  #sheetMap{display:none;flex:0 0 auto;padding:12px 14px;background:var(--surf);border:1px solid var(--brd);border-radius:12px;margin-top:10px;align-self:stretch;overflow:auto}
   .recent{flex-shrink:0;border-top:1px solid var(--brd);background:var(--surf);padding:8px 12px;max-height:26vh;overflow:auto}
   .recent h2{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--txt3);margin:0 0 6px}
   .rrow{display:flex;gap:10px;align-items:center;font-size:13px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04);color:var(--txt2)}
@@ -72,15 +77,17 @@
     <span class="printstat" id="printStat"></span>
     <span class="printstat" id="pendStat" style="color:#e6a23c;cursor:pointer" onclick="pollPendingOffcuts()" title="Print queued offcut labels now"></span>
   </div>
-  <div style="display:flex;align-items:flex-start;gap:18px">
-    <div class="now" id="now" style="flex:1;min-width:0">
-      <div class="waiting">Waiting for the next cut…</div>
+  <div class="mainrow">
+    <div class="maincol">
+      <div class="now" id="now">
+        <div class="waiting">Waiting for the next cut…</div>
+      </div>
+      <div class="recent">
+        <h2>Recent — tap Reprint if a label is damaged</h2>
+        <div id="recentList"></div>
+      </div>
     </div>
-    <div id="sheetMap" style="display:none;flex:0 0 auto;padding:12px 14px;background:#15171e;border:1px solid #2a2e38;border-radius:12px;margin:10px 12px 0 0"></div>
-  </div>
-  <div class="recent">
-    <h2>Recent — tap Reprint if a label is damaged</h2>
-    <div id="recentList"></div>
+    <div id="sheetMap"></div>
   </div>
 </div>
 
@@ -312,6 +319,8 @@ function setSheetMap(m){
   drawSheetMap();
 }
 function setSheetFocus(f){ _sheetFocus=(f&&f.x!=null)?f:null; drawSheetMap(); }
+let _mapRT=null;
+window.addEventListener('resize',()=>{ clearTimeout(_mapRT); _mapRT=setTimeout(drawSheetMap,150); });   // re-fit the map
 function markSheetDone(p){
   if(!_sheetMap||p==null||p.x==null) return;
   if(p.sheetIdx!=null && _sheetMap.sheetIdx!=null && p.sheetIdx!==_sheetMap.sheetIdx) return;
@@ -324,7 +333,11 @@ function drawSheetMap(){
   if(!m){ box.innerHTML=''; box.style.display='none'; return; }
   box.style.display='block';
   const L=m.fullL||2440, W=m.fullW||1220;
-  const maxH=460, sc=Math.min(maxH/L, 250/W);
+  // Fill the height that's actually available (minus topbar/heading/legend), and allow up to a
+  // third of the screen width — so the map is as big as the station can show it.
+  const maxH=Math.max(320, (window.innerHeight||800)-190);
+  const maxW=Math.max(240, Math.min((window.innerWidth||1200)*0.34, 620));
+  const sc=Math.min(maxH/L, maxW/W);
   const sw=Math.max(Math.round(W*sc),60), sh=Math.max(Math.round(L*sc),60);
   // "on saw now" = the panel selected on the iPad (sheet_focus); falls back to the last
   // confirmed panel if no focus has arrived (e.g. older saw-side build).
@@ -337,9 +350,13 @@ function drawSheetMap(){
     if(!isDone) todo++;
     const x=Math.round(pl.x*sc), y=Math.round(pl.y*sc), w=Math.max(Math.round(pl.w*sc),3), h=Math.max(Math.round(pl.h*sc),3);
     const fill=isCur?'#d4820a':(isDone?'#27ae60':'#3a3f4a'), stroke=isCur?'#fff':(isDone?'#1a7a40':'#5a616e');
-    const showTxt=w>34&&h>16;
+    const showTxt=w>30&&h>14;
+    const fs=Math.max(8,Math.min(15,w/7,h/2.2));
+    const chars=Math.max(6,Math.floor(w/(fs*0.58)));
+    const nm=String(pl.label||''); const txt=(isCur?'▶ ':(isDone?'✓ ':''))+(nm.length>chars?nm.slice(0,chars-1)+'…':nm);
+    const dim=(h>fs*3.2&&w>fs*4)?`<text x="${x+w/2}" y="${y+h/2+fs*1.1}" font-size="${Math.round(fs*0.8)}" text-anchor="middle" fill="#cfd6e0" font-family="Arial">${Math.round(pl.origL||pl.h)}×${Math.round(pl.origW||pl.w)}</text>`:'';
     return `<g><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}" stroke="${stroke}" stroke-width="${isCur?3:1.5}"/>`+
-      (showTxt?`<text x="${x+w/2}" y="${y+h/2}" font-size="${Math.max(7,Math.min(11,w/6))}" text-anchor="middle" dominant-baseline="middle" fill="#fff" font-family="Arial">${isCur?'▶ ':(isDone?'✓ ':'')}${esc(String(pl.label||'').slice(0,12))}</text>`:'')+
+      (showTxt?`<text x="${x+w/2}" y="${y+h/2}" font-size="${fs}" font-weight="${isCur?'700':'400'}" text-anchor="middle" dominant-baseline="middle" fill="#fff" font-family="Arial">${esc(txt)}</text>`+dim:'')+
       '</g>';
   }).join('');
   box.innerHTML=
