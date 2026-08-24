@@ -408,6 +408,7 @@ select option{background:var(--surf2)}
     <button class="btn btn-ghost btn-sm" onclick="openPalletPlan()" title="Stacking plan for collection — bundles, pallet layout, weights & sizes for the haulier" style="border-color:#7a4d1f;color:#d9a066">📦 Pallet Plan</button>
     <button class="btn btn-ghost btn-sm" onclick="openApprovalSheet()" title="Clean item sheet to send the customer for sign-off — doors & panels, sizes, orientation & edged edges, no cut diagrams">✅ Customer Approval</button>
     <button class="btn btn-ghost btn-sm" onclick="openMaterialsOrder()" title="What to order per supplier for this job — board & roll stock already subtracted, ready to copy into an email or the supplier website">📋 Materials Order</button>
+    <button class="btn btn-ghost btn-sm" onclick="recoverNestFromCloud()" title="Mid-job and the cut plan is missing (refreshed, different device)? Rebuild the layout you were cutting from the cloud — without re-nesting." style="border-color:#8a6d3b;color:#d9a066">⟲ Recover Cut Plan</button>
     <button class="btn btn-sm" id="cutModeBtn" style="background:var(--ok);color:#000;font-weight:700;display:none" onclick="openCuttingMode()">✂ Cutting Mode</button>
     <button class="btn btn-sm" id="labelBtn" style="background:#9c27b0;color:#fff;font-weight:700;display:none" onclick="openLabelPrint()">🏷 Print Labels</button>
       <a href="tce-admin.html" target="_blank" style="background:#1a2a3a;color:#8ab;border:1px solid #2b4a40;border-radius:6px;padding:7px 14px;cursor:pointer;font-size:12px;text-decoration:none;display:inline-flex;align-items:center;gap:5px">🔒 Admin</a>
@@ -1240,6 +1241,7 @@ async function bootApp(){
   load();
   renderJobSheets();
   renderParts();
+  _resumeNestUI();   // nest restored from before a refresh → let them go straight back to cutting
   // Then restore cloud session — awaiting ensures cloud library
   // overwrites local AFTER load(), not racing against it
   const restored=await sbRefreshToken();
@@ -1252,6 +1254,84 @@ async function bootApp(){
 // ═══════════════════════════════════════════════
 // PERSISTENCE
 // ═══════════════════════════════════════════════
+// ── Keep the calculated nest across a refresh ───────────────────────────────
+// Re-running Calculate can produce a DIFFERENT (equally valid) layout. Mid-cut that's
+// dangerous: already-cut panels get re-matched onto the new arrangement and appear on
+// sheets you haven't touched. So we save the exact layout and restore it on load —
+// the nest only changes when you deliberately press Calculate again.
+function _saveNest(){
+  try{
+    if(!_lastSheets||!_lastSheets.length){ localStorage.removeItem('clp_nest'); return; }
+    const slim=_lastSheets.map(s=>({ name:s.name, fullL:s.fullL, fullW:s.fullW, uw:s.uw, uh:s.uh,
+      cost:s.cost, color:s.color, _isOffcut:s._isOffcut||false, jsid:s.jsid, thick:s.thick,
+      placements:(s.placements||[]).map(p=>({label:p.label,x:p.x,y:p.y,w:p.w,h:p.h,
+        origL:p.origL,origW:p.origW,eb:p.eb,grain:p.grain,rot:p.rot,company:p.company,
+        _lam:p._lam,_lamRole:p._lamRole,_finL:p._finL,_finW:p._finW,_lamOv:p._lamOv,_ebLabel:p._ebLabel,
+        _isCrosscut:p._isCrosscut,_isPickupStrip:p._isPickupStrip,_isTrim:p._isTrim,_isRipStrip:p._isRipStrip,
+        id:p.id,pid:p.pid})) }));
+    localStorage.setItem('clp_nest',JSON.stringify({project:projectName||'',saved:Date.now(),sheets:slim}));
+  }catch(e){}
+}
+// After a refresh mid-job the nest is restored but the results screen hasn't been drawn, so the
+// Cutting Mode button would still be hidden — forcing a Calculate, which is exactly what
+// re-nests and loses your place. Reveal it and say plainly what Calculate would do.
+function _resumeNestUI(){
+  try{
+    if(!_lastSheets||!_lastSheets.length) return;
+    const show=id=>{const el=document.getElementById(id); if(el) el.style.display='inline-flex';};
+    show('cutModeBtn'); show('labelBtn'); show('dxfBtn');
+    const ma=document.getElementById('mainArea');
+    if(ma) ma.innerHTML='<div style="padding:40px;text-align:center;font-family:var(--mono)">'
+      +'<div style="color:var(--ok);font-size:15px;font-weight:700">✓ Cut plan restored — '+_lastSheets.length+' sheet'+(_lastSheets.length!==1?'s':'')+'</div>'
+      +'<div style="color:var(--txt2);font-size:13px;margin-top:8px;font-family:var(--sans)">Same layout as before the refresh. Press <b style="color:var(--ok)">✂ Cutting Mode</b> to carry on where you left off.</div>'
+      +'<div style="color:var(--acc);font-size:12px;margin-top:10px;font-family:var(--sans)">⚠ Pressing Calculate will build a <b>new</b> layout — only do that if you haven\'t started cutting.</div>'
+      +'</div>';
+  }catch(e){}
+}
+// Last-resort recovery: rebuild the cut plan from the sheet layouts the saw published to the
+// cloud during cutting. Use when the local nest is gone (different device, cleared cache, or a
+// refresh from before nests were saved) and you must NOT re-nest because cutting has started.
+async function recoverNestFromCloud(){
+  try{
+    if(!_sbToken){ alert('Sign in first — the cut plan is recovered from your cloud cut log.'); return; }
+    const proj=String(projectName||'').trim().toLowerCase();
+    if(!proj){ alert('Open/name the job first, then recover.'); return; }
+    const since=new Date(Date.now()-180*24*3600*1000).toISOString();
+    const url=SB_URL+'/rest/v1/tce_cut_events?select=id,panel&action=eq.sheet_layout&created_at=gte.'+encodeURIComponent(since)+'&order=id.asc&limit=500';
+    let r=await fetch(url,{headers:sbAuthH()});
+    if(r.status===401 && await sbDoRefresh()) r=await fetch(url,{headers:sbAuthH()});
+    const rows=r.ok?await r.json():[];
+    const co=p=>String(p.company||'').trim().toLowerCase();
+    const mine=rows.map(x=>x.panel||{}).filter(p=>{ const c=co(p); return c===proj||c.indexOf(proj)===0||proj.indexOf(c)===0; });
+    const bySheet={}; mine.forEach(p=>{ if(p.sheetIdx!=null) bySheet[p.sheetIdx]=p; });   // latest wins
+    const keys=Object.keys(bySheet).map(Number).sort((a,b)=>a-b);
+    if(!keys.length){ alert('No saved cut plan found in the cloud for "'+projectName+'".'); return; }
+    // Edgebanding/grain aren't in the layout record — match each panel back to your parts list.
+    const pk=(l,a,b)=>String(l||'').toLowerCase().trim()+'|'+Math.round(a||0)+'|'+Math.round(b||0);
+    const pmap={}; (parts||[]).forEach(p=>{ pmap[pk(p.label,p.l,p.w)]=p; });
+    const sheets=keys.map(k=>{ const s=bySheet[k];
+      return { name:s.sheetName, fullL:s.fullL, fullW:s.fullW, uw:s.uw, uh:s.uh, cost:0, color:'#3a6ea5',
+        placements:(s.placements||[]).map(pl=>{ const src=pmap[pk(pl.label,pl.origL,pl.origW)]||pmap[pk(pl.label,pl.origW,pl.origL)]||{};
+          return {...pl, eb:src.eb||{L1:false,L2:false,W1:false,W2:false,tk:{L1:'1',L2:'1',W1:'1',W2:'1'}},
+                  grain:src.grainOverride==='W'?'W':(src.grainOverride==='N'?'N':'L'), company:projectName||''}; }) };
+    });
+    const withEb=sheets.reduce((a,s)=>a+s.placements.filter(p=>p.eb&&(p.eb.L1||p.eb.L2||p.eb.W1||p.eb.W2)).length,0);
+    const total=sheets.reduce((a,s)=>a+s.placements.length,0);
+    if(!confirm('Recover the cut plan for "'+projectName+'"?\n\n'+sheets.length+' sheets · '+total+' panels (edgebanding matched on '+withEb+').\n\nThis restores the layout you were cutting — it does NOT re-nest.')) return;
+    _lastSheets=sheets; _lastUnplaced=[];
+    _saveNest(); _resumeNestUI();
+    alert('✓ Cut plan recovered — '+sheets.length+' sheets.\n\nPress ✂ Cutting Mode to carry on. Do NOT press Calculate.');
+  }catch(e){ alert('Could not recover the cut plan: '+e.message); }
+}
+function _loadNest(){
+  try{
+    const raw=localStorage.getItem('clp_nest'); if(!raw) return false;
+    const d=JSON.parse(raw); if(!d||!d.sheets||!d.sheets.length) return false;
+    if(String(d.project||'')!==String(projectName||'')) return false;   // different job → don't reuse
+    _lastSheets=d.sheets; _lastUnplaced=[];
+    return true;
+  }catch(e){ return false; }
+}
 function save(){
   try{
     localStorage.setItem('clp_lib',JSON.stringify(library));
@@ -1270,6 +1350,7 @@ function load(){
     if(c)parts=JSON.parse(c);
     if(d){const o=JSON.parse(d);libId=o.libId||1;jsid=o.jsid||1;pid=o.pid||1;ci=o.ci||0;}
     projectName=localStorage.getItem('clp_project')||'';
+    _loadNest();   // restore the exact nest from before the refresh (same layout, same panel order)
     return !!(a||b||c);
   }catch(e){return false;}
 }
@@ -2461,6 +2542,7 @@ let _quoteBasis=null;   // per-material FRESH board count with offcuts OFF — t
 function renderResults(sheets,unplaced){
   // Store for print
   _lastSheets=sheets; _lastUnplaced=unplaced;
+  _saveNest();   // keep this exact layout so a refresh mid-cut restores the SAME nest
   // Capture the quote basis whenever a result uses NO offcuts (i.e. offcuts were off):
   // this is the true count of fresh boards the job needs, which the admin prices from.
   try{
@@ -4806,18 +4888,33 @@ async function cmReconcileFromCloud(){
     if(!r.ok) return {ok:false,count:0};
     rows=await r.json();
   }catch(e){ return {ok:false,count:0}; }
+  // Match a confirm to THIS job. Exact job-name match first; if the job was renamed
+  // (e.g. "Swaans (Don Street)" vs "…(Don Street MFC)") fall back to one containing the other,
+  // so a rename can't wipe out the cut history mid-job.
+  const co=p=>String(p.company||'').trim().toLowerCase();
+  const mine=rows.map(x=>x.panel||{}).filter(p=>!proj||co(p)===proj);
+  const loose=mine.length?mine:rows.map(x=>x.panel||{}).filter(p=>{ const c=co(p);
+    return c&&proj&&(c.indexOf(proj)===0||proj.indexOf(c)===0); });
+  // PRIMARY: match on the panel's exact position on its sheet (sheetIdx + x + y). Counting
+  // by label alone marked the first N matching panels as done regardless of which sheet they
+  // were really cut from — which is how cut panels showed up on sheets not started yet.
+  const posDone=new Set();
   const uniq=new Set(), cnt={};
-  rows.forEach(x=>{ const p=x.panel||{};
-    // Only THIS job's confirms (match by job name), so nothing bleeds across jobs.
-    if(proj && String(p.company||'').trim().toLowerCase()!==proj) return;
-    const uk=(p.label||'')+'|'+(p.panelNum||'')+'|'+(p.origL||'')+'|'+(p.origW||'');
+  loose.forEach(p=>{
+    if(p.x!=null && p.y!=null && p.sheetIdx!=null){ posDone.add(p.sheetIdx+'|'+Math.round(p.x)+'|'+Math.round(p.y)); return; }
+    const uk=(p.label||'')+'|'+(p.panelNum||'')+'|'+(p.origL||'')+'|'+(p.origW||'');   // legacy confirms (no position)
     if(uniq.has(uk)) return; uniq.add(uk);
     const ck=(p.label||'')+'|'+(p.origL||'')+'|'+(p.origW||''); cnt[ck]=(cnt[ck]||0)+1; });
-  const rem={...cnt}; const done=new Set();
+  const rem={...cnt}; const done=new Set(); let posHits=0;
   _cmPanels.forEach((p,i)=>{ if(_cmRecut.has(i)) return;   // keep panels the operator marked for re-cut
+    if(posDone.has(p.sheetIdx+'|'+Math.round(p.x)+'|'+Math.round(p.y))){ done.add(i); posHits++; return; }
     const ck=(p.label||'')+'|'+(p.origL||'')+'|'+(p.origW||''); if(rem[ck]>0){ done.add(i); rem[ck]--; } });
   _cmDone=done;
-  return {ok:true,count:done.size};
+  // If confirms carry positions but few of them line up, the layout has been re-nested since
+  // those cuts — any mapping onto the new nest would be guesswork. Say so rather than
+  // silently showing cut panels on sheets that were never started.
+  const stale = posDone.size>0 && posHits < posDone.size*0.6;
+  return {ok:true, count:done.size, stale, expected:posDone.size, matched:posHits};
 }
 async function openCuttingMode(){
   if(!_lastSheets.length){alert('Run Calculate first.');return;}
@@ -4858,7 +4955,9 @@ async function openCuttingMode(){
   document.getElementById('cuttingMode').classList.add('active');
   document.body.style.overflow='hidden';
   cmRender();
-  if(rec&&rec.ok&&rec.count>0&&typeof cmToast==='function') cmToast('✅ Restored '+rec.count+' already-cut panel'+(rec.count!==1?'s':'')+' from the cloud');
+  if(rec&&rec.ok&&rec.stale){
+    alert('⚠ The layout has changed since those panels were cut.\n\n'+rec.expected+' panel'+(rec.expected!==1?'s were':' was')+' confirmed earlier, but only '+rec.matched+' line up with this nest — so the ✓ marks below may not be reliable.\n\nCheck the physical sheets against your cut log before carrying on.');
+  } else if(rec&&rec.ok&&rec.count>0&&typeof cmToast==='function') cmToast('✅ Restored '+rec.count+' already-cut panel'+(rec.count!==1?'s':'')+' from the cloud');
 }
 function closeCuttingMode(){
   document.getElementById('cuttingMode').classList.remove('active');
