@@ -267,6 +267,7 @@ async function startApp(){
     }
   }catch(e){}
   subscribe();
+  primeSheetMap();                                             // draw the live sheet map straight away on load
   pollCutEvents();                                             // safety-net poll for confirms
   pollPendingOffcuts(); pollPendingEbLabels();
   setInterval(pollCutEvents, 3000);                            // catch anything the websocket drops, within ~3s
@@ -321,6 +322,21 @@ function setSheetMap(m){
 function setSheetFocus(f){ _sheetFocus=(f&&f.x!=null)?f:null; drawSheetMap(); }
 let _mapRT=null;
 window.addEventListener('resize',()=>{ clearTimeout(_mapRT); _mapRT=setTimeout(drawSheetMap,150); });   // re-fit the map
+// Draw the map immediately on load. The saw only publishes a layout when it moves onto a new
+// sheet, so mid-sheet that event can be hours old — we fetch the latest one regardless of age,
+// then replay the confirms since, so the ✓s and the ▶ are right the moment the station opens.
+async function primeSheetMap(){
+  try{
+    const {data:lay}=await sb.from('tce_cut_events').select('*').eq('action','sheet_layout').order('id',{ascending:false}).limit(1);
+    if(!lay||!lay.length) return;
+    const layout=lay[0].panel||{};
+    setSheetMap(layout);
+    const {data:cf}=await sb.from('tce_cut_events').select('*').eq('action','confirm').gt('id',lay[0].id).order('id',{ascending:true}).limit(500);
+    (cf||[]).forEach(r=>{ const p=r.panel||{}; if(p.sheetIdx===layout.sheetIdx) markSheetDone(p); });
+    const {data:fc}=await sb.from('tce_cut_events').select('*').eq('action','sheet_focus').order('id',{ascending:false}).limit(1);
+    if(fc&&fc.length) setSheetFocus(fc[0].panel||{});
+  }catch(e){}
+}
 function markSheetDone(p){
   if(!_sheetMap||p==null||p.x==null) return;
   if(p.sheetIdx!=null && _sheetMap.sheetIdx!=null && p.sheetIdx!==_sheetMap.sheetIdx) return;
