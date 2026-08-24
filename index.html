@@ -1297,13 +1297,35 @@ async function recoverNestFromCloud(){
     const proj=String(projectName||'').trim().toLowerCase();
     if(!proj){ alert('Open/name the job first, then recover.'); return; }
     const since=new Date(Date.now()-180*24*3600*1000).toISOString();
-    const url=SB_URL+'/rest/v1/tce_cut_events?select=id,panel&action=eq.sheet_layout&created_at=gte.'+encodeURIComponent(since)+'&order=id.asc&limit=500';
+    const url=SB_URL+'/rest/v1/tce_cut_events?select=id,action,session_id,panel&action=in.(sheet_layout,confirm)&created_at=gte.'+encodeURIComponent(since)+'&order=id.asc&limit=2000';
     let r=await fetch(url,{headers:sbAuthH()});
     if(r.status===401 && await sbDoRefresh()) r=await fetch(url,{headers:sbAuthH()});
     const rows=r.ok?await r.json():[];
     const co=p=>String(p.company||'').trim().toLowerCase();
-    const mine=rows.map(x=>x.panel||{}).filter(p=>{ const c=co(p); return c===proj||c.indexOf(proj)===0||proj.indexOf(c)===0; });
-    const bySheet={}; mine.forEach(p=>{ if(p.sheetIdx!=null) bySheet[p.sheetIdx]=p; });   // latest wins
+    const mineRows=rows.filter(x=>{ const c=co(x.panel||{}); return c===proj||c.indexOf(proj)===0||proj.indexOf(c)===0; });
+    // Where a panel was actually confirmed — this is the truth we rebuild against.
+    const confirmed={};   // sheetIdx -> Set("x,y")
+    mineRows.filter(x=>x.action==='confirm').forEach(x=>{ const p=x.panel||{};
+      if(p.sheetIdx==null||p.x==null) return;
+      (confirmed[p.sheetIdx]=confirmed[p.sheetIdx]||new Set()).add(Math.round(p.x)+','+Math.round(p.y)); });
+    // A job can be re-nested (someone pressed Calculate), so several nests exist. Pick ONE whole
+    // nest — the cutting session whose layout best fits the panels actually cut — rather than
+    // taking the newest version of each sheet, which would splice two different nests together
+    // and could duplicate or drop parts.
+    const layouts=mineRows.filter(x=>x.action==='sheet_layout'&&(x.panel||{}).sheetIdx!=null);
+    const sessions={};
+    layouts.forEach(x=>{ const p=x.panel, sid=x.session_id||'?';
+      const s=sessions[sid]=sessions[sid]||{score:0,lastId:0,sheets:{}};
+      const cs=confirmed[p.sheetIdx];
+      const hit=cs?(p.placements||[]).filter(pl=>cs.has(Math.round(pl.x)+','+Math.round(pl.y))).length:0;
+      const prev=s.sheets[p.sheetIdx];
+      if(!prev||x.id>prev.id) s.sheets[p.sheetIdx]={p,id:x.id,hit};
+      if(x.id>s.lastId) s.lastId=x.id;
+    });
+    Object.values(sessions).forEach(s=>{ s.score=Object.values(s.sheets).reduce((a,v)=>a+v.hit,0); });
+    const best=Object.values(sessions).sort((a,b)=>b.score-a.score||b.lastId-a.lastId)[0];
+    if(!best){ alert('No saved cut plan found in the cloud for "'+projectName+'".'); return; }
+    const bySheet={}; Object.entries(best.sheets).forEach(([k,v])=>bySheet[k]=v.p);
     const keys=Object.keys(bySheet).map(Number).sort((a,b)=>a-b);
     if(!keys.length){ alert('No saved cut plan found in the cloud for "'+projectName+'".'); return; }
     // Edgebanding/grain aren't in the layout record — match each panel back to your parts list.
