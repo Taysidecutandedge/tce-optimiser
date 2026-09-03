@@ -163,6 +163,9 @@ select option{background:var(--surf2)}
   *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   body,html{background:#fff!important;color:#000!important;margin:0;padding:0;height:auto}
   header,.sidebar,#mainArea,.pl-close-btn,.no-print{display:none!important}
+  /* App furniture must never appear on a customer document: the floating refresh button,
+     the signed-in / Sign out bar, and the PWS floating button. */
+  #refreshBtn,#userBar,.login-user-bar,#pwsOrderBtn{display:none!important}
   .app{display:block!important;height:auto!important}
   #printLayout{display:block!important;position:static!important;overflow:visible!important;padding:0!important;background:#fff!important}
   .pl-page{page-break-after:always;break-after:page;page-break-inside:avoid;break-inside:avoid;
@@ -371,7 +374,7 @@ select option{background:var(--surf2)}
 </head>
 <body>
 
-<button onclick="location.replace(location.pathname+'?r='+Date.now())" title="Refresh — loads the latest saved version" aria-label="Refresh page" style="position:fixed;bottom:12px;left:12px;z-index:2147483000;width:42px;height:42px;border-radius:50%;border:none;background:rgba(31,122,77,.92);color:#fff;font-size:20px;line-height:42px;text-align:center;padding:0;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3)">↻</button>
+<button id="refreshBtn" class="no-print" onclick="location.replace(location.pathname+'?r='+Date.now())" title="Refresh — loads the latest saved version" aria-label="Refresh page" style="position:fixed;bottom:12px;left:12px;z-index:2147483000;width:42px;height:42px;border-radius:50%;border:none;background:rgba(31,122,77,.92);color:#fff;font-size:20px;line-height:42px;text-align:center;padding:0;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3)">↻</button>
 
 <header>
   <div class="logo">
@@ -488,7 +491,7 @@ select option{background:var(--surf2)}
 </div>
 
 <!-- USER BAR (shown when logged in) -->
-<div class="login-user-bar" id="userBar" style="display:none">
+<div class="login-user-bar no-print" id="userBar" style="display:none">
   <span id="userBarEmail"></span>
   <button onclick="doLogout()">Sign out</button>
 </div>
