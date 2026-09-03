@@ -1266,7 +1266,7 @@ async function buildQuote() {
       <td>Laminating <span style="color:#f0a500;font-size:11px">· ⧉ glue-up</span></td>
       <td class="override-label">${lamM2.toFixed(2)}m² × <input type="number" class="override-input" value="${panelLamRate.toFixed(2)}"
         onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},panelLamRate:parseFloat(this.value)||0};buildQuote()" step="0.01">/m² glue
-        &nbsp;+&nbsp; ${lamN} panel${lamN!==1?'s':''} × <input type="number" class="override-input" value="${panelLamPer.toFixed(2)}"
+        &nbsp;+&nbsp; ${lamN} glued panel${lamN!==1?'s':''} × <input type="number" class="override-input" value="${panelLamPer.toFixed(2)}"
         onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},panelLamPer:parseFloat(this.value)||0};buildQuote()" step="0.50">/panel</td>
       <td></td><td></td>
       <td class="r" style="font-size:11px;color:#6b8f7e">glue + press + trim to size</td>
