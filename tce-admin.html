@@ -289,6 +289,22 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
         <div><label>Press £/min</label><input type="number" step="0.01" id="lamPerMin" value="0.17" oninput="lamCalc()"></div>
         <div><label>Labour £ per sheet</label><input type="number" step="0.50" id="lamLabour" value="20" oninput="lamCalc()"></div>
       </div>
+      <div style="border-top:1px solid #2b4a40;padding-top:12px;margin-bottom:14px">
+        <div style="font-size:12px;color:#f0a500;margin-bottom:4px">Panel glue-up rate — ⧉ LAM ×2 (Tensor L22)</div>
+        <div style="font-size:11px;color:#6b8f7e;margin-bottom:8px">
+          For bonding two boards into one thick panel. Coverage is the <b>finished panel area</b> a canister bonds
+          (both mating faces already allowed for). This rate prices the ⧉ panels on a quote automatically.<br>
+          <span style="color:#e6a23c">Remember the glue-up is cut oversize, so after pressing it goes back on the saw to be
+          trimmed to size — that second cut isn't in the Cutting line, so cover it in the rate below.</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr) auto;gap:10px;align-items:end">
+          <div><label>Canister £</label><input type="number" step="1" id="plCan" value="250" oninput="panelLamCalc()"></div>
+          <div><label>Coverage m² / canister</label><input type="number" step="1" id="plCover" value="75" oninput="panelLamCalc()"></div>
+          <div><label>Press, handling &amp; trim £/m²</label><input type="number" step="0.10" id="plExtra" value="0" oninput="panelLamCalc()"></div>
+          <div id="plOut" style="font-size:12px;color:#cfe7dd;padding-bottom:6px"></div>
+          <button class="btn btn-secondary btn-sm" onclick="panelLamSave()">Save rate</button>
+        </div>
+      </div>
       <div style="border-top:1px solid #2b4a40;padding-top:12px">
         <div style="font-size:12px;color:#f0a500;margin-bottom:8px">Laminated board calculator</div>
         <div style="display:grid;grid-template-columns:1.6fr .8fr .8fr .8fr .8fr .8fr;gap:8px;align-items:end">
@@ -1116,6 +1132,12 @@ async function buildQuote() {
         _ebExtra.push({ label:key.replace(/^\s*\d+(\.\d+)?mm\s*·\s*/,''), mm, isLam, thk });
       }
     });
+    // ⧉ LAM ×2 glue-up area per material (m²) — priced as its own line below.
+    Object.entries(jobData.lastResult.lamMap||{}).forEach(([mat,m2])=>{
+      if(!(m2>0)) return;
+      if(!matData[mat]) matData[mat]={sheets:0,ebMm:0,ebMmLam:0,ebByThk:{}};
+      matData[mat].lamM2=(matData[mat].lamM2||0)+m2;
+    });
   } else {
     // No results saved — show note
     wrap.innerHTML = `<div class="no-data" style="text-align:left;padding:20px">
@@ -1190,7 +1212,11 @@ async function buildQuote() {
     const lamBaseRate = lamRate ? parseFloat(lamRate.base_rate) : 2.9;
     const lamRateTotal = lamBaseRate + lamMatRate * (surcharge ? 1.08 : 1);
     const lamTotal = ebMLam * lamRateTotal;
-    const matTotal = boardTotal + cutTotal + ebTotal + lamTotal;
+    // ⧉ LAM ×2 panel glue-up: area from the optimiser × your £/m² rate (Tensor L22 + press/labour)
+    const lamM2 = data.lamM2 || 0;
+    const panelLamRate = (ov.panelLamRate!=null) ? ov.panelLamRate : panelLamRateDefault();
+    const panelLamTotal = lamM2 * panelLamRate;
+    const matTotal = boardTotal + cutTotal + ebTotal + lamTotal + panelLamTotal;
     grandEx += matTotal;
 
     const priceNote = autoPrice !== null
@@ -1218,6 +1244,14 @@ async function buildQuote() {
       <td></td><td></td><td></td>
       <td class="r">£${cutTotal.toFixed(2)}</td>
     </tr>
+    ${lamM2 > 0 ? `<tr>
+      <td>Laminating <span style="color:#f0a500;font-size:11px">· ⧉ glue-up</span></td>
+      <td class="override-label">${lamM2.toFixed(2)}m² × <input type="number" class="override-input" value="${panelLamRate.toFixed(2)}"
+        onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},panelLamRate:parseFloat(this.value)||0};buildQuote()" step="0.01">/m²</td>
+      <td></td><td></td>
+      <td class="r" style="font-size:11px;color:#6b8f7e">glue + press + trim to size</td>
+      <td class="r">£${panelLamTotal.toFixed(2)}</td>
+    </tr>` : ''}
     ${ebRowsHtml}
     ${ebMLam > 0 ? `<tr>
       <td>Edgebanding <span style="color:#f0a500;font-size:11px">· laminated (wide)</span></td>
@@ -1904,6 +1938,10 @@ async function loadCustomBoards() {
   renderSuppliers();
   renderCustomBoards();
   try{ lamCalc(); }catch(e){}   // show the laminating figures straight away
+  try{ const c=panelLamCfg();
+    const set=(id,v)=>{const el=document.getElementById(id); if(el) el.value=v;};
+    set('plCan',c.can); set('plCover',c.cover); set('plExtra',c.extra); panelLamCalc();
+  }catch(e){}
 }
 
 function renderSuppliers() {
@@ -2031,6 +2069,37 @@ async function deleteSupplier(id) {
   } catch(e) { alert('Error: '+e.message); }
 }
 
+// ── Panel laminating (⧉ LAM ×2 glue-up, Tensor L22) ─────────────────────────
+// Priced per m² of finished panel. The canister coverage is taken as the panel area it
+// bonds (both mating faces already allowed for), so no doubling here.
+function panelLamCfg(){
+  let c={can:250, cover:75, extra:0};
+  try{ const s=JSON.parse(localStorage.getItem('tce_panel_lam')||'null'); if(s) c={...c,...s}; }catch(e){}
+  return c;
+}
+function panelLamRateDefault(){
+  const c=panelLamCfg();
+  const glue=(c.cover>0)?(c.can/c.cover):0;
+  return +(glue + (parseFloat(c.extra)||0)).toFixed(2);
+}
+function panelLamSave(){
+  const c={ can:parseFloat(document.getElementById('plCan').value)||0,
+            cover:parseFloat(document.getElementById('plCover').value)||0,
+            extra:parseFloat(document.getElementById('plExtra').value)||0 };
+  try{ localStorage.setItem('tce_panel_lam',JSON.stringify(c)); }catch(e){}
+  panelLamCalc();
+  showToast('Panel laminating rate saved: £'+panelLamRateDefault().toFixed(2)+'/m² ✓');
+}
+function panelLamCalc(){
+  const out=document.getElementById('plOut'); if(!out) return;
+  const can=parseFloat((document.getElementById('plCan')||{}).value)||0;
+  const cover=parseFloat((document.getElementById('plCover')||{}).value)||0;
+  const extra=parseFloat((document.getElementById('plExtra')||{}).value)||0;
+  const glue=cover>0?can/cover:0;
+  out.innerHTML=`Glue £${glue.toFixed(2)}/m²${extra?` + press+trim £${extra.toFixed(2)}/m²`:''}
+    &nbsp;→&nbsp;<b style="color:#f0a500">£${(glue+extra).toFixed(2)}/m²</b>
+    <span style="color:#6b8f7e"> · a 2440×1220 panel = ${((2.44*1.22)*(glue+extra)).toFixed(2)}</span>`;
+}
 // ── Laminating (press) ──────────────────────────────────────────────────────
 // Cost = glue (£/m² per FACE × faces × sheet area) + press (mins × £/min, per pressing)
 // + labour (per pressing). Press and labour are per cycle, so they don't scale with area.

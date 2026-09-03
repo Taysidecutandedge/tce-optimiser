@@ -1110,9 +1110,19 @@ async function cloudSaveJob(){
   // Build compact lastResult for admin pricing panel
   // Only store what the admin needs — sheet counts per material and EB totals
   // Never store full placements (too large, not needed for pricing)
+  // Laminated (⧉ LAM ×2) panel area per material, so the admin can price the glue-up
+  // instead of a fee being added by hand at the end. Finished area — the doubling of
+  // sheets is already handled by the board count.
+  const lamMap={};
+  (parts||[]).forEach(p=>{
+    if(!p.laminate) return;
+    const m=p.matName||''; if(!m) return;
+    lamMap[m]=(lamMap[m]||0)+((Number(p.l)||0)/1000)*((Number(p.w)||0)/1000)*(Math.max(1,parseInt(p.qty)||1));
+  });
   const lastResult = _lastSheets && _lastSheets.length ? {
     sheets: _lastSheets.map(s=>({name:s.name})),
-    ebMap: _lastEbMap || {}
+    ebMap: _lastEbMap || {},
+    lamMap
   } : null;
 
   const customerSel = document.getElementById('cloudJobCustomer');
