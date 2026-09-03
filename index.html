@@ -1431,25 +1431,47 @@ window.onload=async()=>{
 async function openLibModal(){const sb=document.getElementById('libSearch');if(sb)sb.value='';
   // If the library is empty (e.g. the session lapsed while idle), reload it before showing
   if(!library||!library.length){ try{ await sbLoadLibrary(); }catch(e){} }
+  // The picker searches every board on the system, so make sure the admin catalogue and the
+  // Egger decor list are loaded too — otherwise only library sheets would show.
+  try{ if(typeof _cbCatalogue!=='undefined' && (!_cbCatalogue||!_cbCatalogue.length) && typeof sbLoadBoardCatalogue==='function') await sbLoadBoardCatalogue(); }catch(e){}
+  try{ if(typeof _eggerCodes!=='undefined' && (!_eggerCodes||!_eggerCodes.length) && typeof sbLoadEggerCodes==='function') await sbLoadEggerCodes(); }catch(e){}
   renderLibList();sm('libModal');}
 
 function renderLibList(){
   const el=document.getElementById('libList');
-  if(!library.length){el.innerHTML='<div class="lib-empty">No sheets saved. Click "+ New Sheet".</div>';return;}
   const q=(document.getElementById('libSearch')?.value||'').toLowerCase().replace(/\s+/g,' ').trim();
   const qns=q.replace(/\s+/g,'');
   const norm=v=>(v||'').toLowerCase().replace(/\s+/g,' ');
-  const list=q? library.filter(s=>{const n=norm(s.name); return n.includes(q)||n.replace(/\s+/g,'').includes(qns)||norm(s.notes).includes(q);}) : library;
-  if(!list.length){el.innerHTML='<div class="lib-empty">No boards match “'+esc(q)+'”.</div>';return;}
-  el.innerHTML=list.map(s=>`
-    <div class="lib-card" onclick="addJobSheetFromLib(${s.id})">
+  // Your saved library sheets first (editable), then EVERY other board on the system —
+  // the admin board catalogue and all your Egger decors — so anything can be added to a job
+  // directly, without saving it to the library first.
+  const libRows=library.map(s=>({src:'lib',id:s.id,name:s.name,l:s.l,w:s.w,thick:s.thick,cost:s.cost||0,
+    color:s.color,grainLen:s.grainLen,notes:s.notes,ref:'lib:'+s.id}));
+  const others=(typeof _matMapBoards==='function'?_matMapBoards():[]).filter(b=>String(b.ref||'').indexOf('lib:')!==0)
+    .map(b=>({src:String(b.ref).indexOf('eg:')===0?'egger':'catalogue',name:b.name,l:b.l,w:b.w,thick:b.thick,
+      cost:b.cost||0,color:b.color,grainLen:b.grainLen,ref:b.ref}));
+  const all=libRows.concat(others);
+  const match=s=>{ if(!q) return true; const n=norm(s.name);
+    return n.includes(q)||n.replace(/\s+/g,'').includes(qns)||norm(s.notes).includes(q); };
+  const list=all.filter(match);
+  if(!list.length){
+    el.innerHTML=all.length?('<div class="lib-empty">No boards match “'+esc(q)+'”.</div>')
+      :'<div class="lib-empty">No sheets saved. Click "+ New Sheet".</div>';
+    return;
+  }
+  const tag=s=>s.src==='lib'?'':(s.src==='egger'
+    ?'<span style="font-size:9px;color:#c39b7b;border:1px solid #6b4f3a;border-radius:3px;padding:0 4px;margin-left:6px">EGGER</span>'
+    :'<span style="font-size:9px;color:#8aa;border:1px solid #2b4a40;border-radius:3px;padding:0 4px;margin-left:6px">PRICE LIST</span>');
+  el.innerHTML=list.slice(0,400).map(s=>`
+    <div class="lib-card" onclick="addJobSheetFromRef('${esc(s.ref)}')">
       <div>
-        <div class="lib-card-name"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${s.color};margin-right:6px;vertical-align:middle"></span>${esc(s.name)}</div>
-        <div class="lib-card-meta">${s.l}×${s.w}mm · ${s.thick}mm${s.cost>0?' · £'+s.cost.toFixed(2):''}${s.notes?' · '+esc(s.notes):''} · Grain: ${s.grainLen?'along length':'no default'}</div>
+        <div class="lib-card-name"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${s.color||'#8aa'};margin-right:6px;vertical-align:middle"></span>${esc(s.name)}${tag(s)}</div>
+        <div class="lib-card-meta">${s.l}×${s.w}mm · ${s.thick}mm${s.cost>0?' · £'+Number(s.cost).toFixed(2):''}${s.notes?' · '+esc(s.notes):''} · Grain: ${s.grainLen?'along length':'no default'}</div>
       </div>
-      <button class="btn-ico" title="Edit" onclick="event.stopPropagation();openLibEdit(${s.id})">✎</button>
-      <button class="btn-ico" title="Delete" onclick="event.stopPropagation();delLib(${s.id})">✕</button>
-    </div>`).join('');
+      ${s.src==='lib'?`<button class="btn-ico" title="Edit" onclick="event.stopPropagation();openLibEdit(${s.id})">✎</button>
+      <button class="btn-ico" title="Delete" onclick="event.stopPropagation();delLib(${s.id})">✕</button>`:''}
+    </div>`).join('')
+    + (list.length>400?'<div class="lib-empty">…'+(list.length-400)+' more — refine your search</div>':'');
 }
 
 function openLibEdit(id){
@@ -1503,6 +1525,17 @@ function delLib(id){
 function addJobSheetFromLib(lid){
   const s=library.find(x=>x.id===lid); if(!s)return;
   jobSheets.push({id:jsid++,libRef:lid,name:s.name,l:s.l,w:s.w,thick:s.thick,cost:s.cost,color:s.color,grainLen:s.grainLen,qty:1,trimT:15,trimB:15,trimL:15,trimR:15});
+  save(); renderJobSheets(); cm('libModal');
+}
+// Add a sheet from ANY source — library, admin board catalogue, or an Egger decor.
+function addJobSheetFromRef(ref){
+  const B=_resolveBoardRef(ref);
+  if(!B){ alert('Could not load that board — try again, or pick a different one.'); return; }
+  if(jobSheets.some(s=>String(s.name||'').toLowerCase().trim()===String(B.name||'').toLowerCase().trim())){
+    cm('libModal'); return;   // already on the job — don't add a duplicate
+  }
+  jobSheets.push({id:jsid++,libRef:B.libRef,name:B.name,l:B.l,w:B.w,thick:B.thick,cost:B.cost,
+    color:B.color||nc(),grainLen:B.grainLen,qty:1,trimT:15,trimB:15,trimL:15,trimR:15});
   save(); renderJobSheets(); cm('libModal');
 }
 
