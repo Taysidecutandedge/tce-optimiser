@@ -1113,16 +1113,20 @@ async function cloudSaveJob(){
   // Laminated (⧉ LAM ×2) panel area per material, so the admin can price the glue-up
   // instead of a fee being added by hand at the end. Finished area — the doubling of
   // sheets is already handled by the board count.
-  const lamMap={};
+  // Area drives the glue; the PANEL COUNT drives press + trim, because a glued panel needs
+  // four cuts and a lift onto the saw whatever its size.
+  const lamMap={}, lamCount={};
   (parts||[]).forEach(p=>{
     if(!p.laminate) return;
     const m=p.matName||''; if(!m) return;
-    lamMap[m]=(lamMap[m]||0)+((Number(p.l)||0)/1000)*((Number(p.w)||0)/1000)*(Math.max(1,parseInt(p.qty)||1));
+    const q=Math.max(1,parseInt(p.qty)||1);
+    lamMap[m]=(lamMap[m]||0)+((Number(p.l)||0)/1000)*((Number(p.w)||0)/1000)*q;
+    lamCount[m]=(lamCount[m]||0)+q;
   });
   const lastResult = _lastSheets && _lastSheets.length ? {
     sheets: _lastSheets.map(s=>({name:s.name})),
     ebMap: _lastEbMap || {},
-    lamMap
+    lamMap, lamCount
   } : null;
 
   const customerSel = document.getElementById('cloudJobCustomer');
