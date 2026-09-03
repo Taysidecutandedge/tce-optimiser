@@ -276,6 +276,41 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
       </div>
     </div>
 
+    <!-- Laminating (press) -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">🧱 Laminating (press)</div>
+      <div style="font-size:12px;color:#6b8f7e;margin-bottom:12px">
+        Cost to laminate a sheet in the press. Glue is per m² <b>per face</b>; press and labour are per pressing,
+        so they don't scale with sheet size. Change a figure and the calculator below updates.
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
+        <div><label>Glue £/m² per face</label><input type="number" step="0.01" id="lamGlue" value="0.62" oninput="lamCalc()"></div>
+        <div><label>Press mins</label><input type="number" step="1" id="lamMins" value="10" oninput="lamCalc()"></div>
+        <div><label>Press £/min</label><input type="number" step="0.01" id="lamPerMin" value="0.17" oninput="lamCalc()"></div>
+        <div><label>Labour £ per sheet</label><input type="number" step="0.50" id="lamLabour" value="20" oninput="lamCalc()"></div>
+      </div>
+      <div style="border-top:1px solid #2b4a40;padding-top:12px">
+        <div style="font-size:12px;color:#f0a500;margin-bottom:8px">Laminated board calculator</div>
+        <div style="display:grid;grid-template-columns:1.6fr .8fr .8fr .8fr .8fr .8fr;gap:8px;align-items:end">
+          <div><label>Name</label><input type="text" id="lamName" placeholder="e.g. Poplar Ply + Egger laminate" oninput="lamCalc()"></div>
+          <div><label>Length (mm)</label><input type="number" id="lamL" value="2500" oninput="lamCalc()"></div>
+          <div><label>Width (mm)</label><input type="number" id="lamW" value="1220" oninput="lamCalc()"></div>
+          <div><label>Thickness</label><input type="number" id="lamThick" value="18" oninput="lamCalc()"></div>
+          <div><label>Board £/sheet</label><input type="number" step="0.01" id="lamBoard" value="60.89" oninput="lamCalc()"></div>
+          <div><label>Laminate £/sheet</label><input type="number" step="0.01" id="lamFace" placeholder="awaiting price" oninput="lamCalc()"></div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:end;margin-top:8px">
+          <div><label>Faces laminated</label>
+            <select id="lamFaces" onchange="lamCalc()">
+              <option value="2" selected>2 — both faces (balanced)</option>
+              <option value="1">1 — show face only</option>
+            </select></div>
+          <button class="btn btn-secondary btn-sm" onclick="lamSaveBoard()">+ Save as board</button>
+        </div>
+        <div id="lamOut" style="margin-top:12px;font-size:13px"></div>
+      </div>
+    </div>
+
     <!-- Custom boards grouped by type -->
     <div class="card">
       <div class="card-title">🪵 Board Prices</div>
@@ -1868,6 +1903,7 @@ async function loadCustomBoards() {
   }
   renderSuppliers();
   renderCustomBoards();
+  try{ lamCalc(); }catch(e){}   // show the laminating figures straight away
 }
 
 function renderSuppliers() {
@@ -1995,6 +2031,62 @@ async function deleteSupplier(id) {
   } catch(e) { alert('Error: '+e.message); }
 }
 
+// ── Laminating (press) ──────────────────────────────────────────────────────
+// Cost = glue (£/m² per FACE × faces × sheet area) + press (mins × £/min, per pressing)
+// + labour (per pressing). Press and labour are per cycle, so they don't scale with area.
+function _lamNum(id,dflt){ const el=document.getElementById(id); const v=parseFloat(el&&el.value); return isNaN(v)?dflt:v; }
+function lamRates(){
+  return { glue:_lamNum('lamGlue',0.62), mins:_lamNum('lamMins',10), perMin:_lamNum('lamPerMin',0.17), labour:_lamNum('lamLabour',20) };
+}
+function lamCost(L,W,faces,boardCost,faceCost){
+  const r=lamRates();
+  const area=(L/1000)*(W/1000);
+  const glue=area*r.glue*faces;
+  const press=r.mins*r.perMin;
+  const process=glue+press+r.labour;
+  const materials=boardCost+faceCost*faces;
+  return {area,glue,press,labour:r.labour,process,materials,total:process+materials};
+}
+function lamCalc(){
+  const out=document.getElementById('lamOut'); if(!out) return;
+  const L=_lamNum('lamL',0), W=_lamNum('lamW',0), faces=parseInt((document.getElementById('lamFaces')||{}).value)||2;
+  const board=_lamNum('lamBoard',0), face=_lamNum('lamFace',0);
+  if(!L||!W){ out.innerHTML='<span style="color:#6b8f7e">Enter a sheet size.</span>'; return; }
+  const c=lamCost(L,W,faces,board,face);
+  const row=(a,b,muted)=>`<tr><td style="padding:2px 10px 2px 0;color:${muted?'#6b8f7e':'#cfe7dd'}">${a}</td><td style="padding:2px 0;text-align:right;color:${muted?'#6b8f7e':'#e8f0ec'}">${b}</td></tr>`;
+  const faceNote=face>0?'':' <span style="color:#e6a23c">(laminate price not entered yet)</span>';
+  out.innerHTML=
+    `<table style="border-collapse:collapse;font-size:13px">
+      ${row('Sheet area',c.area.toFixed(3)+' m²',true)}
+      ${row('Glue — '+faces+' face'+(faces!==1?'s':'')+' @ £'+lamRates().glue.toFixed(2)+'/m²','£'+c.glue.toFixed(2))}
+      ${row('Press — '+lamRates().mins+' min @ £'+lamRates().perMin.toFixed(2)+'/min','£'+c.press.toFixed(2))}
+      ${row('Labour','£'+c.labour.toFixed(2))}
+      ${row('<b>Process per sheet</b>','<b>£'+c.process.toFixed(2)+'</b>')}
+      ${row('&nbsp;','&nbsp;',true)}
+      ${row('Board','£'+board.toFixed(2))}
+      ${row('Laminate × '+faces,'£'+(face*faces).toFixed(2))}
+      ${row('<b>Total cost / sheet</b>','<b style="color:#f0a500">£'+c.total.toFixed(2)+'</b>')}
+      ${row('Cost per m²','£'+(c.total/c.area).toFixed(2)+'/m²',true)}
+    </table><div style="font-size:11px;color:#6b8f7e;margin-top:6px">This is your <b>cost</b> — surcharge and customer markup are applied on the quote as usual.${faceNote}</div>`;
+}
+async function lamSaveBoard(){
+  const name=(document.getElementById('lamName').value||'').trim();
+  const L=_lamNum('lamL',0), W=_lamNum('lamW',0), thick=_lamNum('lamThick',18);
+  const faces=parseInt(document.getElementById('lamFaces').value)||2;
+  const board=_lamNum('lamBoard',0), face=_lamNum('lamFace',0);
+  if(!name){ alert('Give the laminated board a name, e.g. "Poplar Ply + Egger laminate".'); return; }
+  if(!L||!W){ alert('Enter the sheet size.'); return; }
+  if(!face){ if(!confirm('No laminate price entered — save with laminate at £0?\n\nYou can edit the board price later when the quote comes in.')) return; }
+  const c=lamCost(L,W,faces,board,face);
+  try{
+    await sbFetch('tce_custom_boards',{method:'POST',headers:{'Prefer':'return=minimal'},body:{
+      board_name:name, thickness_mm:Math.round(thick), sheet_size:Math.round(L)+'x'+Math.round(W),
+      base_cost:Number(c.total.toFixed(2)), supplier:'Lathams'
+    }});
+    await loadCustomBoards();
+    showToast(name+' saved at £'+c.total.toFixed(2)+'/sheet ✓');
+  }catch(e){ alert('Error saving board: '+e.message); }
+}
 async function addCustomBoard() {
   const name = document.getElementById('newBoardName').value.trim();
   const thick = parseInt(document.getElementById('newBoardThick').value) || 0;
