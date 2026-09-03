@@ -510,6 +510,7 @@ select option{background:var(--surf2)}
   <div class="sec">
     <div class="sec-hdr">
       <span class="sec-ttl">Parts to Cut</span>
+      <button class="btn btn-ghost btn-sm" onclick="bulkSetTape()" title="Set every banded edge on a material to one tape — instead of changing each edge by hand" style="border-color:#2a8a5a;color:#7fe3a8">🎗 Set All Edging</button>
       <button class="btn btn-ghost btn-sm" onclick="addShakerDoor()">✂ Add Shaker Door</button>
       <button class="btn btn-ghost btn-sm" onclick="addPart()">+ Add Part</button>
     </div>
@@ -1613,7 +1614,33 @@ function applySheetBoard(gi){
 // PARTS
 // ═══════════════════════════════════════════════
 // grainOverride: null=auto (grain along length), true=force grain, false=force no grain
-function makeEB(){return{L1:false,L2:false,W1:false,W2:false,tk:{L1:'1',L2:'1',W1:'1',W2:'1'}};}
+// ── Edge tapes ──────────────────────────────────────────────────────────────
+// An edge carries a THICKNESS (drives edgebanding pricing — unchanged) and a TAPE TYPE
+// (drives the letter on the label, so the edgebander knows which tape to run). Previously
+// the letter was guessed from thickness, so any 2mm edge printed "O" (the oak code) even
+// when it was ABS. Type is now stored explicitly.
+const EB_TAPES=[
+  {k:'0.6p',tk:'0.6',ty:'paper',lbl:'0.6 paper'},
+  {k:'0.8', tk:'0.8',ty:'abs',  lbl:'0.8 ABS'},
+  {k:'1',   tk:'1',  ty:'abs',  lbl:'1 ABS'},
+  {k:'2',   tk:'2',  ty:'abs',  lbl:'2 ABS'},
+  {k:'1o',  tk:'1',  ty:'oak',  lbl:'1 oak'},
+  {k:'2o',  tk:'2',  ty:'oak',  lbl:'2 oak'}
+];
+// Type of an edge. Older jobs have no type stored: 0.6 was always paper, everything else ABS.
+function ebTypeOf(eb,side){
+  const t=eb&&eb.ty&&eb.ty[side]; if(t) return t;
+  const tk=(eb&&eb.tk&&eb.tk[side])||'1';
+  return tk==='0.6'?'paper':'abs';
+}
+// The letter that prints on the label / shows in cutting mode.
+function ebCodeOf(ty){ return ty==='oak'?'O':(ty==='paper'?'P':'Y'); }
+function ebTapeKeyOf(eb,side){
+  const tk=(eb&&eb.tk&&eb.tk[side])||'1', ty=ebTypeOf(eb,side);
+  const f=EB_TAPES.find(t=>t.tk===tk&&t.ty===ty);
+  return f?f.k:((EB_TAPES.find(t=>t.tk===tk)||{k:'1'}).k);
+}
+function makeEB(){return{L1:false,L2:false,W1:false,W2:false,tk:{L1:'1',L2:'1',W1:'1',W2:'1'},ty:{L1:'abs',L2:'abs',W1:'abs',W2:'abs'}};}
 
 function addPart(d){
   parts.push({
@@ -1642,6 +1669,35 @@ function toggleEB(id,side){
 function setEBTk(id,side,v){
   const p=parts.find(x=>x.id===id);if(!p)return;
   p.eb.tk[side]=v;save();
+}
+// Pick a tape (thickness + type) for one edge.
+function setEBTape(id,side,key){
+  const p=parts.find(x=>x.id===id); if(!p) return;
+  const t=EB_TAPES.find(x=>x.k===key); if(!t) return;
+  if(!p.eb.tk) p.eb.tk={}; if(!p.eb.ty) p.eb.ty={};
+  p.eb.tk[side]=t.tk; p.eb.ty[side]=t.ty;
+  save(); renderParts();
+}
+// Set every banded edge on a material (or the whole job) to one tape — saves editing edge by edge.
+function bulkSetTape(){
+  const mats=[...new Set((parts||[]).map(p=>p.matName||'').filter(Boolean))];
+  const matList=['(all materials)'].concat(mats);
+  const mi=prompt('Set edging tape on which material?\n\n'+matList.map((m,i)=>i+' = '+m).join('\n'),'0');
+  if(mi===null) return;
+  const pick=matList[parseInt(mi)]; if(pick===undefined) return;
+  const ti=prompt('Set every banded edge on "'+pick+'" to which tape?\n\n'+EB_TAPES.map((t,i)=>i+' = '+t.lbl).join('\n'),'2');
+  if(ti===null) return;
+  const tape=EB_TAPES[parseInt(ti)]; if(!tape) return;
+  let edges=0, panels=0;
+  (parts||[]).forEach(p=>{
+    if(pick!=='(all materials)' && (p.matName||'')!==pick) return;
+    if(!p.eb) return; let touched=false;
+    ['L1','L2','W1','W2'].forEach(s=>{ if(p.eb[s]){ if(!p.eb.tk)p.eb.tk={}; if(!p.eb.ty)p.eb.ty={};
+      p.eb.tk[s]=tape.tk; p.eb.ty[s]=tape.ty; edges++; touched=true; } });
+    if(touched) panels++;
+  });
+  save(); renderParts();
+  alert('✓ '+edges+' banded edge'+(edges!==1?'s':'')+' on '+panels+' panel'+(panels!==1?'s':'')+' set to '+tape.lbl+'.');
 }
 function cycleGrain(id){
   const p=parts.find(x=>x.id===id);if(!p)return;
@@ -1677,10 +1733,11 @@ function renderParts(){
 
     const ebSide=(side,lbl)=>{
       const on=p.eb[side];
-      const tks=['0.6','0.8','1','2'].map(v=>`<option value="${v}"${p.eb.tk[side]===v?' selected':''}>${v}</option>`).join('');
+      const cur=ebTapeKeyOf(p.eb,side);
+      const tks=EB_TAPES.map(t=>`<option value="${t.k}"${cur===t.k?' selected':''}>${t.lbl}</option>`).join('');
       return `<div class="eb-row">
         <button class="eb-btn${on?' on':''}" onclick="toggleEB(${p.id},'${side}')">${lbl}</button>
-        ${on?`<select class="eb-thick" onchange="setEBTk(${p.id},'${side}',this.value)" title="Thickness (mm)">${tks}</select>`:''}
+        ${on?`<select class="eb-thick" onchange="setEBTape(${p.id},'${side}',this.value)" title="Tape — thickness and type. Type sets the label letter: oak=O, paper=P, ABS=Y">${tks}</select>`:''}
       </div>`;
     };
 
@@ -5224,9 +5281,9 @@ function cmRender(){
 
   // EB
   const ebSides=['L1','L2','W1','W2'].filter(s=>p.eb[s]);
-  const cmCodeFor=tk=>tk==='2'?' (O)':(tk==='0.6'?' (P)':'');
+  const cmCodeFor=s=>{const c=ebCodeOf(ebTypeOf(p.eb,s));return c==='Y'?'':' ('+c+')';};
   const ebHTML=ebSides.length
-    ?ebSides.map(s=>'<span class="cm-eb-tag">'+s+' · '+p.eb.tk[s]+'mm'+cmCodeFor(p.eb.tk[s])+'</span>').join('')
+    ?ebSides.map(s=>'<span class="cm-eb-tag">'+s+' · '+p.eb.tk[s]+'mm'+cmCodeFor(s)+'</span>').join('')
     :'<span class="cm-no-eb">No edgebanding</span>';
   const grainTxt=p.grain==='W'?'↔ Cross grain':p.grain==='N'?'○ No grain':'↕ Grain along length';
   const grainCls=p.grain==='W'?'cm-grain-badge cm-grain-w':'cm-grain-badge cm-grain-l';
@@ -5478,10 +5535,10 @@ function buildLabelPages(){
       // Colour-coded so edges are visually distinct at a glance at the saw.
       const ebB=side=>{
         if(!p.eb||!p.eb[side]) return '<span class="eb-box off">·</span>';
-        const tk=(p.eb.tk&&p.eb.tk[side])||'1';
-        let code='Y', bg='#000', fg='#fff';
-        if(tk==='2'){code='O';bg='#8b4513';fg='#fff';}       // oak — brown
-        else if(tk==='0.6'){code='P';bg='#e0e0e0';fg='#000';} // paper — light grey
+        const ty=ebTypeOf(p.eb,side);
+        let code=ebCodeOf(ty), bg='#000', fg='#fff';
+        if(ty==='oak'){bg='#8b4513';fg='#fff';}              // oak — brown
+        else if(ty==='paper'){bg='#e0e0e0';fg='#000';}        // paper — light grey
         return '<span class="eb-box" style="background:'+bg+';color:'+fg+';border-color:'+bg+'">'+code+'</span>';
       };
       // Find the matching part to get the customer's company name
@@ -5569,8 +5626,7 @@ function exportLabelsCSV(){
         const eb=p.eb||{};
         const codeForSide=side=>{
           if(!eb[side]) return 'N';
-          const tk=(eb.tk&&eb.tk[side])||'1';
-          return tk==='2'?'O':(tk==='0.6'?'P':'Y');
+          return ebCodeOf(ebTypeOf(eb,side));
         };
         // Prefer the customer's company stored on the part; fall back to project name
         const rowCompany=(part&&part.company)||customer||'';
@@ -5640,11 +5696,10 @@ function printLabelForPanel(p,sheetIdx){
   const sheet=_lastSheets[sheetIdx];if(!sheet)return;
   const company='Tayside Cut & Edge';const customer=projectName||'';
   const grain=p.grain==='W'?'W':p.grain==='N'?'N':'Y';
-  // Build edge list with thickness-based codes: O=2mm, P=0.6mm, Y=other/default
-  const codeFor=tk=>tk==='2'?'O':(tk==='0.6'?'P':'Y');
+  // Edge codes come from the TAPE TYPE: O=oak, P=paper, Y=ABS/standard
   const ebSides=['L1','L2','W1','W2']
     .filter(s=>p.eb&&p.eb[s])
-    .map(s=>s+':'+codeFor((p.eb.tk&&p.eb.tk[s])||'1'))
+    .map(s=>s+':'+ebCodeOf(ebTypeOf(p.eb,s)))
     .join(' ');
   const matching=sheet.placements.filter(pl=>pl.label===p.label&&pl.origL===p.origL&&pl.origW===p.origW);
   const pidx=matching.findIndex(pl=>pl.x===p.x&&pl.y===p.y);

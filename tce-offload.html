@@ -387,9 +387,9 @@ function render(r){
   markSheetDone(p);
   const ebSides=['L1','L2','W1','W2'].filter(s=>p.eb&&p.eb[s]);
   const tk=s=>(p.eb&&p.eb.tk&&p.eb.tk[s])||'1';
-  const code=t=>t==='2'?' (O)':(t==='0.6'?' (P)':'');
+  const code=s=>{const c=ebCodeFor(ebTypeOf(p.eb,s));return c==='Y'?'':' ('+c+')';};
   const ebHTML=ebSides.length
-    ? ebSides.map(s=>'<span class="tag">'+s+' · '+tk(s)+'mm'+code(tk(s))+'</span>').join('')
+    ? ebSides.map(s=>'<span class="tag">'+s+' · '+tk(s)+'mm'+code(s)+'</span>').join('')
     : '<span class="tag noeb">No edgebanding</span>';
   const grain=p.grain==='W'?'↔ Cross grain':p.grain==='N'?'○ No grain':'↕ Grain along length';
   const sheet=(p.sheetIdx!=null?('Sheet '+(p.sheetIdx+1)):'')+(p.sheetName?' · '+esc(p.sheetName):'');
@@ -440,7 +440,14 @@ function reprintIndex(btn){
 }
 function reprintCurrent(){ if(_current) printLabel(_current); }
 
-function ebCodeFor(tk){ return tk==='2'?'O':(tk==='0.6'?'P':'Y'); }
+// Edge letter comes from the TAPE TYPE the saw sent (oak=O, paper=P, ABS/standard=Y).
+// Older confirms carry no type — 0.6 was always paper, everything else ABS.
+function ebTypeOf(eb,side){
+  const t=eb&&eb.ty&&eb.ty[side]; if(t) return t;
+  const tk=(eb&&eb.tk&&eb.tk[side])||'1';
+  return tk==='0.6'?'paper':'abs';
+}
+function ebCodeFor(ty){ return ty==='oak'?'O':(ty==='paper'?'P':'Y'); }
 // ── Sample labels (company + board + edging + QR to submit-cutlist) ─────────
 const SAMPLE_QR_B64="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";
 let _sampleListsLoaded=false;
@@ -557,7 +564,7 @@ async function printLabel(p){
   if(!p) return;
   const CO=(p.company||'').replace(/\s*[-—]\s*Rev\s*\d+\s*$/i,'');
   const NUM=(p.panelNum&&p.panelTotal)?(p.panelNum+'/'+p.panelTotal):'';   // 1/2, 2/2 = the glue pair
-  const ebc=s=>(p.eb&&p.eb[s])?ebCodeFor((p.eb.tk&&p.eb.tk[s])||'1'):'';
+  const ebc=s=>(p.eb&&p.eb[s])?ebCodeFor(ebTypeOf(p.eb,s)):'';
   // Each piece prints its OWN label so nothing is unlabelled:
   //  • lam piece    → laminate/cut label: ·LAM x2, oversize CUT size, no edges.
   //  • finish piece → finished label: FINISHED size + edgebanding (as always).
