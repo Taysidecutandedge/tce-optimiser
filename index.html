@@ -80,6 +80,8 @@ select option{background:var(--surf2)}
 .eb-row{display:flex;align-items:center;gap:2px}
 .eb-btn{width:20px;height:18px;border-radius:3px;border:1px solid var(--brd);background:var(--surf3);color:var(--txt3);font-size:9px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:var(--mono);padding:0;transition:all .12s;flex-shrink:0}
 .eb-btn.on{background:var(--eb);border-color:var(--eb);color:#fff}
+.eb-btn.eb-all{width:auto;padding:0 6px;margin-bottom:2px;border-style:dashed;letter-spacing:.5px}
+.eb-btn.eb-all.on{border-style:solid}
 .eb-thick{height:18px;padding:0 3px;font-size:10px;min-width:44px;border-radius:3px}
 
 /* GRAIN */
@@ -1669,6 +1671,13 @@ function toggleEB(id,side){
   const p=parts.find(x=>x.id===id);if(!p)return;
   p.eb[side]=!p.eb[side];save();renderParts();
 }
+// One click to band (or unband) all four edges of a panel, instead of tapping L1/L2/W1/W2.
+function toggleEBAll(id){
+  const p=parts.find(x=>x.id===id);if(!p)return;
+  const all=p.eb.L1&&p.eb.L2&&p.eb.W1&&p.eb.W2;
+  ['L1','L2','W1','W2'].forEach(s=>{ p.eb[s]=!all; });
+  save();renderParts();
+}
 function setEBTk(id,side,v){
   const p=parts.find(x=>x.id===id);if(!p)return;
   p.eb.tk[side]=v;save();
@@ -1761,6 +1770,8 @@ function renderParts(){
       <td><input type="number" value="${p.qty}" onchange="ps(${p.id},'qty',+this.value)" min="1" style="width:40px"></td>
       <td>${matSel}</td>
       <td><div class="eb-cell">
+        ${(()=>{const all=p.eb.L1&&p.eb.L2&&p.eb.W1&&p.eb.W2;
+          return `<button class="eb-btn eb-all${all?' on':''}" onclick="toggleEBAll(${p.id})" title="${all?'Remove edging from all 4 edges':'Band all 4 edges'}">${all?'✓ ALL':'ALL'}</button>`;})()}
         ${ebSide('L1','L1')}${ebSide('L2','L2')}${ebSide('W1','W1')}${ebSide('W2','W2')}
       </div></td>
       <td><button class="${gcls}" onclick="cycleGrain(${p.id})" title="${gtip}">${glbl}</button></td>
