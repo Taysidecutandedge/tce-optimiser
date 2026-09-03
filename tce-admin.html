@@ -1144,6 +1144,16 @@ async function buildQuote() {
       if(!matData[mat]) matData[mat]={sheets:0,ebMm:0,ebMmLam:0,ebByThk:{}};
       matData[mat].lamN=(matData[mat].lamN||0)+n;
     });
+    // Jobs saved before the optimiser sent a panel count (or the area) — work both out from the
+    // parts list, so an older job still prices its glue-up properly without needing a re-save.
+    (jobData.parts||[]).forEach(p=>{
+      if(!p.laminate) return;
+      const m=p.matName||''; if(!m) return;
+      if(!matData[m]) matData[m]={sheets:0,ebMm:0,ebMmLam:0,ebByThk:{}};
+      const q=Math.max(1,parseInt(p.qty)||1);
+      if(!jobData.lastResult.lamCount) matData[m].lamN=(matData[m].lamN||0)+q;
+      if(!jobData.lastResult.lamMap)   matData[m].lamM2=(matData[m].lamM2||0)+((Number(p.l)||0)/1000)*((Number(p.w)||0)/1000)*q;
+    });
   } else {
     // No results saved — show note
     wrap.innerHTML = `<div class="no-data" style="text-align:left;padding:20px">
