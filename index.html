@@ -4267,9 +4267,12 @@ function closePrintLayout(){
 let _palletCfg={ bundleMax:4, smallMax:900, stripNarrow:200, maxHeight:1000, maxWeight:1000 };
 function _boardDensity(name){                 // kg/m³
   const s=String(name||'').toLowerCase();
+  if(/poplar|garnica/.test(s)) return 450;    // lightweight ply — much lighter than birch
+  if(/birch/.test(s)) return 680;
   if(/mdf/.test(s)) return 750;               // MDF / MR MDF / veneered-MDF core
   if(/mfc|melamine|egger|kronospan|chip|particle|\b[uhwf]\d{3}/.test(s)) return 695;
-  if(/ply|birch|oak|ash|walnut|beech|timber|hardwood|softwood/.test(s)) return 680;
+  if(/\bply|plywood/.test(s)) return 600;
+  if(/oak|ash|walnut|beech|timber|hardwood|softwood/.test(s)) return 700;
   return 720;
 }
 function _panelWeightKg(l,w,thick,mat){ return (Number(l)||0)*(Number(w)||0)*(Number(thick)||18)*_boardDensity(mat)/1e9; }
