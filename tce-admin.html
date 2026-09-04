@@ -1477,8 +1477,8 @@ function printQuote() {
 
     rows+=`
       <tr class="mat-row"><td colspan="3"><strong>${mat}</strong></td></tr>
-      <tr><td>Boards (${shts} × £${boardPrice.toFixed(2)}${surcharge?' +8%':''})</td><td></td><td class="amt">£${boardTotal.toFixed(2)}</td></tr>
-      <tr><td>Cutting (${shts} sheets × £${cutRate.toFixed(2)})</td><td></td><td class="amt">£${cutTotal.toFixed(2)}</td></tr>
+      <tr><td>Boards (${shts} sheet${shts!==1?'s':''} × £${(shts?boardTotal/shts:0).toFixed(2)})</td><td></td><td class="amt">£${boardTotal.toFixed(2)}</td></tr>
+      <tr><td>Cutting (${shts} sheet${shts!==1?'s':''} × £${cutRate.toFixed(2)})</td><td></td><td class="amt">£${cutTotal.toFixed(2)}</td></tr>
       ${ebPdfRows}
       ${ebMLam>0?`<tr><td>Edgebanding — laminated (${ebMLam.toFixed(2)}m × £${lamRateTotal.toFixed(2)}/lm)</td><td></td><td class="amt">£${lamTotal.toFixed(2)}</td></tr>`:''}
       <tr class="sub-row"><td colspan="2">Subtotal</td><td class="amt">£${matTotal.toFixed(2)}</td></tr>`;
