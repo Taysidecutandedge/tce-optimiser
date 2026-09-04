@@ -4266,6 +4266,12 @@ function closePrintLayout(){
 // ═══════════════════════════════════════════════
 let _palletCfg={ bundleMax:4, smallMax:900, stripNarrow:200, maxHeight:1000, maxWeight:1000 };
 function _boardDensity(name){                 // kg/m³
+  // Per-board figures set in admin win over the name guess, so pallet weights and quote
+  // weights never disagree (a board named "U645 ST9 Light Weight" has no clue in the name).
+  try{
+    const ov=JSON.parse(localStorage.getItem('tce_board_density')||'{}')[String(name||'').toLowerCase().replace(/\s+/g,' ').trim()];
+    if(ov>0) return ov;
+  }catch(e){}
   const s=String(name||'').toLowerCase();
   if(/poplar|garnica/.test(s)) return 450;    // lightweight ply — much lighter than birch
   if(/birch/.test(s)) return 680;

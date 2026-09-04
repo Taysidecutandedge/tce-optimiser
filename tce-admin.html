@@ -1297,8 +1297,9 @@ async function buildQuote() {
       const diff=mfcKg-kg;
       const cmp=Math.abs(diff)>=1
         ? ` · <span style="color:${diff>0?'#7fe3a8':'#e6a23c'}">${diff>0?'saves':'adds'} ${Math.abs(diff).toFixed(0)}kg vs MFC</span>` : '';
+      const isSet = densOverrides()[densKey(mat)]>0;
       return `<tr><td style="color:#6b8f7e">Panel weight <span style="font-size:10px">(est.)</span></td>
-        <td class="override-label" style="color:#6b8f7e">${a.toFixed(2)}m² · ${thick}mm · ${boardDensity(mat)}kg/m³${lamM2>0?' + laminate faces':''}</td>
+        <td class="override-label" style="color:#6b8f7e">${a.toFixed(2)}m² · ${thick}mm · <span onclick="setBoardDensity(${JSON.stringify(mat).replace(/"/g,'&quot;')})" title="${isSet?'Set for this board — click to change':'Guessed from the board name — click to set the real figure'}" style="cursor:pointer;border-bottom:1px dotted #6b8f7e;color:${isSet?'#cfe7dd':'#e6a23c'}">${boardDensity(mat)}kg/m³${isSet?'':' ?'}</span>${lamM2>0?' + laminate faces':''}</td>
         <td></td><td></td>
         <td class="r" style="font-size:11px;color:#6b8f7e">${cmp?cmp.replace(/^ · /,''):''}</td>
         <td class="r" style="color:#cfe7dd">${kg.toFixed(1)} kg</td></tr>`;
@@ -2113,7 +2114,24 @@ async function deleteSupplier(id) {
 // ── Panel weight (admin only) ───────────────────────────────────────────────
 // Board densities kg/m³. Poplar ply is much lighter than birch — that difference is the
 // whole reason a camper builder pays for it, so it gets its own entry.
+// Boards named after their Egger décor ("18mm U645 ST9 Light Weight") tell us nothing about
+// what the core actually is, so a name-only guess will call a poplar-ply board chipboard.
+// An explicit per-board figure always wins — set it by clicking the kg/m³ on the weight line.
+function densOverrides(){ try{ return JSON.parse(localStorage.getItem('tce_board_density')||'{}'); }catch(e){ return {}; } }
+function densKey(name){ return String(name||'').toLowerCase().replace(/\s+/g,' ').trim(); }
+function setBoardDensity(name){
+  const k=densKey(name); if(!k) return;
+  const cur=densOverrides();
+  const now=cur[k]!=null?cur[k]:boardDensity(name);
+  const v=prompt('Core density for "'+name+'" in kg/m³.\n\nPoplar ply 450 · Plywood 600 · Birch ply 680 · MFC/chipboard 650 · MDF 750.\nLeave blank to go back to the automatic guess.', now);
+  if(v===null) return;
+  if(String(v).trim()==='') delete cur[k]; else { const n=parseFloat(v); if(!(n>0)){ alert('Enter a number in kg/m³'); return; } cur[k]=n; }
+  try{ localStorage.setItem('tce_board_density', JSON.stringify(cur)); }catch(e){}
+  if(typeof buildQuote==='function') buildQuote();
+}
 function boardDensity(name){
+  const ov=densOverrides()[densKey(name)];
+  if(ov>0) return ov;
   const s=String(name||'').toLowerCase();
   if(/poplar|garnica/.test(s)) return 450;
   if(/birch/.test(s)) return 680;
