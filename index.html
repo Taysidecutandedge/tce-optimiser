@@ -4270,7 +4270,7 @@ function _boardDensity(name){                 // kg/m³
   if(/poplar|garnica/.test(s)) return 450;    // lightweight ply — much lighter than birch
   if(/birch/.test(s)) return 680;
   if(/mdf/.test(s)) return 750;               // MDF / MR MDF / veneered-MDF core
-  if(/mfc|melamine|egger|kronospan|chip|particle|\b[uhwf]\d{3}/.test(s)) return 695;
+  if(/mfc|melamine|egger|kronospan|chip|particle|\b[uhwf]\d{3}/.test(s)) return 650;   // Egger Eurodekor / chipboard core
   if(/\bply|plywood/.test(s)) return 600;
   if(/oak|ash|walnut|beech|timber|hardwood|softwood/.test(s)) return 700;
   return 720;

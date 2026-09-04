@@ -1293,7 +1293,7 @@ async function buildQuote() {
       const js=((jobData&&jobData.jobSheets)||[]).find(s=>String(s.name||'')===mat);
       const thick=js?js.thick:18;
       const kg=matWeightKg(mat,a,thick,lamM2);
-      const mfcKg=a*((Number(thick)||18)/1000)*695;
+      const mfcKg=a*((Number(thick)||18)/1000)*650;
       const diff=mfcKg-kg;
       const cmp=Math.abs(diff)>=1
         ? ` · <span style="color:${diff>0?'#7fe3a8':'#e6a23c'}">${diff>0?'saves':'adds'} ${Math.abs(diff).toFixed(0)}kg vs MFC</span>` : '';
@@ -2119,7 +2119,7 @@ function boardDensity(name){
   if(/birch/.test(s)) return 680;
   if(/\bply|plywood/.test(s)) return 600;
   if(/mdf/.test(s)) return 750;                       // incl. MR MDF and veneered MDF (MDF core)
-  if(/mfc|melamine|chip|particle|egger|kronospan|\b[uhwf]\d{3}/.test(s)) return 695;
+  if(/mfc|melamine|chip|particle|egger|kronospan|\b[uhwf]\d{3}/.test(s)) return 650;   // Egger Eurodekor / chipboard core
   if(/oak|ash|walnut|beech|iroko|timber/.test(s)) return 700;
   return 700;
 }
