@@ -918,19 +918,16 @@ function lookupBoardPrice(matName, tier) {
   const finM = matName.match(/\b(ST\s?\d+|PM|PG|TM\s?\d+)\b/i);
   const finish = finM ? finM[1].toUpperCase().replace(/\s+/g, '') : null;
 
-  // 1) Exact Egger board match (code + finish) — the normal case
-  if (code && finish && _pricing[code + ' ' + finish]) {
-    basePrice = parseFloat(_pricing[code + ' ' + finish].price);
-    materialType = 'Egger';
-  }
-
-  // 2) Custom boards (MR MDF, Birch Ply, MDF, etc.)
-  if (basePrice === null) {
+  // 1) Custom boards (MR MDF, Birch Ply, laminated make-ups, etc.) come FIRST.
+  //    A custom board is a price you entered deliberately for a real product; the Egger
+  //    table is a generic catalogue. A laminated poplar board named after its décor
+  //    ("Poplar Ply U645 ST9") must not be priced as U645 Eurodekor MFC.
+  {
     const thickMatch = matName.match(/(\d+)mm/i);
     const thickMm = thickMatch ? parseInt(thickMatch[1]) : null;
-    const sizeMatch = matName.match(/(3050|2440)/);
-    const sheetW = sizeMatch ? sizeMatch[1] : '2440';
-    const _cands = _customBoards.filter(b => {
+    const sizeMatch = matName.match(/(3050|2800|2500|2440)/);
+    const sheetW = sizeMatch ? sizeMatch[1] : null;
+    const _base = _customBoards.filter(b => {
       const _bn=b.board_name.toLowerCase();
       let nameMatch=nameLower.includes(_bn);
       // Generic MDF fallback → the default MR MDF board (Finsa). "Medite" is excluded
@@ -939,9 +936,13 @@ function lookupBoardPrice(matName, tier) {
          && !["oak","walnut","veneer","birch","ply","melamine","chip","particle","osb","hpl","laminate","valch","sonoma","medite"].some(function(w){return nameLower.includes(w)}))
         nameMatch=true;
       const thickOk = thickMm ? b.thickness_mm === thickMm : true;
-      const sizeOk = b.sheet_size.startsWith(sheetW);
-      return nameMatch && thickOk && sizeOk;
+      return nameMatch && thickOk;
     });
+    // Size: honour a size in the name; otherwise keep the old 2440 default, but don't
+    // throw the board away if it only comes in another size (e.g. poplar at 2500x1220).
+    let _cands = sheetW ? _base.filter(b => b.sheet_size.startsWith(sheetW)) : [];
+    if (!_cands.length) _cands = _base.filter(b => b.sheet_size.startsWith('2440'));
+    if (!_cands.length) _cands = _base;
     // Most specific match wins — longest board_name (e.g. "Medite MR MDF"/"Finsa MR MDF" beat "Mdf").
     _cands.sort((a,b)=> (b.board_name||'').length - (a.board_name||'').length);
     const customMatch = _cands[0];
@@ -950,6 +951,12 @@ function lookupBoardPrice(matName, tier) {
       materialType = customMatch.board_name;
       supplierName = customMatch.supplier || 'Lathams';
     }
+  }
+
+  // 2) Exact Egger board match (code + finish) — the normal case
+  if (basePrice === null && code && finish && _pricing[code + ' ' + finish]) {
+    basePrice = parseFloat(_pricing[code + ' ' + finish].price);
+    materialType = 'Egger';
   }
 
   // 3) Egger fallbacks if no exact board: flat premium price, then any variant
@@ -2147,7 +2154,11 @@ function setBoardDensity(name){
   const k=densKey(name); if(!k) return;
   const cur=densOverrides();
   const now=cur[k]!=null?cur[k]:boardDensity(name);
-  const v=prompt('Core density for "'+name+'" in kg/m³.\n\nPoplar ply 450 · Plywood 600 · Birch ply 680 · MFC/chipboard 650 · MDF 750.\nLeave blank to go back to the automatic guess.', now);
+  const v=prompt('Density for "'+name+'" in kg/m³ — of the sheet as you buy it.\n\n'
+    +'Bare board:  Poplar ply 450 · Plywood 600 · Birch ply 680 · MFC/chipboard 650 · MDF 750.\n\n'
+    +'Already laminated when it arrives? Add the faces in, because nothing on the job flags them:\n'
+    +'   18mm poplar + 0.8mm HPL both sides = 574.\n\n'
+    +'Leave blank to go back to the automatic guess.', now);
   if(v===null) return;
   if(String(v).trim()==='') delete cur[k]; else { const n=parseFloat(v); if(!(n>0)){ alert('Enter a number in kg/m³'); return; } cur[k]=n; }
   try{ localStorage.setItem('tce_board_density', JSON.stringify(cur)); }catch(e){}
@@ -2266,6 +2277,15 @@ async function lamSaveBoard(){
       board_name:name, thickness_mm:Math.round(thick), sheet_size:Math.round(L)+'x'+Math.round(W),
       base_cost:Number(c.total.toFixed(2)), supplier:'Lathams'
     }});
+    // The laminate faces are part of this board, not a ⧉ LAM glue-up, so nothing on the job
+    // will ever flag them. Bake them into the board's density instead — otherwise the weight
+    // line reports a bare core and overstates the saving against MFC.
+    try{
+      const t=(Number(thick)||18)/1000;
+      const eff=Math.round(boardDensity(name) + (faces*HPL_T*HPL_DENSITY)/t);
+      const ov=densOverrides(); ov[densKey(name)]=eff;
+      localStorage.setItem('tce_board_density', JSON.stringify(ov));
+    }catch(e){}
     await loadCustomBoards();
     showToast(name+' saved at £'+c.total.toFixed(2)+'/sheet ✓');
   }catch(e){ alert('Error saving board: '+e.message); }
