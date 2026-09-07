@@ -2040,7 +2040,8 @@ function renderCustomBoards() {
               style="width:38px;font-size:11px;background:transparent;border:none;border-bottom:1px solid #2b4a40;color:#8ab;padding:1px 0;text-align:right"
               onchange="patchBoardThickness(${b.id}, this.value)">
             <span style="font-size:11px;color:#8ab">mm</span>
-            <button onclick="deleteCustomBoard(${b.id})" title="Delete this board" style="margin-left:auto;background:#3a1a1a;border:1px solid #5a2a2a;color:#f0a0a0;border-radius:4px;font-size:12px;line-height:1;padding:2px 7px;cursor:pointer">×</button>
+            <button onclick="renameCustomBoard(${b.id})" title="Rename &quot;${_attr(b.board_name)}&quot;" style="margin-left:auto;background:#0d1f1a;border:1px solid #2b4a40;color:#8ab;border-radius:4px;font-size:11px;line-height:1;padding:2px 6px;cursor:pointer">✎</button>
+            <button onclick="deleteCustomBoard(${b.id})" title="Delete this board" style="background:#3a1a1a;border:1px solid #5a2a2a;color:#f0a0a0;border-radius:4px;font-size:12px;line-height:1;padding:2px 7px;cursor:pointer">×</button>
           </div>
           <div style="display:flex;align-items:center;gap:4px">
             <span style="font-size:12px;color:#6b8f7e">£</span>
@@ -2071,6 +2072,29 @@ async function patchBoardThickness(id, val){
   try{
     await sbFetch(`tce_custom_boards?id=eq.${id}`, {method:'PATCH', headers:{'Prefer':'return=minimal'}, body:{thickness_mm:thick}});
     showToast('Thickness updated → '+thick+'mm ✓');
+    await loadCustomBoards();
+  }catch(e){ alert('Error: '+e.message); }
+}
+// Rename a board. A board name is shared across its thicknesses and sheet sizes, so this
+// renames the whole set — otherwise you'd split one board into two half-named groups.
+// Any density you'd set against the old name follows it across.
+async function renameCustomBoard(id){
+  const b=_customBoards.find(x=>x.id===id); if(!b) return;
+  const oldName=b.board_name||'';
+  const kin=_customBoards.filter(x=>(x.board_name||'')===oldName);
+  const v=prompt(`Rename this board.\n\nApplies to all ${kin.length} entr${kin.length===1?'y':'ies'} under "${oldName}" (every thickness and sheet size).\n\nTip: include the core in the name — "Poplar", "MR MDF", "Birch" — so weights and grouping work out on their own.`, oldName);
+  if(v===null) return;
+  const name=String(v).trim();
+  if(!name || name===oldName) return;
+  try{
+    await sbFetch(`tce_custom_boards?board_name=eq.${encodeURIComponent(oldName)}`,
+      {method:'PATCH', headers:{'Prefer':'return=minimal'}, body:{board_name:name}});
+    // Carry any density override over to the new name so the weight line doesn't reset.
+    try{
+      const ov=densOverrides(), ok=densKey(oldName), nk=densKey(name);
+      if(ov[ok]!=null && ov[nk]==null){ ov[nk]=ov[ok]; delete ov[ok]; localStorage.setItem('tce_board_density', JSON.stringify(ov)); }
+    }catch(e){}
+    showToast(`Renamed → ${name} ✓`);
     await loadCustomBoards();
   }catch(e){ alert('Error: '+e.message); }
 }
