@@ -936,7 +936,11 @@ function lookupBoardPrice(matName, tier) {
          && !["oak","walnut","veneer","birch","ply","melamine","chip","particle","osb","hpl","laminate","valch","sonoma","medite"].some(function(w){return nameLower.includes(w)}))
         nameMatch=true;
       const thickOk = thickMm ? b.thickness_mm === thickMm : true;
-      return nameMatch && thickOk;
+      // Skip unpriced rows. The board list carries skeleton entries at £0 for sizes that
+      // were never quoted; matching one would silently price the job at nothing, which is
+      // far worse than showing no price at all.
+      const priced = (parseFloat(b.base_cost)||0) > 0;
+      return nameMatch && thickOk && priced;
     });
     // Size: honour a size in the name; otherwise keep the old 2440 default, but don't
     // throw the board away if it only comes in another size (e.g. poplar at 2500x1220).
