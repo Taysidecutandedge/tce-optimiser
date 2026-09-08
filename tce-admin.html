@@ -1369,6 +1369,36 @@ async function buildQuote() {
     rows += `<tr class="subtotal"><td colspan="5">Shaker doors subtotal</td><td class="r">£${doorTotal.toFixed(2)}</td></tr>`;
   }
 
+  // Extra lines — time, rework, delivery, anything the per-sheet model can't express.
+  // Offcut work is the usual case: the sheet-based cutting charge assumes a full sheet's
+  // worth of parts, so a job cut from odds and ends has to be charged on the clock.
+  {
+    const ex=extraLines();
+    rows += `<tr class="mat-head"><td colspan="6">ADDITIONAL CHARGES</td></tr>`;
+    ex.forEach((x,i)=>{
+      const line=(Number(x.qty)||0)*(Number(x.rate)||0); grandEx+=line;
+      rows += `<tr>
+        <td><input class="override-input" style="width:100%" value="${_attr(x.desc||'')}" placeholder="e.g. Labour — cutting from customer's offcuts"
+          onchange="extraSet(${i},'desc',this.value)"></td>
+        <td class="override-label">
+          <input type="number" step="0.25" class="override-input" style="width:64px" value="${x.qty}" onchange="extraSet(${i},'qty',this.value)">
+          <span style="color:#6b8f7e">${_attr(x.unit||'hrs')}</span>
+          <input class="override-input" style="width:52px" value="${_attr(x.unit||'hrs')}" title="Unit" onchange="extraSet(${i},'unit',this.value)">
+          × £<input type="number" step="0.01" class="override-input" style="width:70px" value="${x.rate}" onchange="extraSet(${i},'rate',this.value)">
+        </td>
+        <td></td><td></td>
+        <td class="r"><button class="btn btn-danger btn-sm" onclick="extraDel(${i})" title="Remove this line">×</button></td>
+        <td class="r">£${line.toFixed(2)}</td></tr>`;
+    });
+    rows += `<tr><td colspan="6" style="padding-top:6px">
+      <button class="btn btn-secondary btn-sm" onclick="extraAdd()">+ Add line</button>
+      <button class="btn btn-secondary btn-sm" onclick="extraAdd('Labour — cutting from customer&#39;s own offcuts',1,'hrs',0)">+ Time</button>
+      <button class="btn btn-secondary btn-sm" onclick="extraAdd('Recuts — cutlist revisions',1,'job',0)">+ Recuts</button>
+      <span style="font-size:11px;color:#6b8f7e;margin-left:8px">Shows on the customer PDF exactly as worded here.</span>
+    </td></tr>`;
+    if(ex.length) rows += `<tr class="subtotal"><td colspan="5">Additional charges subtotal</td><td class="r">£${ex.reduce((s,x)=>s+(Number(x.qty)||0)*(Number(x.rate)||0),0).toFixed(2)}</td></tr>`;
+  }
+
   const grandInc = grandEx * 1.20;
   const vatAmt = grandEx * 0.20;
 
@@ -1383,6 +1413,20 @@ async function buildQuote() {
       <div class="totals-row grand"><span>Total inc-VAT</span><span>£${grandInc.toFixed(2)}</span></div>
     </div>`;
 }
+
+// Extra quote lines live inside _quoteOverrides so they save and reload with the quote.
+// "__" prefix keeps them clear of the per-material entries.
+function extraLines(){ if(!Array.isArray(_quoteOverrides.__extras)) _quoteOverrides.__extras=[]; return _quoteOverrides.__extras; }
+function extraAdd(desc,qty,unit,rate){
+  extraLines().push({desc:desc||'', qty:qty!=null?qty:1, unit:unit||'hrs', rate:rate!=null?rate:0});
+  buildQuote();
+}
+function extraSet(i,field,val){
+  const ex=extraLines(); if(!ex[i]) return;
+  ex[i][field]=(field==='qty'||field==='rate') ? (parseFloat(val)||0) : val;
+  buildQuote();
+}
+function extraDel(i){ extraLines().splice(i,1); buildQuote(); }
 
 async function saveQuote() {
   if (!_currentJob) return;
@@ -1540,6 +1584,21 @@ function printQuote() {
       rows+=`<tr><td>Door ${i+1} — ${d.h}×${d.w}mm${d.panels>1?', '+d.panels+'-panel':''} (${qty} × £${each.toFixed(2)})</td><td></td><td class="amt">£${line.toFixed(2)}</td></tr>`;
     });
     rows+=`<tr class="sub-row"><td colspan="2">Shaker doors subtotal</td><td class="amt">£${doorTotal.toFixed(2)}</td></tr>`;
+  }
+
+  // Additional charges — time, rework, delivery. Worded exactly as typed in admin.
+  {
+    const ex=extraLines().filter(x=>(Number(x.qty)||0)*(Number(x.rate)||0)!==0 || (x.desc||'').trim());
+    if(ex.length){
+      let exTotal=0;
+      rows+=`<tr class="mat-row"><td colspan="3"><strong>Additional Charges</strong></td></tr>`;
+      ex.forEach(x=>{
+        const q=Number(x.qty)||0, r=Number(x.rate)||0, line=q*r; exTotal+=line; grandEx+=line;
+        const det=(q&&r)?` (${q} ${x.unit||'hrs'} × £${r.toFixed(2)})`:'';
+        rows+=`<tr><td>${_attr(x.desc||'Additional charge')}${det}</td><td></td><td class="amt">£${line.toFixed(2)}</td></tr>`;
+      });
+      rows+=`<tr class="sub-row"><td colspan="2">Additional charges subtotal</td><td class="amt">£${exTotal.toFixed(2)}</td></tr>`;
+    }
   }
 
   const vat=grandEx*0.20;
