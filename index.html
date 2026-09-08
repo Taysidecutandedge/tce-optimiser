@@ -5042,8 +5042,22 @@ async function cmReconcileFromCloud(){
   // so a rename can't wipe out the cut history mid-job.
   const co=p=>String(p.company||'').trim().toLowerCase();
   const mine=rows.map(x=>x.panel||{}).filter(p=>!proj||co(p)===proj);
-  const loose=mine.length?mine:rows.map(x=>x.panel||{}).filter(p=>{ const c=co(p);
-    return c&&proj&&(c.indexOf(proj)===0||proj.indexOf(c)===0); });
+  // Rename tolerance, but a bare prefix is not enough. "Dianne" is a prefix of
+  // "Dianne Rev3 Doors" — a completely different job — and matching it silently ticked
+  // panels that had never been cut. Only accept a tail that reads like a revision or
+  // qualifier suffix, and refuse to guess if more than one job still matches.
+  const TAIL_OK=/^[\s\-–—_.,()]*(?:(?:rev|revision|v)\s*\.?\s*\d+|final|copy)?[\s\-–—_.,()]*$/i;
+  let loose=mine;
+  if(!loose.length && proj){
+    const cand=rows.map(x=>x.panel||{}).filter(p=>{
+      const c=co(p); if(!c) return false;
+      const [lng,shrt]=c.length>proj.length?[c,proj]:[proj,c];
+      return lng.indexOf(shrt)===0 && TAIL_OK.test(lng.slice(shrt.length));
+    });
+    // Ambiguous (two different jobs both look like renames of this one)? Take neither.
+    const names=new Set(cand.map(co));
+    loose = names.size<=1 ? cand : [];
+  }
   // PRIMARY: match on the panel's exact position on its sheet (sheetIdx + x + y). Counting
   // by label alone marked the first N matching panels as done regardless of which sheet they
   // were really cut from — which is how cut panels showed up on sheets not started yet.
