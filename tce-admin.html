@@ -1228,9 +1228,13 @@ async function buildQuote() {
     // the optimiser saved it — so offcuts never inflate a customer quote.
     const qb=(jobData&&jobData.quoteBasis)||null;
     const shts=(qb && qb[mat]!=null) ? qb[mat] : data.sheets;
-    const boardBase = shts * boardPrice;
+    // Boards and cutting get their own counts. On offcut work you can bill nil material
+    // but still charge the handling, or the other way round.
+    const bShts = ov.boardSheets!=null ? ov.boardSheets : shts;
+    const cShts = ov.cutSheets  !=null ? ov.cutSheets   : shts;
+    const boardBase = bShts * boardPrice;
     const boardTotal = surcharge ? boardBase * 1.08 : boardBase;
-    const cutTotal = shts * cutRate;
+    const cutTotal = cShts * cutRate;
     // Laminated edges = a thick glued-up edge → WIDER tape, priced separately.
     const ebMLam = (data.ebMmLam||0)/1000;
     const lamTapeKey = ov.lamTapeKey || '43x1 ABS';
@@ -1256,7 +1260,9 @@ async function buildQuote() {
     <tr class="mat-head"><td colspan="6">${mat}</td></tr>
     <tr>
       <td>Boards</td>
-      <td class="override-label">${shts} sheets × <input type="number" class="override-input" value="${boardPrice.toFixed(2)}"
+      <td class="override-label"><input type="number" class="override-input" style="width:52px" value="${bShts}" step="1" min="0"
+        title="Sheets charged for material${ov.boardSheets!=null?' — edited, nested count is '+shts:''}"
+        onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},boardSheets:parseFloat(this.value)||0};buildQuote()"> sheets × <input type="number" class="override-input" value="${boardPrice.toFixed(2)}"
         onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},boardPrice:parseFloat(this.value)||0};buildQuote()" step="0.01">
         <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#6b8f7e;margin-left:8px">
           <input type="checkbox" ${surcharge?'checked':''} onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},surcharge:this.checked};buildQuote()"> +8% surcharge
@@ -1268,9 +1274,12 @@ async function buildQuote() {
     </tr>
     <tr>
       <td>Cutting</td>
-      <td class="override-label">${shts} sheets × <input type="number" class="override-input" value="${cutRate.toFixed(2)}"
+      <td class="override-label"><input type="number" class="override-input" style="width:52px" value="${cShts}" step="1" min="0"
+        title="Sheets charged for cutting${ov.cutSheets!=null?' — edited, nested count is '+shts:''}"
+        onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},cutSheets:parseFloat(this.value)||0};buildQuote()"> sheets × <input type="number" class="override-input" value="${cutRate.toFixed(2)}"
         onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},cutRate:parseFloat(this.value)||0};buildQuote()" step="0.01">/sheet</td>
-      <td></td><td></td><td></td>
+      <td></td><td></td>
+      <td class="r" style="font-size:11px;color:#6b8f7e">${(ov.boardSheets!=null||ov.cutSheets!=null)?`<a href="#" onclick="delete _quoteOverrides['${mat}'].boardSheets;delete _quoteOverrides['${mat}'].cutSheets;buildQuote();return false" style="color:#e6a23c">reset to ${shts}</a>`:`nested: ${shts}`}</td>
       <td class="r">£${cutTotal.toFixed(2)}</td>
     </tr>
     ${lamM2 > 0 ? `<tr>
@@ -1543,16 +1552,18 @@ function printQuote() {
     const lamTotal=ebMLam*lamRateTotal;
     const qb=(jobData&&jobData.quoteBasis)||null;
     const shts=(qb && qb[mat]!=null) ? qb[mat] : data.sheets;   // offcuts-off count
-    const boardBase=shts*boardPrice;
+    const bShts = ov.boardSheets!=null ? ov.boardSheets : shts;
+    const cShts = ov.cutSheets  !=null ? ov.cutSheets   : shts;
+    const boardBase=bShts*boardPrice;
     const boardTotal=surcharge?boardBase*1.08:boardBase;
-    const cutTotal=shts*cutRate;
+    const cutTotal=cShts*cutRate;
     const matTotal=boardTotal+cutTotal+ebTotal+lamTotal;
     grandEx+=matTotal;
 
     rows+=`
       <tr class="mat-row"><td colspan="3"><strong>${mat}</strong></td></tr>
-      <tr><td>Boards (${shts} sheet${shts!==1?'s':''} × £${(shts?boardTotal/shts:0).toFixed(2)})</td><td></td><td class="amt">£${boardTotal.toFixed(2)}</td></tr>
-      <tr><td>Cutting (${shts} sheet${shts!==1?'s':''} × £${cutRate.toFixed(2)})</td><td></td><td class="amt">£${cutTotal.toFixed(2)}</td></tr>
+      ${boardTotal!==0||bShts?`<tr><td>Boards (${bShts} sheet${bShts!==1?'s':''} × £${(bShts?boardTotal/bShts:0).toFixed(2)})</td><td></td><td class="amt">£${boardTotal.toFixed(2)}</td></tr>`:''}
+      ${cutTotal!==0||cShts?`<tr><td>Cutting (${cShts} sheet${cShts!==1?'s':''} × £${cutRate.toFixed(2)})</td><td></td><td class="amt">£${cutTotal.toFixed(2)}</td></tr>`:''}
       ${ebPdfRows}
       ${ebMLam>0?`<tr><td>Edgebanding — laminated (${ebMLam.toFixed(2)}m × £${lamRateTotal.toFixed(2)}/lm)</td><td></td><td class="amt">£${lamTotal.toFixed(2)}</td></tr>`:''}
       <tr class="sub-row"><td colspan="2">Subtotal</td><td class="amt">£${matTotal.toFixed(2)}</td></tr>`;
