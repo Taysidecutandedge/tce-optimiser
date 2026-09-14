@@ -1515,9 +1515,10 @@ async function loadSavedQuotes(jobId) {
           <td><span class="badge badge-${q.customer_tier}">${q.customer_tier}</span></td>
           <td style="text-align:right">£${parseFloat(q.total_ex_vat).toFixed(2)}${drift?` <span title="Today's rates would give £${live.toFixed(2)} for this job" style="color:#e6a23c">⚠</span>`:''}</td>
           <td style="text-align:right">£${parseFloat(q.total_inc_vat).toFixed(2)}</td>
-          <td style="text-align:right">${lines&&lines.length
-            ? `<button class="btn btn-secondary btn-sm" onclick="viewSavedQuote('${q.id}')">${lines.length} lines</button>`
-            : '<span style="font-size:11px;color:#6b8f7e" title="Saved before line detail was recorded">totals only</span>'}</td>
+          <td style="text-align:right;white-space:nowrap">${lines&&lines.length
+            ? `<button class="btn btn-secondary btn-sm" onclick="viewSavedQuote('${q.id}')" title="See it exactly as you sent it">👁 ${lines.length} lines</button>`
+            : '<span style="font-size:11px;color:#6b8f7e" title="Saved before line detail was recorded">totals only</span>'}
+            <button class="btn btn-secondary btn-sm" onclick="restoreSavedQuote('${q.id}')" title="Load this quote back in so you can amend it and save a new version">↩ Reopen</button></td>
         </tr>`;}).join('')}
         </tbody>
       </table>
@@ -1527,6 +1528,29 @@ async function loadSavedQuotes(jobId) {
   } catch(e){}
 }
 let _savedQuotes=[];
+// Load a saved quote back into the working quote — its tier, customer and every override —
+// so you can amend it and save a new version. The lines redraw at TODAY'S rates, which is
+// what you want when revising, but it means the total can differ from the stored one, so
+// say so plainly rather than let it change under him.
+function restoreSavedQuote(id){
+  const q=_savedQuotes.find(x=>String(x.id)===String(id)); if(!q) return;
+  const qd=q.quote_data||{};
+  const stored=parseFloat(q.total_ex_vat)||0;
+  if(!confirm(`Reopen the quote saved ${new Date(q.created_at).toLocaleDateString('en-GB')} (£${stored.toFixed(2)} ex-VAT)?\n\n`
+    +`Its customer, tier and all your overrides come back.\n`
+    +`Lines re-price at today's rates, so the total may differ — the saved copy isn't changed.`)) return;
+  _quoteOverrides = JSON.parse(JSON.stringify(qd.overrides||{}));
+  const tierSel=document.getElementById('qTier'); if(tierSel && qd.tier) tierSel.value=qd.tier;
+  const custInp=document.getElementById('qCustomer'); if(custInp && q.customer_name) custInp.value=q.customer_name;
+  buildQuote();
+  setTimeout(()=>{
+    const el=document.querySelectorAll('.totals-row span:last-child')[0];
+    const now=el?parseFloat(el.textContent.replace('£','')):null;
+    if(now!=null && Math.abs(now-stored)>0.01)
+      showToast(`Reopened — now £${now.toFixed(2)}, was £${stored.toFixed(2)} (rates have changed)`);
+    else showToast('Quote reopened ✓');
+  },50);
+}
 // Show a saved quote exactly as it was priced, not as today's rates would redraw it.
 function viewSavedQuote(id){
   const q=_savedQuotes.find(x=>String(x.id)===String(id)); if(!q) return;
