@@ -1640,7 +1640,7 @@ function sheetBoardFilter(){
   list=list.slice(0,50);
   if(!list.length){ res.innerHTML='<div style="padding:8px 9px;color:#8fae9f;font-size:12px">No match</div>'; res.style.display='block'; return; }
   res.innerHTML=list.map(b=>{ const gi=_matMapData.indexOf(b);
-    return `<div onmousedown="applySheetBoard(${gi})" style="padding:8px 10px;font-size:12px;color:#e8f0ec;cursor:pointer;border-bottom:1px solid #17332b" onmouseover="this.style.background='#17332b'" onmouseout="this.style.background='transparent'">${esc(b.name)} · ${b.thick||'?'}mm · ${b.l}×${b.w} · £${(b.cost||0).toFixed(2)}</div>`;
+    return `<div onmousedown="applySheetBoard(${gi})" style="padding:8px 10px;font-size:12px;color:#e8f0ec;cursor:pointer;border-bottom:1px solid #17332b" onmouseover="this.style.background='#17332b'" onmouseout="this.style.background='transparent'">${esc(b.name)} · ${b.thick||'?'}mm · ${b.l}×${b.w} · ${(b.cost||0)>0?('£'+(b.cost||0).toFixed(2)):'<span style="color:#e6a23c">no price set</span>'}</div>`;
   }).join('');
   res.style.display='block';
 }
@@ -4137,7 +4137,15 @@ function _matMapBoards(){
     return {name:(b.thickness_mm+'mm '+b.board_name), thick:b.thickness_mm, l:sz?parseInt(sz[1]):2440, w:sz?parseInt(sz[2]):1220, cost:parseFloat(b.base_cost)||0, color:'#8aa', grainLen:false, ref:'cb:'+b.id}; });
   const egAll=(_eggerCodes||[]).map(e=>({name:e.egger_code, thick:18, l:2800, w:2070, cost:parseFloat(e.price_retail)||0, color:'#c39b7b', grainLen:true, ref:'eg:'+e.egger_code}));
   const seen=new Set(), out=[];
-  [...cbAll,...libAll,...egAll].forEach(o=>{ const k=(o.name||'').toLowerCase().replace(/\s+/g,' ').trim()+'|'+o.thick; if(seen.has(k))return; seen.add(k); out.push(o); });
+  // The key MUST include the sheet size. The same board is stocked in more than one size
+  // (Finsa MR MDF at 2440×1220 and 3050×1220), and keying on name+thickness alone threw one
+  // of them away — so only whichever happened to come back first was ever pickable.
+  const src=[...cbAll,...libAll,...egAll];
+  // Where two entries really are identical, keep the priced one: a £0 row is a placeholder
+  // for a size that was never quoted, and picking it puts nothing on the job.
+  src.sort((a,b)=> ((b.cost||0)>0?1:0) - ((a.cost||0)>0?1:0));
+  src.forEach(o=>{ const k=(o.name||'').toLowerCase().replace(/\s+/g,' ').trim()+'|'+o.thick+'|'+o.l+'x'+o.w;
+    if(seen.has(k))return; seen.add(k); out.push(o); });
   return out;
 }
 let _matMapData=[], _matMapCatTried=false;
