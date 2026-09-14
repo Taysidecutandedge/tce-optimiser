@@ -4743,7 +4743,6 @@ function buildPrintLayout(){
 
   // ── JOB-LEVEL STATS ──────────────────────────────────────────
   const totalPanels=sheets.reduce((a,s)=>a+s.placements.length,0);
-  const totalCost=sheets.reduce((a,s)=>a+s.cost,0);
 
   // EB grand totals keyed by thickness + sheet code
   const plEbSheetCode=name=>{
@@ -4808,7 +4807,8 @@ function buildPrintLayout(){
         '<div class="pl-sum-box-title">Job Overview</div>'+
         '<div class="pl-sum-stat"><span>Total sheets</span><span class="pl-sum-stat-val">'+N+'</span></div>'+
         '<div class="pl-sum-stat"><span>Total panels</span><span class="pl-sum-stat-val">'+totalPanels+'</span></div>'+
-        (totalCost>0?'<div class="pl-sum-stat"><span>Material cost</span><span class="pl-sum-stat-val">£'+totalCost.toFixed(2)+'</span></div>':'')+
+        // No money on the workshop print — pricing belongs on the quote PDF, and this
+        // sheet gets handled on the saw and sometimes seen by the customer.
         '<div style="margin-top:8px">'+matRows+'</div>'+
       '</div>'+
       '<div class="pl-sum-box">'+
