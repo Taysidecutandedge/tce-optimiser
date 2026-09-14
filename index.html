@@ -1677,7 +1677,8 @@ const EB_TAPES=[
   {k:'1',   tk:'1',  ty:'abs',  lbl:'1 ABS'},
   {k:'2',   tk:'2',  ty:'abs',  lbl:'2 ABS'},
   {k:'1o',  tk:'1',  ty:'oak',  lbl:'1 oak'},
-  {k:'2o',  tk:'2',  ty:'oak',  lbl:'2 oak'}
+  {k:'2o',  tk:'2',  ty:'oak',  lbl:'2 oak'},
+  {k:'1w',  tk:'1',  ty:'walnut', lbl:'1 walnut'}
 ];
 // Type of an edge. Older jobs have no type stored: 0.6 was always paper, everything else ABS.
 function ebTypeOf(eb,side){
@@ -1686,7 +1687,7 @@ function ebTypeOf(eb,side){
   return tk==='0.6'?'paper':'abs';
 }
 // The letter that prints on the label / shows in cutting mode.
-function ebCodeOf(ty){ return ty==='oak'?'O':(ty==='paper'?'P':'Y'); }
+function ebCodeOf(ty){ return ty==='oak'?'O':(ty==='walnut'?'W':(ty==='paper'?'P':'Y')); }
 function ebTapeKeyOf(eb,side){
   const tk=(eb&&eb.tk&&eb.tk[side])||'1', ty=ebTypeOf(eb,side);
   const f=EB_TAPES.find(t=>t.tk===tk&&t.ty===ty);

@@ -482,6 +482,7 @@ const DEFAULT_EB_RATES = [
   {tape_key:'23x2 Oak',tape_label:'23mm × 2mm Oak',base_rate:2.90,mat_rate:1.20},
   {tape_key:'43x1 Oak',tape_label:'43mm × 1mm Oak',base_rate:2.90,mat_rate:1.25},
   {tape_key:'43x2 Oak',tape_label:'43mm × 2mm Oak',base_rate:2.90,mat_rate:2.00},
+  {tape_key:'23x1 Walnut',tape_label:'22mm × 1mm Walnut veneer',base_rate:2.90,mat_rate:0.90},
   {tape_key:'no_mat',tape_label:'Application only (no material)',base_rate:2.90,mat_rate:0.00},
 ];
 
@@ -1191,15 +1192,21 @@ async function buildQuote() {
     const cutRate = ov.cutRate !== undefined ? ov.cutRate : cutRateForMat(mat, jobData, tier);
     // Edgebanding split by tape thickness (1mm, 2mm, …) — each its own line + rate,
     // so a board with e.g. 1mm and 2mm oak veneer edges charges both correctly.
-    const _isOakMat=/oak|walnut|veneer/i.test(mat);
+    // Walnut is checked before oak: a walnut board should default to walnut tape, not be
+    // swept into "wood veneer = oak" and quoted at the oak rate.
+    const _wood=/walnut/i.test(mat)?'Walnut':(/oak|veneer/i.test(mat)?'Oak':'ABS');
+    const _isOakMat=_wood!=='ABS';
     const _boardThk=parseInt((mat.match(/(\d+)\s*mm/)||[])[1])||18;
     const _wide=_boardThk>=19?'43':'23';
     const _defTape=(thk)=>{
-      const t=parseFloat(thk)>=2?'2':'1', wood=_isOakMat?'Oak':'ABS';
+      const t=parseFloat(thk)>=2?'2':'1', wood=_wood;
       const want=_wide+'x'+t+' '+wood;
       if(_ebRates.some(r=>r.tape_key===want)) return want;
       const c=_ebRates.find(r=>r.tape_key.indexOf('x'+t)>=0 && r.tape_key.toLowerCase().indexOf(wood.toLowerCase())>=0);
-      return c?c.tape_key:(_isOakMat?'23x1 Oak':'23x1 ABS');
+      if(c) return c.tape_key;
+      // That wood isn't stocked in this width/thickness — fall back to any of it, then oak, then ABS.
+      const any=_ebRates.find(r=>r.tape_key.toLowerCase().indexOf(wood.toLowerCase())>=0);
+      return any?any.tape_key:(_isOakMat?'23x1 Oak':'23x1 ABS');
     };
     let ebTotal=0, ebRowsHtml='';
     Object.keys(data.ebByThk||{}).sort((a,b)=>parseFloat(a)-parseFloat(b)).forEach(thk=>{
@@ -1526,13 +1533,16 @@ function printQuote() {
     const surcharge=ov.surcharge||false;
     const cutRate=ov.cutRate!==undefined?ov.cutRate:cutRateForMat(mat,jobData,tier);
     // Edgebanding split by tape thickness — each its own priced line (matches the on-screen quote).
-    const _isOakMat=/oak|walnut|veneer/i.test(mat);
+    const _wood=/walnut/i.test(mat)?'Walnut':(/oak|veneer/i.test(mat)?'Oak':'ABS');
+    const _isOakMat=_wood!=='ABS';
     const _boardThk=parseInt((mat.match(/(\d+)\s*mm/)||[])[1])||18;
     const _wide=_boardThk>=19?'43':'23';
-    const _defTape=(thk)=>{ const t=parseFloat(thk)>=2?'2':'1', wood=_isOakMat?'Oak':'ABS'; const want=_wide+'x'+t+' '+wood;
+    const _defTape=(thk)=>{ const t=parseFloat(thk)>=2?'2':'1', wood=_wood; const want=_wide+'x'+t+' '+wood;
       if(_ebRates.some(r=>r.tape_key===want)) return want;
       const c=_ebRates.find(r=>r.tape_key.indexOf('x'+t)>=0 && r.tape_key.toLowerCase().indexOf(wood.toLowerCase())>=0);
-      return c?c.tape_key:(_isOakMat?'23x1 Oak':'23x1 ABS'); };
+      if(c) return c.tape_key;
+      const any=_ebRates.find(r=>r.tape_key.toLowerCase().indexOf(wood.toLowerCase())>=0);
+      return any?any.tape_key:(_isOakMat?'23x1 Oak':'23x1 ABS'); };
     let ebTotal=0, ebPdfRows='';
     Object.keys(data.ebByThk||{}).sort((a,b)=>parseFloat(a)-parseFloat(b)).forEach(thk=>{
       const m=(data.ebByThk[thk]||0)/1000; if(m<=0) return;
