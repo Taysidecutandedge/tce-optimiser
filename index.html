@@ -2058,16 +2058,27 @@ function _calculateInner(){
         }
         const frX=sh.cols.filter(c=>c.fullRun).reduce((a,c)=>Math.max(a,c.x+c.w+kerf),0);
         if(frX+w<=sh.uw+.001){
+          // Opening a full-run column shoves every other column to the right. Check the
+          // whole sheet still fits BEFORE committing: without this the strips went on and
+          // pushed the panels already placed clean off the edge of the board.
+          const others=sh.cols.filter(c=>!c.fullRun);
+          let ext=frX+w;
+          others.forEach(c=>{ ext+=kerf+c.w; });
+          if(ext>sh.uw+.001) return false;      // won't fit once everything shifts — try another sheet
           record(frX,0);
           sh.cols.unshift({x:frX,w,usedH:h+kerf,fullRun:true});
           // Shift non-fullRun columns right to make room
           let nextX=frX+w+kerf;
-          const shiftAmount=nextX - (sh.cols.filter(c=>!c.fullRun).length?Math.min(...sh.cols.filter(c=>!c.fullRun).map(c=>c.x)):nextX);
-          sh.cols.filter(c=>!c.fullRun).forEach(c=>{c.x=nextX;nextX+=c.w+kerf;});
-          // Also shift existing placements that belong to non-fullRun columns
+          const shiftAmount=nextX - (others.length?Math.min(...others.map(c=>c.x)):nextX);
+          others.forEach(c=>{c.x=nextX;nextX+=c.w+kerf;});
+          // Also shift existing placements that belong to non-fullRun columns.
+          // A full run is anything taller than the USABLE area (same test as above) — not
+          // something exactly as long as the sheet. Testing against fullL meant a 2436mm
+          // strip on a 2440mm board counted as "not a full run" and got shifted with the
+          // rest, landing on top of the panels it was supposed to sit beside.
           if(shiftAmount>0){
             sh.placements.forEach(pl=>{
-              if(Math.abs(pl.h-sh.fullL)>1) pl.x+=shiftAmount;
+              if(!(pl.h>sh.uh-1)) pl.x+=shiftAmount;
             });
           }
           sh.usedW=sh.cols.reduce((a,c)=>Math.max(a,c.x+c.w+kerf),0);
@@ -2544,7 +2555,35 @@ function _calculateInner(){
     }
     _usedOff[k].count++; } });
   window._lastUsedOffcuts=Object.values(_usedOff);
+  _validateNest(best.sheets);
   renderResults(best.sheets,best.unplaced);
+}
+
+// Last line of defence. A nest that puts panels off the board or on top of each other is
+// worse than no nest — it gets cut. Anything impossible is reported here rather than
+// quietly printed and sent to the saw.
+function _validateNest(sheets){
+  const bad=[];
+  (sheets||[]).forEach((s,si)=>{
+    const P=s.placements||[];
+    const lim=(p)=>(p.h>s.uh-1?s.fullL:s.uh);      // full runs legitimately use the untrimmed length
+    P.forEach(p=>{
+      if(p.x<-1||p.y<-1||p.x+p.w>s.uw+1||p.y+p.h>lim(p)+1)
+        bad.push(`Sheet ${si+1} (${s.name}): “${p.label}” ${Math.round(p.w)}×${Math.round(p.h)} sits off the board`);
+    });
+    for(let i=0;i<P.length;i++) for(let j=i+1;j<P.length;j++){
+      const a=P[i],b=P[j];
+      if(Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x)>1 && Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y)>1)
+        bad.push(`Sheet ${si+1} (${s.name}): “${a.label}” overlaps “${b.label}”`);
+    }
+  });
+  if(!bad.length) return true;
+  console.error('[nest] invalid placements:', bad);
+  const shown=bad.slice(0,8).join('\n');
+  alert('⚠ This nest is not safe to cut.\n\n'+shown
+    +(bad.length>8?`\n\n…and ${bad.length-8} more.`:'')
+    +'\n\nDo not cut these sheets. Press Calculate again — if it repeats, check for parts bigger than the sheet, or reduce the sheet trims.');
+  return false;
 }
 
 function guillotinePlace(){} // kept for compatibility — not used
