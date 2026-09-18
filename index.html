@@ -299,6 +299,8 @@ select option{background:var(--surf2)}
 .cm-dot{width:8px;height:8px;border-radius:50%;background:#2a2b3a;cursor:pointer;flex-shrink:0;transition:background .15s}
 .cm-dot.current{background:var(--acc);transform:scale(1.3)}
 .cm-dot.done{background:var(--ok)}
+/* cut AND selected — stays green, ringed amber so you can see which one you're on */
+.cm-dot.done.current{background:var(--ok);box-shadow:0 0 0 2px var(--acc);transform:scale(1.3)}
 /* Instruction overlay for non-panel steps */
 .cm-step-overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(10,11,15,.92);padding:20px;text-align:center}
 .cm-step-icon{font-size:clamp(40px,8vw,80px);line-height:1;margin-bottom:12px}
@@ -5495,7 +5497,8 @@ function cmRender(){
 
   // Progress dots
   const dotsHTML=_cmPanels.map((_,i)=>{
-    const c=_cmDone.has(i)?'done':i===_cmIdx?'current':'';
+    // "done" and "current" aren't exclusive — a cut panel can be the selected one.
+    const c=(_cmDone.has(i)?'done':'')+(i===_cmIdx?' current':'');
     return '<div class="cm-dot '+c+'" onclick="cmJump('+i+')" title="'+esc(_cmPanels[i].label)+'"></div>';
   }).join('');
 
@@ -5602,6 +5605,15 @@ function cmDrawCanvas(currentPanel){
       } else {
         ctx.font='bold '+Math.max(10,Math.min(h*.6,w*.5,22))+'px Arial';
         ctx.fillText('✓',x+w/2,y+h/2);
+      }
+      // Cut AND selected — keep it green so it still reads as done, but ring it in amber
+      // so you can see which one you tapped when you go back to reprint a label.
+      if(isCurrent){
+        const lw=Math.max(4,Math.min(6,w*.06,h*.06));
+        ctx.strokeStyle='#d4820a';ctx.lineWidth=lw;
+        ctx.strokeRect(x-lw/2,y-lw/2,w+lw,h+lw);
+        ctx.strokeStyle='rgba(255,255,255,.9)';ctx.lineWidth=1.5;
+        ctx.strokeRect(x+lw/2,y+lw/2,w-lw,h-lw);
       }
     } else if(isCurrent){
       // Current — bright TCE amber, thick border drawn OUTSIDE so panel size looks correct
