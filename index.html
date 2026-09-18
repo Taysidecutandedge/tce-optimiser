@@ -5207,28 +5207,25 @@ async function cmReconcileFromCloud(){
   const stale = posDone.size>0 && posHits < posDone.size*0.6;
   return {ok:true, count:done.size, stale, expected:posDone.size, matched:posHits};
 }
+// The order panels come off a sheet, following the saw rather than the drawing: whole-length
+// rips first, then rip by rip left to right, working DOWN each strip. Cutting mode, the label
+// sheet and the CSV export all use this, so the label stack matches the cutting sequence.
+function _cmSheetOrder(sheet){
+  const isFR=p=>p.h>sheet.uh-1;          // full-length rip (not necessarily exactly the sheet length)
+  const out=[];
+  sheet.placements.filter(isFR).sort((a,b)=>b.w-a.w).forEach(p=>out.push(p));
+  const byCol={};
+  sheet.placements.filter(p=>!isFR(p)).forEach(p=>{const k=Math.round(p.x);(byCol[k]=byCol[k]||[]).push(p);});
+  Object.keys(byCol).map(Number).sort((a,b)=>a-b)
+    .forEach(cx=>byCol[cx].sort((a,b)=>a.y-b.y).forEach(p=>out.push(p)));
+  return out;
+}
 async function openCuttingMode(){
   if(!_lastSheets.length){alert('Run Calculate first.');return;}
   _cmPanels=[];
   _lastSheets.forEach((sheet,si)=>{
-    // Group panels by horizontal band (bottom edge y+h)
-    // Full-run panels first, then bands tallest-to-shortest
-    const fullRuns=sheet.placements.filter(p=>Math.abs(p.h-sheet.fullL)<=1);
-    const cutPanels=sheet.placements.filter(p=>Math.abs(p.h-sheet.fullL)>1);
-    const bySB={};
-    cutPanels.forEach(p=>{const b=Math.round(p.y+p.h);if(!bySB[b])bySB[b]=[];bySB[b].push(p);});
-    const secMaxH={};
-    Object.entries(bySB).forEach(([b,ps])=>{secMaxH[+b]=Math.max(...ps.map(p=>p.h));});
-    const secBottoms=Object.keys(bySB).map(Number).sort((a,b)=>secMaxH[b]-secMaxH[a]);
-    // Full runs first (widest fence first)
-    fullRuns.sort((a,b)=>b.w-a.w).forEach(p=>{
+    _cmSheetOrder(sheet).forEach(p=>{
       _cmPanels.push({...p,sheetIdx:si,sheetName:sheet.name,sheet});
-    });
-    // Then each section, tallest first, widest panel first within section
-    secBottoms.forEach(bot=>{
-      bySB[bot].sort((a,b)=>b.w-a.w||a.x-b.x).forEach(p=>{
-        _cmPanels.push({...p,sheetIdx:si,sheetName:sheet.name,sheet});
-      });
     });
   });
   const newCount=_cmPanels.length;
@@ -5712,16 +5709,7 @@ function buildLabelPages(){
   const customer=projectName||'';
   let totalLabels=0;
   _lastSheets.forEach((sheet,si)=>{
-    const trueFullRuns=sheet.placements.filter(p=>Math.abs(p.h-sheet.fullL)<=1);
-    const cutPanels=sheet.placements.filter(p=>Math.abs(p.h-sheet.fullL)>1);
-    const bySB={};
-    cutPanels.forEach(p=>{const b=Math.round(p.y+p.h);if(!bySB[b])bySB[b]=[];bySB[b].push(p);});
-    const secMaxH={};
-    Object.entries(bySB).forEach(([b,ps])=>{secMaxH[+b]=Math.max(...ps.map(p=>p.h));});
-    const secBottoms=Object.keys(bySB).map(Number).sort((a,b)=>secMaxH[b]-secMaxH[a]);
-    let sheetPanels=[];
-    trueFullRuns.sort((a,b)=>b.w-a.w).forEach(p=>sheetPanels.push(p));
-    secBottoms.forEach(bot=>{bySB[bot].sort((a,b)=>b.w-a.w||a.x-b.x).forEach(p=>sheetPanels.push(p));});
+    const sheetPanels=_cmSheetOrder(sheet);   // same order as cutting mode, so the stack matches
     const expanded=[];
     sheetPanels.forEach(p=>{
       const part=parts.find(pt=>pt.label===p.label&&pt.l===p.origL&&pt.w===p.origW);
@@ -5824,16 +5812,7 @@ function exportLabelsCSV(){
     const rows=[['Length','Width','L1','L2','W1','W2','Quantity','Label Description','Material','Company']];
     _lastSheets.forEach((sheet,si)=>{
       rows.push(['','P'+(si+1),'','','','','','','','']);
-      const trueFullRuns=sheet.placements.filter(p=>Math.abs(p.h-sheet.fullL)<=1);
-      const cutPanels=sheet.placements.filter(p=>Math.abs(p.h-sheet.fullL)>1);
-      const bySB={};
-      cutPanels.forEach(p=>{const b=Math.round(p.y+p.h);if(!bySB[b])bySB[b]=[];bySB[b].push(p);});
-      const secMaxH={};
-      Object.entries(bySB).forEach(([b,ps])=>{secMaxH[+b]=Math.max(...ps.map(p=>p.h));});
-      const secBottoms=Object.keys(bySB).map(Number).sort((a,b)=>secMaxH[b]-secMaxH[a]);
-      let sp=[];
-      trueFullRuns.sort((a,b)=>b.w-a.w).forEach(p=>sp.push(p));
-      secBottoms.forEach(bot=>{bySB[bot].sort((a,b)=>b.w-a.w||a.x-b.x).forEach(p=>sp.push(p));});
+      const sp=_cmSheetOrder(sheet);   // same order as cutting mode
       sp.forEach(p=>{
         const part=parts.find(pt=>pt.label===p.label&&pt.l===p.origL&&pt.w===p.origW);
         const total=part?part.qty:1;
