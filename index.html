@@ -674,6 +674,10 @@ select option{background:var(--surf2)}
 // ═══════════════════════════════════════════════
 let library=[], jobSheets=[], parts=[];
 let _offcutStock=[]; // in-stock offcuts for the nester (Phase 2)
+// How long an offcut can sit in stock before it's worth checking the rack rather than
+// trusting the list — most of the pile is older than this, and an offcut nobody has
+// touched in a month has often been used, cut down or binned without being logged.
+const OFFCUT_STALE_DAYS=30;
 let projectName='';
 let _jobContact=null;   // {name,email,phone,notes} from a website submission — who to message about the job
 let libId=1, jsid=1, pid=1, ci=0;
@@ -2134,8 +2138,21 @@ function _calculateInner(){
     const findSheet=piece=>{
       const matching=pool.filter(sh=>!piece._msid||sh.jsid===piece._msid);
       const ocSmall=sh=>Math.max(sh._offL||0,sh._offW||0)<=offcutGuard;
-      const bySize=(a,b)=>(a.uw*a.uh)-(b.uw*b.uh)||a._poolIdx-b._poolIdx;
-      // 1) SMALL offcuts first — use freely (smallest that fits)
+      // An offcut ALREADY in this job beats an untouched one — filling a board you're
+      // fetching anyway costs nothing, opening another means a second trip to the rack
+      // and a second piece of stock gone. Among open ones, fullest first; among untouched,
+      // smallest that fits.
+      const bySize=(a,b)=>{
+        const ao=a.placements.length>0, bo=b.placements.length>0;
+        if(ao!==bo) return ao?-1:1;
+        if(ao){
+          const ua=a.placements.reduce((s,p)=>s+p.w*p.h,0)/((a.uw*a.uh)||1);
+          const ub=b.placements.reduce((s,p)=>s+p.w*p.h,0)/((b.uw*b.uh)||1);
+          if(ub!==ua) return ub-ua;
+        }
+        return (a.uw*a.uh)-(b.uw*b.uh)||a._poolIdx-b._poolIdx;
+      };
+      // 1) SMALL offcuts first — use freely (open ones first, then smallest that fits)
       for(const sh of matching.filter(s=>s._isOffcut&&ocSmall(s)).sort(bySize)) if(tryPlace(sh,piece)) return true;
       // 2) Boards ALREADY IN USE — fullest first (original behaviour).
       //    Untouched boards are excluded here: an empty board is effectively a NEW
@@ -2444,20 +2461,27 @@ function _calculateInner(){
     // so the leftover comes off as a single big reusable offcut rather than lots
     // of small ones. We do that by MAXIMISING the free area of the emptiest board,
     // which pulls parts tight onto the other boards and pools the slack on one.
-    let maxFree=0, fullBoards=0, smallOff=0, bigOff=0;
+    let maxFree=0, fullBoards=0, offArea=0, offCount=0;
     for(const s of res.sheets){
-      if(s._isOffcut){ (Math.max(s._offL||0,s._offW||0)<=offcutGuard ? smallOff++ : bigOff++); continue; }
+      if(s._isOffcut){
+        // Reward the offcut material actually CONSUMED, and charge a small fee per offcut
+        // opened. The old score counted offcuts TOUCHED, so two offcuts always beat one —
+        // it would crack open a fresh board for two small parts when one already in the
+        // job had room, costing another trip to the rack and another piece of stock.
+        const used=s.placements.reduce((b,p)=>b+p.w*p.h,0);
+        if(used>0){ offArea+=used; offCount++; }
+        continue;
+      }
       const placed=s.placements.reduce((b,p)=>b+p.w*p.h,0);
       const free=(s.uw*s.fullL)-placed;
       if(free>maxFree) maxFree=free;
       fullBoards++;
     }
-    // Primary: fewest FRESH BOARDS (dominant — big offcuts help only by reducing this).
-    // Then: consume more SMALL offcuts. Then: concentrate the leftover into ONE big
-    // offcut (maximise the emptiest board's free area). The 1e9 / 1e7 weights dwarf
-    // maxFree (≤ ~6e6), so board count and offcut usage are unchanged — only which
-    // same-board-count layout wins flips from "even spread" to "one big offcut".
-    return fullBoards*1e9 - smallOff*1e7 - maxFree;
+    // Primary: fewest FRESH BOARDS (dominant — offcuts help mainly by reducing this).
+    // Then: most offcut material consumed, minus a fee per offcut opened — so it still
+    // works through the offcut pile, but fills a board it's already fetching before
+    // reaching for another. Then: concentrate the leftover into ONE big offcut.
+    return fullBoards*1e9 - offArea*8 + offCount*1e6 - maxFree;
   };
 
   let best=null;
@@ -5372,7 +5396,6 @@ function _ocGenCode(){ const a='23456789ABCDEFGHJKLMNPQRSTUVWXYZ'; return 'OC-'+
 // How long an offcut can sit in stock before it's worth checking the rack rather than
 // trusting the list. Most of the pile is older than this, and an offcut nobody has touched
 // in a month has often been used, cut down or binned without the system being told.
-const OFFCUT_STALE_DAYS=30;
 function _ocAgeDays(oc){ const d=oc&&oc.created_at; if(!d) return null;
   return Math.floor((Date.now()-new Date(d))/86400000); }
 function _ocIsStale(oc){ const a=_ocAgeDays(oc); return a!=null && a>OFFCUT_STALE_DAYS; }
