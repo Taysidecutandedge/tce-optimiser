@@ -5438,13 +5438,8 @@ async function cmSaveRemainder(fromId){
 }
 
 function cmJump(idx){_cmIdx=idx;_cmSave();cmRender();}
-function cmMarkRecut(){
-  if(_cmIdx>=_cmPanels.length)return;
-  if(_cmRecut.has(_cmIdx)){_cmRecut.delete(_cmIdx);}
-  else{_cmRecut.add(_cmIdx);_cmDone.delete(_cmIdx);}
-  cmRender();
-}
-
+// (there were two copies of cmMarkRecut; the first never saved state, and being second
+//  in the file this one was the only one that ever ran. Dead copy removed.)
 function cmMarkRecut(){
   if(_cmIdx>=_cmPanels.length)return;
   if(_cmRecut.has(_cmIdx)){
@@ -5675,8 +5670,10 @@ function cmDrawCanvas(currentPanel){
     if(!m)return;
     const idx=_cmPanels.indexOf(m);
     if(idx<0)return;
-    if(_cmDone.has(idx))_cmDone.delete(idx);
-    _cmIdx=idx;cmRender();
+    // Tapping a panel SELECTS it — nothing more. It used to un-tick a cut panel, so going
+    // back to one just to reprint its label wiped the record of it being cut. Un-ticking is
+    // what "⚠ Mark Recut" is for, and that's a deliberate press.
+    _cmIdx=idx; _cmSave(); cmRender();
   };
   cv.onclick=handleTap;cv.ontouchend=handleTap;cv.style.cursor='pointer';
 }
