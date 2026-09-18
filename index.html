@@ -2863,7 +2863,7 @@ function renderResults(sheets,unplaced){
     card.innerHTML=`
       <div class="sc-hdr">
         <div>
-          <div class="sc-title">${esc(s.name)} <span style="color:var(--txt3)">#${idx+1}</span>${s._isOffcut?` <span style="background:#27ae60;color:#fff;font-size:10px;padding:1px 6px;border-radius:4px;font-family:var(--mono)">♻ ${esc(s._offcutCode||'OFFCUT')}</span>`:''}</div>
+          <div class="sc-title">${esc(s.name)} <span style="color:var(--txt3)">#${idx+1}</span>${s._isOffcut?` <span style="background:#27ae60;color:#fff;font-size:10px;padding:1px 6px;border-radius:4px;font-family:var(--mono)">♻ ${esc(s._offcutCode||'OFFCUT')}</span>${(function(){const oc=_ocFor(s._offcutId);const loc=oc&&oc.location&&String(oc.location).trim();return (loc?` <span style="background:#1f3a34;color:#cfe7dd;font-size:10px;padding:1px 6px;border-radius:4px;font-family:var(--mono)">📍 ${esc(loc)}</span>`:'')+(_ocIsStale(oc)?` <span title="In stock ${_ocAgeDays(oc)} days — check the rack" style="background:#5a3a12;color:#ffc46b;font-size:10px;padding:1px 6px;border-radius:4px;font-family:var(--mono)">⚠ ${_ocAgeDays(oc)}d</span>`:'');})()}`:''}</div>
           <div class="sc-meta">${s._isOffcut?'Offcut ':'Full '}${s.fullL}×${s.fullW}mm · Usable ${s.uw}×${s.uh}mm${s.cost>0?' · £'+s.cost.toFixed(2):''}</div>
         </div>
         <span class="wb ${wc}">${wp}% waste</span>
@@ -5368,6 +5368,42 @@ function cmConfirm(){
 // been cut up — mark it used automatically (no separate step to forget), then
 // offer to log any usable remainder as a new offcut.
 function _ocGenCode(){ const a='23456789ABCDEFGHJKLMNPQRSTUVWXYZ'; return 'OC-'+Array.from({length:4},()=>a[Math.floor(Math.random()*a.length)]).join(''); }
+// How long an offcut can sit in stock before it's worth checking the rack rather than
+// trusting the list. Most of the pile is older than this, and an offcut nobody has touched
+// in a month has often been used, cut down or binned without the system being told.
+const OFFCUT_STALE_DAYS=30;
+function _ocAgeDays(oc){ const d=oc&&oc.created_at; if(!d) return null;
+  return Math.floor((Date.now()-new Date(d))/86400000); }
+function _ocIsStale(oc){ const a=_ocAgeDays(oc); return a!=null && a>OFFCUT_STALE_DAYS; }
+function _ocFor(id){ return (_offcutStock||[]).find(o=>String(o.id)===String(id))||null; }
+
+// The operator is at the saw and the offcut isn't on the rack. Take it out of stock so it's
+// never offered again, leave a record of what happened, and re-nest without it.
+async function cmOffcutMissing(){
+  const p=_cmPanels[_cmIdx]; const sheet=p&&p.sheet;
+  if(!sheet||!sheet._isOffcut){ alert('This sheet is a full board, not an offcut.'); return; }
+  const code=sheet._offcutCode||'this offcut';
+  const oc=_ocFor(sheet._offcutId)||{};
+  if(!confirm(`Can't find ${code} (${sheet._offL}×${sheet._offW}${oc.location?' · '+oc.location:''})?\n\n`
+    +`It'll be marked missing so it's never offered again, and the job re-nested without it.\n`
+    +`Panels you've already cut stay ticked.`)) return;
+  if(_sbToken && sheet._offcutId!=null){
+    try{
+      await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+sheet._offcutId,{method:'PATCH',headers:sbAuthH(),
+        body:JSON.stringify({status:'missing', qty:0, used_at:new Date().toISOString()})});
+    }catch(e){ alert('Could not update stock — check your connection.\n'+e.message); return; }
+    try{
+      fetch(SB_URL+'/rest/v1/tce_cut_events',{method:'POST',headers:{...sbAuthH(),'Prefer':'return=minimal'},
+        body:JSON.stringify({session_id:_cmSession||(projectName||'job'),action:'offcut_missing',
+          panel:{code:sheet._offcutCode||'',offcutId:sheet._offcutId,name:oc.name||sheet.name||'',
+                 wasL:sheet._offL,wasW:sheet._offW,location:oc.location||'',ageDays:_ocAgeDays(oc)}})}).catch(()=>{});
+    }catch(e){}
+  }
+  // Drop it from the in-memory pool too, so Calculate right now won't pick it up again
+  _offcutStock=(_offcutStock||[]).filter(o=>String(o.id)!==String(sheet._offcutId));
+  closeCuttingMode();
+  alert(code+' marked missing.\n\nPress Calculate to re-nest without it, then go back into Cut Mode.\nYour cut panels are saved and will come back ticked.');
+}
 function cmCheckOffcutDone(si){
   const sheet=_lastSheets[si];
   if(!sheet || !sheet._isOffcut || sheet._offcutDone) return;
@@ -5507,6 +5543,12 @@ function cmRender(){
   const _isOff=!!p.sheet._isOffcut;
   const _offTag=_isOff
     ? '<span style="background:#27ae60;color:#fff;font-family:var(--mono);font-size:12px;font-weight:700;padding:2px 9px;border-radius:5px">♻ '+esc(p.sheet._offcutCode||'OFFCUT')+' · '+p.sheet._offL+'×'+p.sheet._offW+'mm</span>'
+      +(function(){ const oc=_ocFor(p.sheet._offcutId);
+         const loc=oc&&oc.location&&String(oc.location).trim();
+         return (loc?'<span style="background:#1f3a34;color:#cfe7dd;font-family:var(--mono);font-size:12px;padding:2px 9px;border-radius:5px">📍 '+esc(loc)+'</span>':'')
+           +(_ocIsStale(oc)?'<span title="In stock '+_ocAgeDays(oc)+' days — check the rack before relying on it" style="background:#5a3a12;color:#ffc46b;font-family:var(--mono);font-size:12px;font-weight:700;padding:2px 9px;border-radius:5px">⚠ check rack · '+_ocAgeDays(oc)+'d</span>':'');
+       })()
+      +'<button onclick="cmOffcutMissing()" style="background:#3a1a1a;color:#ff8a8a;border:1px solid #5a2a2a;border-radius:5px;font-family:var(--mono);font-size:12px;font-weight:700;padding:3px 9px;cursor:pointer">✕ Can\'t find it</button>'
     : '';
   const sheetIdentity=
     '<div style="flex-shrink:0;background:var(--surf2);border-bottom:2px solid '+(sheetChanged?'var(--acc)':'var(--brd)')+';padding:6px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;'+sheetBg+'">'+
