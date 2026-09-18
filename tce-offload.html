@@ -77,6 +77,7 @@
     <span class="printstat" id="printStat"></span>
     <span class="printstat" id="pendStat" style="color:#e6a23c;cursor:pointer" onclick="pollPendingOffcuts()" title="Print queued offcut labels now"></span>
   </div>
+  <div id="linkWarn" onclick="pollCutEvents();runPrintQ();" title="Tap to retry now" style="display:none;background:#5a1a1a;color:#ffc9c9;font-weight:700;padding:10px 16px;font-size:15px;text-align:center;cursor:pointer;border-bottom:2px solid #a33"></div>
   <div class="mainrow">
     <div class="maincol">
       <div class="now" id="now">
@@ -231,15 +232,49 @@ function handleConfirm(r, fromRealtime){
   }
 }
 let _cutPollBusy=false;
+// Health of the link to the cloud. The websocket "live" dot only reports the websocket —
+// it can happily say "live" while the poll that actually delivers confirms is dead.
+let _lastPollOk=Date.now(), _pollFails=0;
 async function pollCutEvents(){
+  // A hung request used to leave _cutPollBusy stuck true FOREVER, so every later poll
+  // returned immediately and the station went silent until someone reloaded the page.
+  // Hard timeout, and the flag is cleared in finally whatever happens.
   if(_cutPollBusy) return; _cutPollBusy=true;
+  const ctrl=new AbortController();
+  const killer=setTimeout(()=>{ try{ctrl.abort();}catch(e){} }, 10000);
   try{
     const since=new Date(Date.now()-15*60000).toISOString();
-    const {data}=await sb.from('tce_cut_events').select('*').in('action',['confirm','reprint','sheet_layout','sheet_focus']).gte('created_at',since).order('id',{ascending:true}).limit(200);
+    const {data,error}=await sb.from('tce_cut_events').select('*')
+      .in('action',['confirm','reprint','sheet_layout','sheet_focus'])
+      .gte('created_at',since).order('id',{ascending:true}).limit(200)
+      .abortSignal(ctrl.signal);
+    if(error) throw error;
     if(data) for(const r of data) handleConfirm(r,false);   // dedup gate stops any re-print
-  }catch(e){}
-  _cutPollBusy=false;
+    _lastPollOk=Date.now(); _pollFails=0; setLinkWarn('');
+  }catch(e){
+    _pollFails++;
+    // Two in a row is a blip; say so rather than sit there looking fine.
+    if(_pollFails>=2) setLinkWarn('⚠ lost the cutlist feed ('+_pollFails+' failed checks) — '+(e&&e.message?e.message:'no response'));
+  }finally{
+    clearTimeout(killer);
+    _cutPollBusy=false;
+  }
 }
+function setLinkWarn(txt){
+  const el=document.getElementById('linkWarn'); if(!el) return;
+  el.textContent=txt||''; el.style.display=txt?'block':'none';
+}
+// Watchdog: if nothing has got through for a while, say so loudly and try to rebuild
+// the connection. Silence here means labels aren't printing and nobody knows.
+setInterval(()=>{
+  const gap=Math.round((Date.now()-_lastPollOk)/1000);
+  if(gap>45){
+    setLinkWarn('⚠ no contact with the cutlist for '+gap+'s — labels may not be printing. Reconnecting…');
+    _cutPollBusy=false;                 // clear any latch
+    try{ subscribe(); }catch(e){}       // rebuild the websocket too
+    pollCutEvents();
+  }
+}, 15000);
 
 async function doLogin(){
   const email=document.getElementById('email').value.trim();
@@ -543,19 +578,43 @@ async function printLamLabel(p){
 // send one at a time and space them ~600ms so no label is ever lost.
 let _printQ=[]; let _printQBusy=false;
 function enqueueLabelXml(xml, okMsg){ _printQ.push({xml, okMsg:okMsg||'sent to printer ✓'}); runPrintQ(); }
+let _printRetry=null;
+// Keep trying a stranded queue. It used to give up the moment the printer wasn't there and
+// wait for the NEXT label to arrive — so if it was the last panel off a sheet, the label
+// just sat in the queue and nobody knew.
+function schedulePrintRetry(){
+  if(_printRetry||!_printQ.length) return;
+  _printRetry=setTimeout(()=>{ _printRetry=null; _dymoBase=null; runPrintQ(); }, 5000);
+}
 async function runPrintQ(){
   if(_printQBusy) return; _printQBusy=true;
   while(_printQ.length){
     const job=_printQ[0];
     const base=await ensureDymo();
-    if(!base){ setPrintStat('printer not reachable — open DYMO Connect & accept certificate'); _printQBusy=false; return; }  // leave job queued; retries on next print
+    if(!base){
+      setPrintStat('printer not reachable — '+_printQ.length+' label'+(_printQ.length!==1?'s':'')+' waiting, retrying…');
+      _printQBusy=false; schedulePrintRetry(); return;    // job stays queued and WILL be retried
+    }
     _printQ.shift();
     setPrintStat('printing…');
+    let ok=false;
     try{
       const r=await fetch(base+'PrintLabel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
         body:'printerName='+encodeURIComponent(_dymoPrinter)+'&labelXml='+encodeURIComponent(job.xml)+'&printParamsXml=&labelSetXml='});
-      setPrintStat(r.ok?job.okMsg:'printer error '+r.status);
-    }catch(e){ _dymoBase=null; setPrintStat('printer not reachable'); }
+      ok=r.ok;
+      if(!ok){
+        // An error RESPONSE used to leave the cached port in place. DYMO Connect takes a new
+        // port when it restarts, so the old one kept failing until the page was reloaded.
+        _dymoBase=null;
+        setPrintStat('printer error '+r.status+' — retrying');
+        _printQ.unshift(job); _printQBusy=false; schedulePrintRetry(); return;
+      }
+      setPrintStat(job.okMsg);
+    }catch(e){
+      _dymoBase=null;
+      setPrintStat('printer not reachable — retrying');
+      _printQ.unshift(job); _printQBusy=false; schedulePrintRetry(); return;
+    }
     if(_printQ.length) await new Promise(res=>setTimeout(res,600));   // space jobs so the 550 doesn't drop rapid prints
   }
   _printQBusy=false;
