@@ -2811,6 +2811,7 @@ function renderResults(sheets,unplaced){
           <span style="font-weight:700;min-width:150px">${esc(x.mat||'—')}</span>
           <span style="font-family:var(--mono);min-width:104px">${x.l}×${x.w}</span>
           <span style="color:var(--txt3);font-size:11px;font-family:var(--mono)">${esc(x.code||'')}${x.count>1?' ×'+x.count:''}</span>
+          <button onclick="event.preventDefault();event.stopPropagation();ocSwapFromList('${x.id}')" title="Not on the rack, or already cut up? Swap it for one that is." style="margin-left:auto;background:#3a1a1a;color:#ff8a8a;border:1px solid #5a2a2a;border-radius:5px;font-family:var(--mono);font-size:11px;font-weight:700;padding:2px 8px;cursor:pointer">✕ can't find</button>
         </label>`).join('');
       const unset=k==='Location not set';
       return `<div style="margin-top:9px">
@@ -5385,9 +5386,35 @@ function _cmSheetExtent(sheet){
   (sheet.placements||[]).forEach(p=>{ mx=Math.max(mx,p.x+p.w); my=Math.max(my,p.y+p.h); });
   return {mx:Math.ceil(mx),my:Math.ceil(my)};
 }
+// Which sheet the open swap dialog is about, and what to re-render afterwards. Set by whoever
+// opens it — the collect list on the results page, or cutting mode at the saw.
+let _ocSwapCtx=null;
 function cmOffcutMissing(){
   const p=_cmPanels[_cmIdx]; const sheet=p&&p.sheet;
   if(!sheet||!sheet._isOffcut){ alert('This sheet is a full board, not an offcut.'); return; }
+  _ocSwapOpen(sheet, ()=>{ _cmSave(); cmRender(); });
+}
+// Same dialog from the "offcuts to collect" list — you're at the rack, it isn't there,
+// swap it before you start cutting rather than finding out at the saw.
+function ocSwapFromList(id){
+  const using=(_lastSheets||[]).filter(s=>s._isOffcut&&String(s._offcutId)===String(id));
+  if(!using.length){ alert('That offcut is no longer part of this nest — press Calculate.'); return; }
+  _ocSwapOpen(using[0], ()=>{
+    // rebuild the collect list off the current nest, then redraw the results page
+    const t={};
+    (_lastSheets||[]).forEach(s=>{ if(!s._isOffcut||!s.placements.length) return;
+      const src=_ocFor(s._offcutId)||{};
+      const k=s._offcutId;
+      if(!t[k]) t[k]={id:s._offcutId,code:s._offcutCode,l:s._offL,w:s._offW,count:0,
+                      mat:src.name||s.name||'',loc:src.location||''};
+      t[k].count++; });
+    window._lastUsedOffcuts=Object.values(t);
+    renderResults(_lastSheets,_lastUnplaced);
+  }, using.length>1?using.length:0);
+}
+function _ocSwapOpen(sheet, after, moreCount){
+  if(!sheet||!sheet._isOffcut){ alert('That sheet is a full board, not an offcut.'); return; }
+  _ocSwapCtx={sheet, after};
   const {mx,my}=_cmSheetExtent(sheet);
   const matKey=String(sheet.name||'').toLowerCase().trim();
   const cands=[];
@@ -5412,7 +5439,8 @@ function cmOffcutMissing(){
   }).join('');
   div.innerHTML='<div style="background:#12241d;border:1px solid #2b4a40;border-radius:14px;max-width:460px;width:100%;max-height:86vh;overflow:auto;padding:20px;color:#e8f0ec">'+
     '<div style="font-size:16px;font-weight:700;color:#ff8a8a;margin-bottom:2px">✕ '+esc(sheet._offcutCode||'Offcut')+' not found</div>'+
-    '<div style="font-size:12px;color:#9ab;margin-bottom:12px">'+esc(sheet.name||'')+' · was '+sheet._offL+'×'+sheet._offW+'mm · panels need at least '+mx+'×'+my+'mm</div>'+
+    '<div style="font-size:12px;color:#9ab;margin-bottom:12px">'+esc(sheet.name||'')+' · was '+sheet._offL+'×'+sheet._offW+'mm · panels need at least '+mx+'×'+my+'mm'+
+      (moreCount?'<br><span style="color:#ffc46b">This job uses '+moreCount+' of these — this swaps one, repeat for the rest.</span>':'')+'</div>'+
     (cands.length
       ? '<div style="font-size:13px;margin-bottom:8px">Using a different offcut instead? Pick it and both records get fixed now — the labels stay exactly as printed.</div>'+rows
       : '<div style="font-size:13px;color:#e6a23c;margin-bottom:10px">No other offcut in stock is big enough for these panels.</div>')+
@@ -5443,7 +5471,8 @@ async function _ocMarkMissing(sheet){
 // Swap this sheet onto a different board. newId 0 = a full board of the same material.
 async function cmOffcutSwapTo(newId, rot){
   const m=document.getElementById('cmOcSwap'); if(m) m.remove();
-  const p=_cmPanels[_cmIdx]; const sheet=p&&p.sheet; if(!sheet) return;
+  const ctx=_ocSwapCtx; const sheet=ctx&&ctx.sheet; if(!sheet) return;
+  const after=(ctx&&ctx.after)||function(){};
   const oldCode=sheet._offcutCode||'offcut';
   if(!await _ocMarkMissing(sheet)){ alert('Could not update stock — check your connection.'); return; }
   if(!newId){
@@ -5472,17 +5501,19 @@ async function cmOffcutSwapTo(newId, rot){
         body:JSON.stringify({session_id:_cmSession||(projectName||'job'),action:'offcut_swap',
           panel:{from:oldCode,fromId:null,to:o.code,toId:o.id,name:o.name||'',l:o.l,w:o.w,rotated:!!rot}})}).catch(()=>{});
     }catch(e){}
-    cmToast&&cmToast('♻ Swapped '+oldCode+' → '+o.code+(rot?' (rotated)':'')+' — both records updated');
+    (typeof cmToast==='function') && cmToast('♻ Swapped '+oldCode+' → '+o.code+(rot?' (rotated)':'')+' — both records updated');
   }
-  _cmSave(); cmRender();
+  _ocSwapCtx=null;
+  after();
 }
 async function cmOffcutJustMissing(){
   const m=document.getElementById('cmOcSwap'); if(m) m.remove();
-  const p=_cmPanels[_cmIdx]; const sheet=p&&p.sheet; if(!sheet) return;
+  const ctx=_ocSwapCtx; const sheet=ctx&&ctx.sheet; if(!sheet) return;
   const code=sheet._offcutCode||'offcut';
   if(!await _ocMarkMissing(sheet)){ alert('Could not update stock — check your connection.'); return; }
-  closeCuttingMode();
-  alert(code+' marked missing.\n\nPress Calculate to re-nest without it, then go back into Cut Mode.\nYour cut panels are saved and will come back ticked.');
+  _ocSwapCtx=null;
+  if(document.getElementById('cuttingMode')&&document.getElementById('cuttingMode').classList.contains('active')) closeCuttingMode();
+  alert(code+' marked missing.\n\nPress Calculate to re-nest without it.\nAny panels you\'ve already cut are saved and will come back ticked.');
 }
 function cmCheckOffcutDone(si){
   const sheet=_lastSheets[si];
