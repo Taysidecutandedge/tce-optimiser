@@ -5377,30 +5377,110 @@ function _ocAgeDays(oc){ const d=oc&&oc.created_at; if(!d) return null;
 function _ocIsStale(oc){ const a=_ocAgeDays(oc); return a!=null && a>OFFCUT_STALE_DAYS; }
 function _ocFor(id){ return (_offcutStock||[]).find(o=>String(o.id)===String(id))||null; }
 
-// The operator is at the saw and the offcut isn't on the rack. Take it out of stock so it's
-// never offered again, leave a record of what happened, and re-nest without it.
-async function cmOffcutMissing(){
+// The offcut isn't on the rack. What actually happens in the workshop is that another offcut
+// gets used instead and the paperwork is fixed "later" — which never happens. So offer the
+// swap right here: the panels and their labels don't change, only which board they come off.
+function _cmSheetExtent(sheet){
+  let mx=0,my=0;
+  (sheet.placements||[]).forEach(p=>{ mx=Math.max(mx,p.x+p.w); my=Math.max(my,p.y+p.h); });
+  return {mx:Math.ceil(mx),my:Math.ceil(my)};
+}
+function cmOffcutMissing(){
   const p=_cmPanels[_cmIdx]; const sheet=p&&p.sheet;
   if(!sheet||!sheet._isOffcut){ alert('This sheet is a full board, not an offcut.'); return; }
-  const code=sheet._offcutCode||'this offcut';
+  const {mx,my}=_cmSheetExtent(sheet);
+  const matKey=String(sheet.name||'').toLowerCase().trim();
+  const cands=[];
+  (_offcutStock||[]).forEach(o=>{
+    if(String(o.id)===String(sheet._offcutId)) return;
+    if(String(o.name||'').toLowerCase().trim()!==matKey) return;
+    if(o.w>=mx && o.l>=my) cands.push({o,rot:false});
+    else if(o.l>=mx && o.w>=my) cands.push({o,rot:true});
+  });
+  // Smallest board that still does the job first — don't cut up a big sheet for a small need
+  cands.sort((a,b)=>(a.o.l*a.o.w)-(b.o.l*b.o.w));
+  const old=document.getElementById('cmOcSwap'); if(old) old.remove();
+  const div=document.createElement('div'); div.id='cmOcSwap';
+  div.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:100000;display:flex;align-items:center;justify-content:center;padding:16px;font-family:var(--mono)';
+  const rows=cands.slice(0,12).map(c=>{
+    const age=_ocAgeDays(c.o), loc=(c.o.location||'').trim();
+    return '<button onclick="cmOffcutSwapTo('+c.o.id+','+(c.rot?'true':'false')+')" style="display:block;width:100%;text-align:left;margin-bottom:6px;padding:11px 12px;border:1px solid #2b4a40;border-radius:8px;background:#0d1f1a;color:#e8f0ec;font-family:var(--mono);font-size:13px;cursor:pointer">'+
+      '<b style="color:#7fe3a8">'+esc(c.o.code||'?')+'</b> · '+c.o.l+'×'+c.o.w+'mm'+
+      (c.rot?' <span style="color:#ffc46b">↻ rotated — grain runs the other way</span>':'')+
+      '<div style="font-size:11px;color:#9ab;margin-top:2px">'+(loc?'📍 '+esc(loc):'<span style="color:#e6a23c">no location recorded</span>')+
+      (age!=null?' · in stock '+age+'d':'')+'</div></button>';
+  }).join('');
+  div.innerHTML='<div style="background:#12241d;border:1px solid #2b4a40;border-radius:14px;max-width:460px;width:100%;max-height:86vh;overflow:auto;padding:20px;color:#e8f0ec">'+
+    '<div style="font-size:16px;font-weight:700;color:#ff8a8a;margin-bottom:2px">✕ '+esc(sheet._offcutCode||'Offcut')+' not found</div>'+
+    '<div style="font-size:12px;color:#9ab;margin-bottom:12px">'+esc(sheet.name||'')+' · was '+sheet._offL+'×'+sheet._offW+'mm · panels need at least '+mx+'×'+my+'mm</div>'+
+    (cands.length
+      ? '<div style="font-size:13px;margin-bottom:8px">Using a different offcut instead? Pick it and both records get fixed now — the labels stay exactly as printed.</div>'+rows
+      : '<div style="font-size:13px;color:#e6a23c;margin-bottom:10px">No other offcut in stock is big enough for these panels.</div>')+
+    '<div style="display:flex;gap:8px;margin-top:10px">'+
+      '<button onclick="document.getElementById(\'cmOcSwap\').remove()" style="flex:1;padding:12px;border:1px solid #2b4a40;border-radius:8px;background:none;color:#9ab;font-size:13px;font-weight:700;font-family:var(--mono)">Cancel</button>'+
+      '<button onclick="cmOffcutSwapTo(0,false)" style="flex:2;padding:12px;border:none;border-radius:8px;background:#5a3a12;color:#ffc46b;font-size:13px;font-weight:700;font-family:var(--mono)">Use a full board</button>'+
+    '</div>'+
+    '<button onclick="cmOffcutJustMissing()" style="width:100%;margin-top:8px;padding:10px;border:1px solid #5a2a2a;border-radius:8px;background:#3a1a1a;color:#ff8a8a;font-size:12px;font-family:var(--mono)">Mark missing and re-nest the job instead</button>'+
+    '</div>';
+  document.body.appendChild(div);
+}
+// Take the missing offcut out of stock. Shared by both routes.
+async function _ocMarkMissing(sheet){
   const oc=_ocFor(sheet._offcutId)||{};
-  if(!confirm(`Can't find ${code} (${sheet._offL}×${sheet._offW}${oc.location?' · '+oc.location:''})?\n\n`
-    +`It'll be marked missing so it's never offered again, and the job re-nested without it.\n`
-    +`Panels you've already cut stay ticked.`)) return;
   if(_sbToken && sheet._offcutId!=null){
     try{
       await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+sheet._offcutId,{method:'PATCH',headers:sbAuthH(),
         body:JSON.stringify({status:'missing', qty:0, used_at:new Date().toISOString()})});
-    }catch(e){ alert('Could not update stock — check your connection.\n'+e.message); return; }
-    try{
       fetch(SB_URL+'/rest/v1/tce_cut_events',{method:'POST',headers:{...sbAuthH(),'Prefer':'return=minimal'},
         body:JSON.stringify({session_id:_cmSession||(projectName||'job'),action:'offcut_missing',
           panel:{code:sheet._offcutCode||'',offcutId:sheet._offcutId,name:oc.name||sheet.name||'',
                  wasL:sheet._offL,wasW:sheet._offW,location:oc.location||'',ageDays:_ocAgeDays(oc)}})}).catch(()=>{});
-    }catch(e){}
+    }catch(e){ return false; }
   }
-  // Drop it from the in-memory pool too, so Calculate right now won't pick it up again
   _offcutStock=(_offcutStock||[]).filter(o=>String(o.id)!==String(sheet._offcutId));
+  return true;
+}
+// Swap this sheet onto a different board. newId 0 = a full board of the same material.
+async function cmOffcutSwapTo(newId, rot){
+  const m=document.getElementById('cmOcSwap'); if(m) m.remove();
+  const p=_cmPanels[_cmIdx]; const sheet=p&&p.sheet; if(!sheet) return;
+  const oldCode=sheet._offcutCode||'offcut';
+  if(!await _ocMarkMissing(sheet)){ alert('Could not update stock — check your connection.'); return; }
+  if(!newId){
+    const js=jobSheets.find(s=>s.id===sheet.jsid);
+    if(!js){ alert(oldCode+' marked missing, but I can\'t find the full board for this material. Press Calculate.'); return; }
+    sheet._isOffcut=false; sheet._offcutId=null; sheet._offcutCode=null; sheet._offL=null; sheet._offW=null;
+    sheet.fullL=js.l; sheet.fullW=js.w; sheet.cost=js.cost;
+    sheet.uw=js.w-(js.trimL??15)-(js.trimR??15);
+    sheet.uh=js.l-(js.trimT??15)-(js.trimB??15);
+    cmToast&&cmToast(oldCode+' missing — now cutting from a full board');
+  } else {
+    const o=_ocFor(newId); if(!o){ alert('That offcut is no longer in stock.'); return; }
+    try{
+      const cur=await (await fetch(SB_URL+'/rest/v1/tce_library?select=qty&id=eq.'+o.id,{headers:sbAuthH()})).json();
+      const q=((cur&&cur[0]?(+cur[0].qty||1):1)-1);
+      await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+o.id,{method:'PATCH',headers:sbAuthH(),
+        body:JSON.stringify(q>0?{qty:q}:{qty:0,status:'used',used_at:new Date().toISOString()})});
+    }catch(e){}
+    sheet._offcutId=o.id; sheet._offcutCode=o.code; sheet._offL=o.l; sheet._offW=o.w;
+    sheet.uw = rot ? o.l : o.w;   sheet.uh = rot ? o.w : o.l;
+    sheet.fullW = sheet.uw;        sheet.fullL = sheet.uh;
+    sheet._offcutDone=true;        // already accounted for — don't decrement it again on completion
+    _offcutStock=(_offcutStock||[]).filter(x=>String(x.id)!==String(o.id));
+    try{
+      fetch(SB_URL+'/rest/v1/tce_cut_events',{method:'POST',headers:{...sbAuthH(),'Prefer':'return=minimal'},
+        body:JSON.stringify({session_id:_cmSession||(projectName||'job'),action:'offcut_swap',
+          panel:{from:oldCode,fromId:null,to:o.code,toId:o.id,name:o.name||'',l:o.l,w:o.w,rotated:!!rot}})}).catch(()=>{});
+    }catch(e){}
+    cmToast&&cmToast('♻ Swapped '+oldCode+' → '+o.code+(rot?' (rotated)':'')+' — both records updated');
+  }
+  _cmSave(); cmRender();
+}
+async function cmOffcutJustMissing(){
+  const m=document.getElementById('cmOcSwap'); if(m) m.remove();
+  const p=_cmPanels[_cmIdx]; const sheet=p&&p.sheet; if(!sheet) return;
+  const code=sheet._offcutCode||'offcut';
+  if(!await _ocMarkMissing(sheet)){ alert('Could not update stock — check your connection.'); return; }
   closeCuttingMode();
   alert(code+' marked missing.\n\nPress Calculate to re-nest without it, then go back into Cut Mode.\nYour cut panels are saved and will come back ticked.');
 }
@@ -5449,6 +5529,10 @@ function cmOffcutRemainderModal(sheet, oc){
       '<div style="flex:1"><label style="font-size:11px;color:#9ab">Length (mm)</label><input id="ocRemL" type="number" inputmode="numeric" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid #2b4a40;border-radius:6px;background:#0d1f1a;color:#e8f0ec;font-size:16px"></div>'+
       '<div style="flex:1"><label style="font-size:11px;color:#9ab">Width (mm)</label><input id="ocRemW" type="number" inputmode="numeric" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid #2b4a40;border-radius:6px;background:#0d1f1a;color:#e8f0ec;font-size:16px"></div>'+
     '</div>'+
+    // Where it's going matters as much as its size. Half the stock has no location, and those
+    // are exactly the ones nobody can find later.
+    '<div style="margin-bottom:14px"><label style="font-size:11px;color:#9ab">Where are you putting it?</label>'+
+      '<input id="ocRemLoc" type="text" placeholder="e.g. Rack B, top shelf" value="'+esc(oc.location||'')+'" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid '+((oc.location||'').trim()?'#2b4a40':'#7a5a1a')+';border-radius:6px;background:#0d1f1a;color:#e8f0ec;font-size:16px"></div>'+
     '<div style="display:flex;gap:10px">'+
       '<button onclick="document.getElementById(\'cmOcRem\').remove()" style="flex:1;padding:13px;border:1px solid #2b4a40;border-radius:8px;background:none;color:#9ab;font-size:14px;font-weight:700;font-family:var(--mono)">No remainder</button>'+
       '<button onclick="cmSaveRemainder('+sheet._offcutId+')" style="flex:2;padding:13px;border:none;border-radius:8px;background:#27ae60;color:#fff;font-size:14px;font-weight:700;font-family:var(--mono)">Save remainder</button>'+
@@ -5460,9 +5544,13 @@ async function cmSaveRemainder(fromId){
   const L=parseInt((document.getElementById('ocRemL')||{}).value)||0;
   const W=parseInt((document.getElementById('ocRemW')||{}).value)||0;
   if(!L||!W){ alert('Enter the remainder length and width.'); return; }
+  const loc=((document.getElementById('ocRemLoc')||{}).value||'').trim();
+  if(!loc && !confirm('No location entered.\n\nAn offcut with no location is one nobody can find later — half the current stock is like this.\n\nSave it anyway?')) {
+    const el=document.getElementById('ocRemLoc'); if(el) el.focus(); return;
+  }
   const oc=(_offcutStock||[]).find(o=>String(o.id)===String(fromId))||{};
   const row={ name:oc.name||'', l:L, w:W, thick:oc.thick||0, cost:0, is_offcut:true, status:'in_stock',
-    code:_ocGenCode(), location:oc.location||null, color:oc.color||null, grain_len:oc.grain_len!==false,
+    code:_ocGenCode(), location:loc||null, color:oc.color||null, grain_len:oc.grain_len!==false,
     label_printed:false, user_id:(_sbUser&&_sbUser.id) };
   try{
     const r=await fetch(SB_URL+'/rest/v1/tce_library',{method:'POST',headers:{...sbAuthH(),'Prefer':'return=minimal'},body:JSON.stringify(row)});
