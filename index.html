@@ -3591,12 +3591,18 @@ function parseShakerNotes(notes){
   return cfg;
 }
 
+// Default rail positions give EQUAL PANEL OPENINGS. Spacing the rail CENTRES evenly
+// instead looks right on paper but isn't: an inner panel loses a full mid-rail (half at
+// each end) while an outer panel only loses half a rail, so the top and bottom panels came
+// out a rail-width taller than the middle ones. On a 2266 door that was 497/461/461/497.
+// A centre you type in still wins — that's how you get a deeper bottom panel when you want one.
 function getShakerCentres(H,outerRail,midRail,panels,userCentres){
   if(panels<=1) return [];
+  const opening=(H-2*outerRail-(panels-1)*midRail)/panels;   // every panel the same
   const centres=[];
   for(let i=0;i<panels-1;i++){
-    if(i<userCentres.length) centres.push(userCentres[i]);
-    else centres.push(Math.round(outerRail+(H-2*outerRail)/panels*(i+1)));
+    if(i<userCentres.length && userCentres[i]!=null && userCentres[i]!=='' ) centres.push(userCentres[i]);
+    else centres.push(Math.round(outerRail+(i+1)*opening+i*midRail+midRail/2));
   }
   return centres;
 }
