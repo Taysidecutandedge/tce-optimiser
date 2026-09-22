@@ -3410,23 +3410,32 @@ function guessMap(headers){
   // Normalise: lowercase, trim, collapse spaces
   const h=headers.map(x=>x.toLowerCase().replace(/\s+/g,' ').trim());
   const exact=(name)=>{const i=h.findIndex(x=>x===name);return i;};
-  const contains=(kws)=>{for(const k of kws){const i=h.findIndex(x=>x.includes(k));if(i>=0)return i;}return -1;};
+  // `skip` keeps a loose keyword from stealing a column a more specific field already owns.
+  // "Material name" contains "name", so the part-name matcher used to grab the MATERIAL
+  // column and every panel came in named after its board.
+  const contains=(kws,skip)=>{const bad=new Set((skip||[]).filter(i=>i>=0));
+    for(const k of kws){const i=h.findIndex((x,ix)=>!bad.has(ix)&&x.includes(k));if(i>=0)return i;}return -1;};
+
+  // Resolve the unambiguous columns FIRST, then keep the part name off them.
+  const board = exact('material name') >= 0 ? exact('material name') : exact('material') >= 0 ? exact('material') : contains(['board','material','mat']);
+  const l     = exact('length') >= 0 ? exact('length') : contains(['length','len']);
+  const w     = exact('width')  >= 0 ? exact('width')  : contains(['width','wid']);
+  const qty   = exact('quantity') >= 0 ? exact('quantity') : contains(['qty','quantity','count']);
+  const thick = exact('thickness') >= 0 ? exact('thickness') : contains(['thickness','thick','thk']);
+  const taken = [board,l,w,qty,thick];
 
   return{
-    // Exact TCE column name matches first, then fuzzy fallbacks
+    // Exact TCE column name first, then OpenCutList's "Designation", then fuzzy fallbacks
     label: exact('label description') >= 0 ? exact('label description')
-           : contains(['label','name','panel','part','desc','design']),
-    l:     exact('length') >= 0 ? exact('length') : contains(['length','len']),
-    w:     exact('width')  >= 0 ? exact('width')  : contains(['width','wid']),
-    qty:   exact('quantity') >= 0 ? exact('quantity') : contains(['qty','quantity','count']),
-    board: exact('material name') >= 0 ? exact('material name') : exact('material') >= 0 ? exact('material') : contains(['board','material','mat']),
-    thick: exact('thickness') >= 0 ? exact('thickness') : contains(['thickness','thick','thk']),
-    company: exact('company') >= 0 ? exact('company') : contains(['company','customer','client']),
-    // L1/L2/W1/W2 — exact match on your column names
-    ebL1:  exact('l1') >= 0 ? exact('l1') : contains(['eb_l1','edge_l1','edgeband_l1']),
-    ebL2:  exact('l2') >= 0 ? exact('l2') : contains(['eb_l2','edge_l2','edgeband_l2']),
-    ebW1:  exact('w1') >= 0 ? exact('w1') : contains(['eb_w1','edge_w1','edgeband_w1']),
-    ebW2:  exact('w2') >= 0 ? exact('w2') : contains(['eb_w2','edge_w2','edgeband_w2']),
+           : exact('designation') >= 0 ? exact('designation')
+           : contains(['label','part name','panel name','description','designation','desc','panel','part','name'], taken),
+    l, w, qty, board, thick,
+    company: exact('company') >= 0 ? exact('company') : contains(['company','customer','client'], taken),
+    // L1/L2/W1/W2 — TCE's own names, then OpenCutList's "Edge Length 1" / "Edge Width 1"
+    ebL1:  exact('l1') >= 0 ? exact('l1') : exact('edge length 1') >= 0 ? exact('edge length 1') : contains(['eb_l1','edge_l1','edgeband_l1']),
+    ebL2:  exact('l2') >= 0 ? exact('l2') : exact('edge length 2') >= 0 ? exact('edge length 2') : contains(['eb_l2','edge_l2','edgeband_l2']),
+    ebW1:  exact('w1') >= 0 ? exact('w1') : exact('edge width 1')  >= 0 ? exact('edge width 1')  : contains(['eb_w1','edge_w1','edgeband_w1']),
+    ebW2:  exact('w2') >= 0 ? exact('w2') : exact('edge width 2')  >= 0 ? exact('edge width 2')  : contains(['eb_w2','edge_w2','edgeband_w2']),
   };
 }
 
