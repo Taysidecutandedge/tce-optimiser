@@ -1652,7 +1652,15 @@ function printQuote() {
     const boardBase=bShts*boardPrice;
     const boardTotal=surcharge?boardBase*1.08:boardBase;
     const cutTotal=cShts*cutRate;
-    const matTotal=boardTotal+cutTotal+ebTotal+lamTotal;
+    // ⧉ LAM ×2 panel glue-up. This was priced on the admin screen but MISSING from the PDF
+    // entirely, so any job with glued panels quoted low on the printed copy — the one the
+    // customer actually gets. Same figures as the screen.
+    const lamM2 = data.lamM2 || 0;
+    const lamN  = data.lamN  || 0;
+    const panelLamRate = (ov.panelLamRate!=null) ? ov.panelLamRate : panelLamGlueRate();
+    const panelLamPer  = (ov.panelLamPer!=null)  ? ov.panelLamPer  : panelLamPerPanel();
+    const panelLamTotal = lamM2 * panelLamRate + lamN * panelLamPer;
+    const matTotal=boardTotal+cutTotal+ebTotal+lamTotal+panelLamTotal;
     grandEx+=matTotal;
 
     rows+=`
@@ -1661,6 +1669,7 @@ function printQuote() {
       ${cutTotal!==0||cShts?`<tr><td>Cutting (${cShts} sheet${cShts!==1?'s':''} × £${cutRate.toFixed(2)})</td><td></td><td class="amt">£${cutTotal.toFixed(2)}</td></tr>`:''}
       ${ebPdfRows}
       ${ebMLam>0?`<tr><td>Edgebanding — laminated (${ebMLam.toFixed(2)}m × £${lamRateTotal.toFixed(2)}/lm)</td><td></td><td class="amt">£${lamTotal.toFixed(2)}</td></tr>`:''}
+      ${panelLamTotal>0?`<tr><td>Laminating (${lamM2.toFixed(2)}m² glue + ${lamN} glued panel${lamN!==1?'s':''} × £${panelLamPer.toFixed(2)})</td><td></td><td class="amt">£${panelLamTotal.toFixed(2)}</td></tr>`:''}
       <tr class="sub-row"><td colspan="2">Subtotal</td><td class="amt">£${matTotal.toFixed(2)}</td></tr>`;
   });
 
@@ -1707,6 +1716,21 @@ function printQuote() {
     }
   }
 
+  // The PDF re-derives every figure instead of reading the screen, so the two can drift
+  // apart silently — the panel-laminating line was priced on screen and missing here for
+  // weeks. Check them against each other before anything is printed for a customer.
+  try{
+    const el=document.querySelectorAll('.totals-row span:last-child')[0];
+    const onScreen=el?parseFloat(el.textContent.replace(/[£,]/g,'')):null;
+    if(onScreen!=null && Math.abs(onScreen-grandEx)>0.01){
+      const diff=(grandEx-onScreen);
+      if(!confirm('⚠ The PDF total doesn\'t match the quote on screen.\n\n'
+        +'On screen:  £'+onScreen.toFixed(2)+'\n'
+        +'This PDF:   £'+grandEx.toFixed(2)+'\n'
+        +'Difference: '+(diff>0?'+':'')+'£'+diff.toFixed(2)+'\n\n'
+        +'Don\'t send this to a customer until it\'s sorted. Print anyway?')) return;
+    }
+  }catch(e){}
   const vat=grandEx*0.20;
   const inc=grandEx*1.20;
 
