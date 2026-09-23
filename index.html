@@ -483,6 +483,7 @@ select option{background:var(--surf2)}
       <input id="cloudJobName" placeholder="Job name to save..." style="flex:1;background:var(--surf2);border:1px solid var(--brd);color:var(--txt);border-radius:6px;padding:7px 10px;font-size:13px;font-family:var(--sans)">
       <button class="btn btn-sm" style="background:var(--acc);color:#111;font-weight:700" onclick="cloudSaveJob()">💾 Save</button>
       <button class="btn btn-sm" style="background:var(--surf2);color:var(--txt);border:1px solid var(--brd);white-space:nowrap" onclick="cloudSaveAsRevision()" title="Save as a new revision, keeping the original">Save as Rev</button>
+      <span id="nestSavedTag" style="display:none;font-size:11px;color:#7fe3a8;font-family:var(--mono);align-self:center"></span>
     </div>
     <div style="display:flex;gap:8px;align-items:center">
       <span style="font-size:11px;color:var(--txt3);white-space:nowrap">Customer:</span>
@@ -1110,9 +1111,11 @@ async function cloudSaveAsRevision(){
   await cloudSaveJob();
 }
 
-async function cloudSaveJob(){
+// quiet=true → background auto-save. No prompts, no button flicker; used to push a freshly
+// generated cut plan up to an already-saved job so it's never only in one browser.
+async function cloudSaveJob(quiet){
   const name=document.getElementById('cloudJobName').value.trim()||(projectName||'Unnamed Job');
-  if(!name)return alert('Please enter a job name.');
+  if(!name){ if(quiet) return; return alert('Please enter a job name.'); }
   // Build compact lastResult for admin pricing panel
   // Only store what the admin needs — sheet counts per material and EB totals
   // Never store full placements (too large, not needed for pricing)
@@ -1129,8 +1132,21 @@ async function cloudSaveJob(){
     lamMap[m]=(lamMap[m]||0)+((Number(p.l)||0)/1000)*((Number(p.w)||0)/1000)*q;
     lamCount[m]=(lamCount[m]||0)+q;
   });
+  // Save the actual LAYOUT, not just the sheet names. Only names were stored, so a job
+  // reopened on another machine — or after the browser's copy was overwritten — had no cut
+  // plan to recover and had to be re-nested from scratch.
   const lastResult = _lastSheets && _lastSheets.length ? {
-    sheets: _lastSheets.map(s=>({name:s.name})),
+    sheets: _lastSheets.map(s=>({
+      name:s.name, fullL:s.fullL, fullW:s.fullW, uw:s.uw, uh:s.uh, thick:s.thick,
+      cost:s.cost, color:s.color, jsid:s.jsid,
+      _isOffcut:s._isOffcut||false, _offcutId:s._offcutId||null, _offcutCode:s._offcutCode||null,
+      _offL:s._offL||null, _offW:s._offW||null,
+      placements:(s.placements||[]).map(p=>({label:p.label,x:p.x,y:p.y,w:p.w,h:p.h,
+        origL:p.origL,origW:p.origW,eb:p.eb,grain:p.grain,rot:p.rot,company:p.company,
+        _lam:p._lam,_lamRole:p._lamRole,_finL:p._finL,_finW:p._finW,_lamOv:p._lamOv,_ebLabel:p._ebLabel,
+        _isCrosscut:p._isCrosscut,_isPickupStrip:p._isPickupStrip,_isTrim:p._isTrim,_isRipStrip:p._isRipStrip,
+        id:p.id,pid:p.pid}))
+    })),
     ebMap: _lastEbMap || {},
     lamMap, lamCount
   } : null;
@@ -1171,11 +1187,29 @@ async function cloudSaveJob(){
       try{const ed=await r.json();errMsg=ed.message||ed.hint||ed.error||errMsg;}catch(e2){}
       throw new Error(errMsg);
     }
+    if(quiet){ _setNestSaved('☁ cut plan saved'); return; }
     loadCloudJobList();
     // Show brief confirmation
     const btn=document.querySelector('.cj-box .btn');
     if(btn){const orig=btn.textContent;btn.textContent='✓ Saved!';setTimeout(()=>btn.textContent=orig,2000);}
-  }catch(e){alert('Could not save job: '+e.message);}
+  }catch(e){
+    if(quiet){ _setNestSaved('⚠ cut plan saved on this computer only'); return; }
+    alert('Could not save job: '+e.message);
+  }
+}
+// A freshly generated plan belongs with the job, not just in this browser. If the job came
+// from the cloud we push it back up automatically — that's what makes it survive a different
+// machine, a cleared cache, or a second job overwriting the local copy.
+let _autoNestTimer=null;
+function _autoCloudNest(){
+  if(!_sbToken || !_loadedCloudJobId) return;      // not signed in, or job never saved yet
+  clearTimeout(_autoNestTimer);
+  _autoNestTimer=setTimeout(()=>{ try{ cloudSaveJob(true); }catch(e){} }, 1200);   // debounce rapid recalcs
+}
+function _setNestSaved(txt){
+  const el=document.getElementById('nestSavedTag'); if(!el) return;
+  el.textContent=txt; el.style.display='inline-block';
+  clearTimeout(el._t); el._t=setTimeout(()=>{ el.style.display='none'; }, 6000);
 }
 
 async function cloudLoadJob(id){
@@ -1206,6 +1240,13 @@ async function cloudLoadJob(id){
     if(d.lastResult){
       _lastSheets=d.lastResult.sheets||[];
       _lastEbMap=d.lastResult.ebMap||{};
+      // If the saved copy carries the real layout, this job is ready to cut as it stands —
+      // put it straight back on screen so nobody is pushed into a re-nest to get going.
+      if(_lastSheets.some(s=>s&&s.placements&&s.placements.length)){
+        _lastUnplaced=[];
+        try{ _saveNest(); }catch(e){}
+        setTimeout(()=>{ try{ renderResults(_lastSheets,_lastUnplaced); _resumeNestUI(); }catch(e){} },0);
+      }
     }
     _quoteBasis=d.quoteBasis||null;   // the offcuts-off count the admin prices from
     _pwsOrder=d.pwsOrder||[];
@@ -1295,7 +1336,25 @@ function _saveNest(){
         _lam:p._lam,_lamRole:p._lamRole,_finL:p._finL,_finW:p._finW,_lamOv:p._lamOv,_ebLabel:p._ebLabel,
         _isCrosscut:p._isCrosscut,_isPickupStrip:p._isPickupStrip,_isTrim:p._isTrim,_isRipStrip:p._isRipStrip,
         id:p.id,pid:p.pid})) }));
-    localStorage.setItem('clp_nest',JSON.stringify({project:projectName||'',saved:Date.now(),sheets:slim}));
+    const payload=JSON.stringify({project:projectName||'',saved:Date.now(),sheets:slim});
+    localStorage.setItem('clp_nest',payload);                  // current job (unchanged)
+    // ALSO keep it under the job's own name. There was only ever ONE nest slot, so running
+    // two jobs at once meant the second silently wiped the first — open the other one next
+    // morning and there was "no cut plan saved", forcing a re-nest.
+    const k=_nestKey(projectName); if(k) localStorage.setItem(k,payload);
+    _pruneNests();
+  }catch(e){}
+}
+function _nestKey(proj){ const p=String(proj||'').toLowerCase().replace(/\s+/g,' ').trim(); return p?('clp_nest_'+p):''; }
+// Keep the last 8 job nests; bin the oldest so storage can't fill up.
+function _pruneNests(){
+  try{
+    const rows=[];
+    for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i);
+      if(k&&k.indexOf('clp_nest_')===0){ let t=0; try{ t=JSON.parse(localStorage.getItem(k)).saved||0; }catch(e){}
+        rows.push({k,t}); } }
+    rows.sort((a,b)=>b.t-a.t);
+    rows.slice(8).forEach(r=>localStorage.removeItem(r.k));
   }catch(e){}
 }
 // After a refresh mid-job the nest is restored but the results screen hasn't been drawn, so the
@@ -1373,7 +1432,12 @@ async function recoverNestFromCloud(){
 }
 function _loadNest(){
   try{
-    const raw=localStorage.getItem('clp_nest'); if(!raw) return false;
+    // This job's OWN saved nest first, so switching between two live jobs always finds the
+    // right one. Falls back to the single shared slot for anything saved before this change.
+    let raw=null; const k=_nestKey(projectName);
+    if(k) raw=localStorage.getItem(k);
+    if(!raw) raw=localStorage.getItem('clp_nest');
+    if(!raw) return false;
     const d=JSON.parse(raw); if(!d||!d.sheets||!d.sheets.length) return false;
     if(String(d.project||'')!==String(projectName||'')) return false;   // different job → don't reuse
     _lastSheets=d.sheets; _lastUnplaced=[];
@@ -2749,6 +2813,7 @@ function renderResults(sheets,unplaced){
   // Store for print
   _lastSheets=sheets; _lastUnplaced=unplaced;
   _saveNest();   // keep this exact layout so a refresh mid-cut restores the SAME nest
+  _autoCloudNest();   // …and push it up to the saved job, so it isn't only in this browser
   // Capture the quote basis whenever a result uses NO offcuts (i.e. offcuts were off):
   // this is the true count of fresh boards the job needs, which the admin prices from.
   try{
@@ -3864,10 +3929,14 @@ function confirmShakerDoors(){
   // one at a time get D1, D2, D3… instead of all being stamped "D1".
   let maxN=0;
   (parts||[]).forEach(p=>{ const m=p.door&&p.door.ref&&String(p.door.ref).match(/^D(\d+)/); if(m) maxN=Math.max(maxN,parseInt(m[1])); });
-  let total=0;
+  // Count what the operator actually cares about: DOORS made and PIECES to cut. The old
+  // message counted door *types* and part *rows* — five doors from one entry read back as
+  // "1 door exploded into 9 parts", which looks like four doors went missing.
+  let total=0, doorUnits=0, pieceCount=0;
   _shakerDoors.forEach((door,di)=>{
     const cfg=getShakerCfgFromUI(di);
     const qty=parseInt(document.getElementById('sk-qty-'+di)?.value)||1;
+    doorUnits+=qty;
     const ebFrame=document.getElementById('sk-ebframe-'+di)?.checked||false;
     const ebPanel=document.getElementById('sk-ebpanel-'+di)?.checked||false;
     // Resolve the actual library sheet names for THIS door's chosen thicknesses + material
@@ -3877,13 +3946,15 @@ function confirmShakerDoors(){
     explodeShakerDoor('D'+(maxN+di+1),door.h,door.w,qty,cfg,ebFrame,ebPanel,door.company||'').forEach(sp=>{
       const resolvedMat=sp.kind==='panel'?panelMat:frameMat;
       addPart({label:sp.label,l:sp.l,w:sp.w,qty:sp.qty,grainOverride:sp.grainOverride,matName:resolvedMat,company:sp.company,eb:sp.eb,door:sp.door});
-      total++;
+      total++; pieceCount+=Math.max(1,parseInt(sp.qty)||1);
     });
   });
   renderJobSheets();
   if(typeof _shakerNormalParts==='function') _shakerNormalParts();
   save();renderParts();closeShakerModal();
-  alert(_shakerDoors.length+' door'+(_shakerDoors.length!==1?'s':'')+' exploded into '+total+' parts.');
+  alert(doorUnits+' door'+(doorUnits!==1?'s':'')+' added'
+    +(_shakerDoors.length>1?' ('+_shakerDoors.length+' types)':'')
+    +' — '+pieceCount+' piece'+(pieceCount!==1?'s':'')+' to cut, on '+total+' cutlist row'+(total!==1?'s':'')+'.');
 }
 
 function applyImport(){
@@ -5229,17 +5300,35 @@ async function cmReconcileFromCloud(){
   // PRIMARY: match on the panel's exact position on its sheet (sheetIdx + x + y). Counting
   // by label alone marked the first N matching panels as done regardless of which sheet they
   // were really cut from — which is how cut panels showed up on sheets not started yet.
+  // EVERY confirm counts twice over: once as an exact position, and once as "one more of
+  // this part cut". Positional confirms used to `return` before the count was taken, so the
+  // moment a job was re-nested the positions stopped matching and there was nothing to fall
+  // back on — panels cut yesterday came back as still to cut. A cut is a cut; the layout
+  // changing must never undo it.
   const posDone=new Set();
-  const uniq=new Set(), cnt={};
+  const seen=new Set(), cnt={};
   loose.forEach(p=>{
-    if(p.x!=null && p.y!=null && p.sheetIdx!=null){ posDone.add(p.sheetIdx+'|'+Math.round(p.x)+'|'+Math.round(p.y)); return; }
-    const uk=(p.label||'')+'|'+(p.panelNum||'')+'|'+(p.origL||'')+'|'+(p.origW||'');   // legacy confirms (no position)
-    if(uniq.has(uk)) return; uniq.add(uk);
-    const ck=(p.label||'')+'|'+(p.origL||'')+'|'+(p.origW||''); cnt[ck]=(cnt[ck]||0)+1; });
+    const hasPos = p.x!=null && p.y!=null && p.sheetIdx!=null;
+    // De-dupe: the same physical panel confirmed twice shouldn't count twice.
+    const key = hasPos ? 'P|'+p.sheetIdx+'|'+Math.round(p.x)+'|'+Math.round(p.y)
+                       : 'L|'+(p.label||'')+'|'+(p.panelNum||'')+'|'+(p.origL||'')+'|'+(p.origW||'');
+    if(seen.has(key)) return; seen.add(key);
+    if(hasPos) posDone.add(p.sheetIdx+'|'+Math.round(p.x)+'|'+Math.round(p.y));
+    const ck=(p.label||'')+'|'+(p.origL||'')+'|'+(p.origW||'');
+    cnt[ck]=(cnt[ck]||0)+1;
+  });
   const rem={...cnt}; const done=new Set(); let posHits=0;
+  // Pass 1 — exact position. Best case: same nest, panels land back where they were.
   _cmPanels.forEach((p,i)=>{ if(_cmRecut.has(i)) return;   // keep panels the operator marked for re-cut
-    if(posDone.has(p.sheetIdx+'|'+Math.round(p.x)+'|'+Math.round(p.y))){ done.add(i); posHits++; return; }
-    const ck=(p.label||'')+'|'+(p.origL||'')+'|'+(p.origW||''); if(rem[ck]>0){ done.add(i); rem[ck]--; } });
+    if(posDone.has(p.sheetIdx+'|'+Math.round(p.x)+'|'+Math.round(p.y))){
+      done.add(i); posHits++;
+      const ck=(p.label||'')+'|'+(p.origL||'')+'|'+(p.origW||''); if(rem[ck]>0) rem[ck]--;
+    } });
+  // Pass 2 — whatever is still owed, matched by part name and size. This is what saves a
+  // re-nested job: the panel may be on a different sheet now, but it IS cut.
+  _cmPanels.forEach((p,i)=>{ if(_cmRecut.has(i)||done.has(i)) return;
+    const ck=(p.label||'')+'|'+(p.origL||'')+'|'+(p.origW||'');
+    if(rem[ck]>0){ done.add(i); rem[ck]--; } });
   _cmDone=done;
   // If confirms carry positions but few of them line up, the layout has been re-nested since
   // those cuts — any mapping onto the new nest would be guesswork. Say so rather than
@@ -5284,7 +5373,12 @@ async function openCuttingMode(){
   document.body.style.overflow='hidden';
   cmRender();
   if(rec&&rec.ok&&rec.stale){
-    alert('⚠ The layout has changed since those panels were cut.\n\n'+rec.expected+' panel'+(rec.expected!==1?'s were':' was')+' confirmed earlier, but only '+rec.matched+' line up with this nest — so the ✓ marks below may not be reliable.\n\nCheck the physical sheets against your cut log before carrying on.');
+    // The ticks themselves are sound — every confirmed panel is accounted for by name and
+    // size. What HAS moved is which sheet each one appears on, so say that and nothing worse.
+    alert('ℹ The sheets have been re-nested since those panels were cut.\n\n'
+      +rec.count+' cut panel'+(rec.count!==1?'s are':' is')+' still ticked — matched by part name and size, because only '
+      +rec.matched+' of '+rec.expected+' are in the same place on the board as before.\n\n'
+      +'What is left to cut is right. Which sheet a cut panel is shown on may not be — so work from the ticks, not from where they sit.');
   } else if(rec&&rec.ok&&rec.count>0&&typeof cmToast==='function') cmToast('✅ Restored '+rec.count+' already-cut panel'+(rec.count!==1?'s':'')+' from the cloud');
 }
 function closeCuttingMode(){
