@@ -1165,6 +1165,15 @@ async function cloudSaveJob(quiet){
     customer: savedCustomer || null,
     customerTier: savedCustomerTier
   };
+  // Creating a NEW job under a name that already exists is nearly always a slip — a fresh
+  // cutlist being filed under the last job's name. That's how Karl's parts got saved as
+  // "stephen office". Ask, rather than quietly making a second job with the same name.
+  if(!_loadedCloudJobId && !quiet){
+    const clash=(_cjJobs||[]).filter(j=>String(j.job_name||'').toLowerCase().trim()===name.toLowerCase().trim() && !j.archived);
+    if(clash.length && !confirm('There is already a job called "'+name+'".\n\n'
+      +'This will create a SECOND job with that name, not update the existing one.\n\n'
+      +'If you meant to update it, cancel and open it from the list first.\n\nCreate a new job anyway?')) return;
+  }
   try{
     // Update existing job if one was loaded, otherwise create new
     const isUpdate = !!_loadedCloudJobId;
@@ -3959,6 +3968,14 @@ function confirmShakerDoors(){
 
 function applyImport(){
   document.querySelector('.app')?.classList.remove('results'); // reviewing a fresh import — widen the input panel
+  // A fresh cutlist is a DIFFERENT job. Cut it loose from whatever was loaded before, or
+  // Save quietly files it under the old job's name — which is how Karl's cutlist ended up
+  // saved as "stephen office" — and the auto-save would overwrite that job outright.
+  if(_loadedCloudJobId){
+    _loadedCloudJobId=null;
+    const nb=document.getElementById('cloudJobName'); if(nb) nb.value='';
+    if(typeof _setNestSaved==='function') _setNestSaved('new cutlist — name it before saving');
+  }
   const g=k=>{const el=document.getElementById(`map_${k}`);return el&&el.value!==''?+el.value:-1;};
   const lC=g('l'),wC=g('w'),lblC=g('label');
   if(lC<0||wC<0||lblC<0)return alert('Length, Width and Panel Name columns are required — please map them above.');
