@@ -1245,6 +1245,10 @@ async function cloudLoadJob(id){
       if(pn){ projectName=pn; const ni=document.getElementById('projectNameInput'); if(ni) ni.value=pn; }
     })();
     if(d.ids){libId=d.ids.libId||libId;jsid=d.ids.jsid||jsid;pid=d.ids.pid||pid;ci=d.ids.ci||ci;}
+    // Switching jobs: drop the previous job's cutting-mode state. Leaving it in memory meant
+    // the next _cmSave wrote the OLD job's panels under the NEW job's name.
+    _cmPanels=[]; _cmDone=new Set(); _cmRecut=new Set(); _cmIdx=0; _cmPrevCount=0;
+    _cmSession=''; _cmSince=0;
     // Restore lastResult so admin panel can generate quotes without recalculating
     if(d.lastResult){
       _lastSheets=d.lastResult.sheets||[];
@@ -5254,13 +5258,26 @@ function _cmSig(){
   return s;
 }
 let _cmSince=0;   // cuts made before this time are ignored on reload (set by "Reset cuts")
+// Cut progress is stored PER JOB. There used to be one shared slot, so running two jobs
+// meant each overwrote the other's ticks — and a half-written state could end up carrying
+// one job's name with the other job's panels, which is how both jobs showed the same
+// cutlist. The old shared key is still read as a fallback for progress saved before this.
+function _cmKey(){ const p=String(projectName||'').toLowerCase().replace(/\s+/g,' ').trim(); return p?('tce_cm_state_'+p):'tce_cm_state'; }
 function _cmSave(){
-  try{ localStorage.setItem('tce_cm_state', JSON.stringify({sig:_cmSig(),done:[..._cmDone],recut:[..._cmRecut],idx:_cmIdx,session:_cmSession,since:_cmSince,t:Date.now()})); }catch(e){}
+  try{
+    const payload=JSON.stringify({job:projectName||'',sig:_cmSig(),done:[..._cmDone],recut:[..._cmRecut],idx:_cmIdx,session:_cmSession,since:_cmSince,t:Date.now()});
+    localStorage.setItem(_cmKey(), payload);
+    localStorage.setItem('tce_cm_state', payload);   // keep the legacy slot pointed at the live job
+  }catch(e){}
 }
 function _cmLoad(){
   try{
-    const raw=localStorage.getItem('tce_cm_state'); if(!raw)return false;
+    let raw=localStorage.getItem(_cmKey());
+    if(!raw && _cmKey()!=='tce_cm_state') raw=localStorage.getItem('tce_cm_state');
+    if(!raw)return false;
     const st=JSON.parse(raw); if(!st||st.sig!==_cmSig())return false;   // only restore if same layout
+    // Belt and braces: never accept progress stamped with a different job's name.
+    if(st.job && String(st.job)!==String(projectName||'')) return false;
     _cmDone=new Set(st.done||[]); _cmRecut=new Set(st.recut||[]);
     _cmIdx=(typeof st.idx==='number')?st.idx:0; if(st.session)_cmSession=st.session;
     if(st.since) _cmSince=st.since;
