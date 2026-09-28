@@ -681,6 +681,8 @@ let _offcutStock=[]; // in-stock offcuts for the nester (Phase 2)
 const OFFCUT_STALE_DAYS=30;
 let projectName='';
 let _jobContact=null;   // {name,email,phone,notes} from a website submission — who to message about the job
+let _jobSource=null;    // 'website' etc. — kept across saves so a job never loses its origin
+let _jobRef=null;       // the TCE-XXXXXX reference the customer was given
 let libId=1, jsid=1, pid=1, ci=0;
 let importHeaders=[], importRows=[], libEditingId=null;
 
@@ -1157,7 +1159,8 @@ async function cloudSaveJob(quiet){
 
   const jobData={
     version:2, saved:new Date().toISOString(),
-    projectName:name, library, jobSheets, parts,
+    projectName: quiet ? (projectName||name) : name,
+    library, jobSheets, parts,
     ids:{libId,jsid,pid,ci},
     lastResult,
     quoteBasis:_quoteBasis,   // fresh-board count with offcuts OFF — the admin quotes from this
@@ -1165,6 +1168,12 @@ async function cloudSaveJob(quiet){
     customer: savedCustomer || null,
     customerTier: savedCustomerTier
   };
+  // Where the job came from is part of the job. Saving used to drop it, so a website
+  // enquiry lost its TCE reference and the customer's contact details the first time it
+  // was saved from the optimiser — and there was then no way to tell who had sent it.
+  if(_jobSource) jobData.source=_jobSource;
+  if(_jobRef) jobData.ref=_jobRef;
+  if(_jobContact) jobData.contact=_jobContact;
   // Creating a NEW job under a name that already exists is nearly always a slip — a fresh
   // cutlist being filed under the last job's name. That's how Karl's parts got saved as
   // "stephen office". Ask, rather than quietly making a second job with the same name.
@@ -1183,7 +1192,13 @@ async function cloudSaveJob(quiet){
     const r=await fetch(url,{
       method: isUpdate ? 'PATCH' : 'POST',
       headers:{...sbAuthH(), ...(isUpdate?{'Prefer':'return=minimal'}:{})},
-      body:JSON.stringify({
+      body:JSON.stringify(quiet ? {
+        // Background auto-save touches the LAYOUT ONLY. It must never rename a job or
+        // reassign its customer — that is how a website enquiry ended up called
+        // "stephen office" with its TCE reference gone.
+        job_data:jobData,
+        saved_at:new Date().toISOString()
+      } : {
         user_id:_sbUser.id,
         job_name:name,
         client_name: savedCustomer || (isUpdate ? undefined : null),   // store the chosen account; leave existing assignment alone on re-save
@@ -1223,7 +1238,7 @@ function _setNestSaved(txt){
 
 async function cloudLoadJob(id){
   try{
-    const r=await fetch(SB_URL+'/rest/v1/tce_jobs?id=eq.'+id+'&select=job_data',{headers:sbAuthH()});
+    const r=await fetch(SB_URL+'/rest/v1/tce_jobs?id=eq.'+id+'&select=job_data,job_name',{headers:sbAuthH()});
     const rows=await r.json();
     if(!rows||!rows[0]||!rows[0].job_data)throw new Error('Job not found');
     const d=rows[0].job_data;
@@ -1238,11 +1253,18 @@ async function cloudLoadJob(id){
       const note=(d.contact&&typeof d.contact.notes==='string')?d.contact.notes.trim():'';
       let pn=d.projectName||'';
       _jobContact=d.contact||null;      // keep contact (name/phone/email) for reference on the job
+      _jobSource=d.source||null;        // …and where it came from, so saving can't strip it
+      _jobRef=d.ref||(String((rows[0]&&rows[0].job_name)||'').match(/TCE-\d+/i)||[])[0]||null;
       if(d.source==='website'){
         pn=note||company||pn;
         if(company) window._pendingImportCustomer=company;   // pre-select the customer on Save
       }
       if(pn){ projectName=pn; const ni=document.getElementById('projectNameInput'); if(ni) ni.value=pn; }
+      // The SAVE name box must follow the job you just opened. It didn't, so it kept the
+      // previous job's name — and the next save renamed this job to that one. A website
+      // enquiry lost its TCE reference that way.
+      const nb=document.getElementById('cloudJobName');
+      if(nb) nb.value = (rows[0]&&rows[0].job_name) || pn || '';
     })();
     if(d.ids){libId=d.ids.libId||libId;jsid=d.ids.jsid||jsid;pid=d.ids.pid||pid;ci=d.ids.ci||ci;}
     // Switching jobs: drop the previous job's cutting-mode state. Leaving it in memory meant
