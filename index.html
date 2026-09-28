@@ -683,6 +683,23 @@ let projectName='';
 let _jobContact=null;   // {name,email,phone,notes} from a website submission — who to message about the job
 let _jobSource=null;    // 'website' etc. — kept across saves so a job never loses its origin
 let _jobRef=null;       // the TCE-XXXXXX reference the customer was given
+let _webDoors=null;     // shaker doors from a website submission, waiting to be reviewed
+// Turn the website's compact door records into the shape the shaker review modal expects,
+// then open it so they're checked and exploded into parts like any other door.
+function reviewWebDoors(){
+  if(!_webDoors||!_webDoors.length){ alert('No website doors on this job.'); return; }
+  const doors=_webDoors.map(x=>{
+    const cfg=parseShakerNotes('');
+    cfg.panels=Math.max(1,Math.min(4,parseInt(x.p)||1));
+    if(parseInt(x.rw)) cfg.outerRail=parseInt(x.rw);
+    cfg.midRail=parseInt(x.rw)||cfg.outerRail;
+    cfg.centres=String(x.rc||'').split(/[, ]+/).map(n=>parseInt(n)).filter(n=>n>0);   // blank = even spacing
+    return { h:parseInt(x.h)||0, w:parseInt(x.w)||0, qty:Math.max(1,parseInt(x.q)||1),
+             label:x.d||'Shaker Door', company:(_jobContact&&_jobContact.company)||'', notes:'', cfg };
+  }).filter(d=>d.h>0&&d.w>0);
+  if(!doors.length){ alert('Those door records have no usable sizes.'); return; }
+  openShakerModal(doors,null);
+}
 let libId=1, jsid=1, pid=1, ci=0;
 let importHeaders=[], importRows=[], libEditingId=null;
 
@@ -1174,6 +1191,7 @@ async function cloudSaveJob(quiet){
   if(_jobSource) jobData.source=_jobSource;
   if(_jobRef) jobData.ref=_jobRef;
   if(_jobContact) jobData.contact=_jobContact;
+  if(_webDoors) jobData.doors=_webDoors;   // keep the original door spec with the job
   // Creating a NEW job under a name that already exists is nearly always a slip — a fresh
   // cutlist being filed under the last job's name. That's how Karl's parts got saved as
   // "stephen office". Ask, rather than quietly making a second job with the same name.
@@ -1255,6 +1273,9 @@ async function cloudLoadJob(id){
       _jobContact=d.contact||null;      // keep contact (name/phone/email) for reference on the job
       _jobSource=d.source||null;        // …and where it came from, so saving can't strip it
       _jobRef=d.ref||(String((rows[0]&&rows[0].job_name)||'').match(/TCE-\d+/i)||[])[0]||null;
+      // Shaker doors submitted through the website. Nothing read these, so a customer could
+      // order doors and only the flat panels arrived — the doors vanished without a trace.
+      _webDoors=(Array.isArray(d.doors)&&d.doors.length)?d.doors:null;
       if(d.source==='website'){
         pn=note||company||pn;
         if(company) window._pendingImportCustomer=company;   // pre-select the customer on Save
@@ -1285,6 +1306,16 @@ async function cloudLoadJob(id){
     }
     _quoteBasis=d.quoteBasis||null;   // the offcuts-off count the admin prices from
     _pwsOrder=d.pwsOrder||[];
+    // Doors on the submission but not yet in the cutlist — say so, loudly, on load. A
+    // customer's doors going unnoticed means they're missing off the quote and off the saw.
+    if(_webDoors && !(parts||[]).some(p=>p.door)){
+      const n=_webDoors.reduce((a,x)=>a+(parseInt(x.q)||1),0);
+      setTimeout(()=>{
+        if(confirm('This job was submitted with '+n+' shaker door'+(n!==1?'s':'')+' that are NOT in the cutlist yet.\n\n'
+          +_webDoors.map(x=>'  • '+(x.d||'Door')+'  '+x.h+'×'+x.w+'mm  ×'+(x.q||1)+'  '+(x.p||1)+' panel'+((+x.p||1)!==1?'s':'')).join('\n')
+          +'\n\nReview them now and add them to the cutlist?')) reviewWebDoors();
+      },400);
+    }
     // Safety net: pull any PWS parts out of the cut list on load — whatever the source
     // (a website-submitted job may still contain them). PWS is supply-only, never cut.
     (function(){
