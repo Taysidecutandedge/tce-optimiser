@@ -686,16 +686,25 @@ let _jobRef=null;       // the TCE-XXXXXX reference the customer was given
 let _webDoors=null;     // shaker doors from a website submission, waiting to be reviewed
 // Turn the website's compact door records into the shape the shaker review modal expects,
 // then open it so they're checked and exploded into parts like any other door.
+// The website sends doors in either the short form used by the email data blob
+// (d/h/w/q/p/rw/rc) or the long form used by the intake function
+// (label/height/width/qty/panels/railWidth/midRailFromBottom). Accept both, so a change
+// at either end can't quietly stop doors arriving.
+function _webDoorField(x,short,long){ return (x[short]!=null&&x[short]!=='')?x[short]:x[long]; }
 function reviewWebDoors(){
   if(!_webDoors||!_webDoors.length){ alert('No website doors on this job.'); return; }
   const doors=_webDoors.map(x=>{
+    const F=(s,l)=>_webDoorField(x,s,l);
+    const rail=parseInt(F('rw','railWidth'))||0;
     const cfg=parseShakerNotes('');
-    cfg.panels=Math.max(1,Math.min(4,parseInt(x.p)||1));
-    if(parseInt(x.rw)) cfg.outerRail=parseInt(x.rw);
-    cfg.midRail=parseInt(x.rw)||cfg.outerRail;
-    cfg.centres=String(x.rc||'').split(/[, ]+/).map(n=>parseInt(n)).filter(n=>n>0);   // blank = even spacing
-    return { h:parseInt(x.h)||0, w:parseInt(x.w)||0, qty:Math.max(1,parseInt(x.q)||1),
-             label:x.d||'Shaker Door', company:(_jobContact&&_jobContact.company)||'', notes:'', cfg };
+    cfg.panels=Math.max(1,Math.min(4,parseInt(F('p','panels'))||1));
+    if(rail) cfg.outerRail=rail;
+    cfg.midRail=rail||cfg.outerRail;
+    cfg.centres=String(F('rc','midRailFromBottom')||'').split(/[, ]+/).map(n=>parseInt(n)).filter(n=>n>0);   // blank = even spacing
+    return { h:parseInt(F('h','height'))||0, w:parseInt(F('w','width'))||0,
+             qty:Math.max(1,parseInt(F('q','qty'))||1),
+             label:F('d','label')||'Shaker Door',
+             company:(_jobContact&&_jobContact.company)||'', notes:'', cfg };
   }).filter(d=>d.h>0&&d.w>0);
   if(!doors.length){ alert('Those door records have no usable sizes.'); return; }
   openShakerModal(doors,null);
@@ -1309,10 +1318,12 @@ async function cloudLoadJob(id){
     // Doors on the submission but not yet in the cutlist — say so, loudly, on load. A
     // customer's doors going unnoticed means they're missing off the quote and off the saw.
     if(_webDoors && !(parts||[]).some(p=>p.door)){
-      const n=_webDoors.reduce((a,x)=>a+(parseInt(x.q)||1),0);
+      const n=_webDoors.reduce((a,x)=>a+(parseInt(_webDoorField(x,'q','qty'))||1),0);
       setTimeout(()=>{
         if(confirm('This job was submitted with '+n+' shaker door'+(n!==1?'s':'')+' that are NOT in the cutlist yet.\n\n'
-          +_webDoors.map(x=>'  • '+(x.d||'Door')+'  '+x.h+'×'+x.w+'mm  ×'+(x.q||1)+'  '+(x.p||1)+' panel'+((+x.p||1)!==1?'s':'')).join('\n')
+          +_webDoors.map(x=>{const F=(s,l)=>_webDoorField(x,s,l);
+            const p=parseInt(F('p','panels'))||1;
+            return '  • '+(F('d','label')||'Door')+'  '+F('h','height')+'×'+F('w','width')+'mm  ×'+(F('q','qty')||1)+'  '+p+' panel'+(p!==1?'s':'');}).join('\n')
           +'\n\nReview them now and add them to the cutlist?')) reviewWebDoors();
       },400);
     }
