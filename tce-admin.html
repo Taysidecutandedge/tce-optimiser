@@ -206,6 +206,7 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
         <div class="quote-actions">
           <button class="btn btn-secondary" onclick="saveQuote()">💾 Save Quote</button>
           <button class="btn btn-primary" onclick="printQuote()">🖨 Print Quote</button>
+          <button class="btn btn-primary" onclick="openSendPack()" title="Everything that goes to the customer, in order: print the quote, print the approval sheet, and the email written for you.">📧 Send Pack</button>
           <button class="btn btn-secondary" onclick="openApprovalSheet()" title="The customer's visual approval sheet for this job — every panel and door drawn with its sizes, orientation and edged edges. Opens in the optimiser; print it to PDF and send it with the quote.">✅ Customer Approval</button>
         </div>
       </div>
@@ -1731,6 +1732,121 @@ function viewSavedQuote(id){
   <div style="color:#6b8f7e;font-size:11px;margin-top:16px">Priced at the rates in force on the save date.</div>
   </body></html>`);
   w.document.close();
+}
+
+// ═══════════════════════════════════════════════════════════
+// SEND PACK  —  quote + approval, in the order they go out
+// ═══════════════════════════════════════════════════════════
+// What Rob does today: print the quote, print the approval sheet, write the email, attach both.
+// This does the parts a browser is allowed to do — it prints both and writes the email — and
+// leaves attaching to him, because no web page can attach a file to someone's mail client.
+// It also refuses to start quietly if the readiness gate is red. That's the whole point of the
+// gate: the moment something is about to reach a customer is the moment it has to be checked.
+function openSendPack(){
+  if(!_currentJob){ alert('Open a job first.'); return; }
+  const jobName=_currentJob.job_name||'Job';
+  const custName=(document.getElementById('qCustomer')||{}).value||'';
+  const cust=_customers.find(c=>c.name===custName);
+  // The email address, in order of how likely it is to be the right one: the customer record,
+  // then the contact that came in with a website submission.
+  let jobData=null;
+  try{ jobData=typeof _currentJob.job_data==='string'?JSON.parse(_currentJob.job_data):_currentJob.job_data; }catch(e){}
+  const email=(cust&&cust.email)||(jobData&&jobData.contact&&jobData.contact.email)||'';
+  const who=(cust&&cust.contact_name)||(jobData&&jobData.contact&&jobData.contact.name)||custName||'';
+  const first=String(who).trim().split(/\s+/)[0]||'there';
+  const ref=(jobData&&jobData.ref)||((jobName.match(/TCE-\d+/i)||[])[0])||'';
+  // Totals straight off the screen — never re-derived, so this can't disagree with the quote.
+  const tEls=document.querySelectorAll('.totals-row span:last-child');
+  const exVat=tEls[0]?tEls[0].textContent:'—', incVat=tEls[2]?tEls[2].textContent:'—';
+
+  const blocks=_gate.filter(g=>g.lvl==='block'), warns=_gate.filter(g=>g.lvl==='warn');
+  const subject=`Quote${ref?' '+ref:''} — ${jobName}`;
+  const body =
+`Hi ${first},
+
+Thanks for sending this over. Your quote is attached, along with the approval sheet.
+
+  ${jobName}
+  Total ex-VAT   ${exVat}
+  Total inc-VAT  ${incVat}
+
+The approval sheet shows every panel and door drawn out with its sizes, which way the grain runs, and which edges are banded (in green). Please check it against your own measurements — once it's cut it can't be altered.
+
+To go ahead, just reply APPROVED. If anything needs changing, tell me in the same reply and nothing gets cut until you confirm.
+
+Thanks,
+Rob
+Tayside Cut & Edge
+07876614414`;
+
+  const step=(n,txt,btn,onclick,note)=>`
+    <div style="display:flex;gap:12px;align-items:flex-start;padding:11px 0;border-bottom:1px solid #1e3530">
+      <div style="flex:0 0 22px;height:22px;border-radius:50%;background:#1e3530;color:#8fae9f;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center">${n}</div>
+      <div style="flex:1">
+        <div style="font-size:13px;color:#e8f0ec">${txt}</div>
+        ${note?`<div style="font-size:11px;color:#6b8f7e;margin-top:2px">${note}</div>`:''}
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="${onclick}">${btn}</button>
+    </div>`;
+
+  const gateHtml = blocks.length
+    ? `<div class="gate gate-block" style="margin-bottom:14px"><div class="gate-h">⛔ This quote isn't ready to go out</div>
+       <ul class="gate-list">${blocks.map(g=>`<li class="gl-block">${g.msg}</li>`).join('')}</ul>
+       <div class="gate-sub">Sort these first. You can still work through the steps, but don't send it.</div></div>`
+    : warns.length
+    ? `<div class="gate gate-warn" style="margin-bottom:14px"><div class="gate-h">⚠ Worth a look before this goes</div>
+       <ul class="gate-list">${warns.map(g=>`<li class="gl-warn">${g.msg}</li>`).join('')}</ul></div>`
+    : `<div class="gate gate-ok" style="margin-bottom:14px"><div class="gate-h">✅ Ready to send</div></div>`;
+
+  const ov=document.createElement('div');
+  ov.id='sendPackOv';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.66);z-index:9000;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:36px 16px';
+  ov.innerHTML=`
+    <div style="background:#0f2620;border:1px solid #2b4a40;border-radius:12px;max-width:680px;width:100%;padding:20px 22px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <div style="font-size:16px;font-weight:600;color:#f0a500">Send pack — ${_attr(jobName)}</div>
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('sendPackOv').remove()">✕ Close</button>
+      </div>
+      ${gateHtml}
+      ${step(1,'Print the quote','🖨 Quote','printQuote()','Save as PDF from the print dialog.')}
+      ${step(2,'Print the customer approval sheet','✅ Approval','openApprovalSheet()','Opens in the optimiser, then print to PDF.')}
+      <div style="padding:14px 0 0">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div style="font-size:13px;color:#e8f0ec">3 &nbsp;Email</div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-secondary btn-sm" onclick="_spCopy()">📋 Copy</button>
+            <button class="btn btn-primary btn-sm" onclick="_spMail()">✉ Open in email</button>
+          </div>
+        </div>
+        <label style="font-size:11px;color:#6b8f7e">To</label>
+        <input id="spTo" value="${_attr(email)}" placeholder="no email on file — type it in"
+          style="width:100%;background:#0d1f1a;border:1px solid #2b4a40;border-radius:5px;color:#e8f0ec;padding:7px 9px;font-size:12px;margin:2px 0 8px">
+        <label style="font-size:11px;color:#6b8f7e">Subject</label>
+        <input id="spSubj" value="${_attr(subject)}"
+          style="width:100%;background:#0d1f1a;border:1px solid #2b4a40;border-radius:5px;color:#e8f0ec;padding:7px 9px;font-size:12px;margin:2px 0 8px">
+        <label style="font-size:11px;color:#6b8f7e">Message — edit freely, this is what gets copied</label>
+        <textarea id="spBody" rows="16"
+          style="width:100%;background:#0d1f1a;border:1px solid #2b4a40;border-radius:5px;color:#e8f0ec;padding:9px;font-size:12px;line-height:1.5;font-family:inherit;margin-top:2px;resize:vertical">${_attr(body)}</textarea>
+        <div style="font-size:11px;color:#6b8f7e;margin-top:7px">
+          Attach the two PDFs yourself — a web page isn't allowed to put files into your mail app.
+          ${email?'':'<span style="color:#e6a23c">No email address on file for this customer.</span>'}
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener('click',e=>{ if(e.target===ov) ov.remove(); });
+}
+function _spCopy(){
+  const t=document.getElementById('spBody');
+  t.select(); t.setSelectionRange(0,99999);
+  try{ document.execCommand('copy'); }catch(e){}
+  if(navigator.clipboard) navigator.clipboard.writeText(t.value).catch(()=>{});
+}
+function _spMail(){
+  const to=encodeURIComponent((document.getElementById('spTo')||{}).value||'');
+  const su=encodeURIComponent((document.getElementById('spSubj')||{}).value||'');
+  const bo=encodeURIComponent((document.getElementById('spBody')||{}).value||'');
+  window.location.href=`mailto:${to}?subject=${su}&body=${bo}`;
 }
 
 // The customer's visual approval sheet — panels and doors drawn with sizes, orientation and
