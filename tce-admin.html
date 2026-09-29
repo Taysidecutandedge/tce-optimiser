@@ -206,6 +206,7 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
         <div class="quote-actions">
           <button class="btn btn-secondary" onclick="saveQuote()">💾 Save Quote</button>
           <button class="btn btn-primary" onclick="printQuote()">🖨 Print Quote</button>
+          <button class="btn btn-secondary" onclick="openApprovalSheet()" title="The customer's visual approval sheet for this job — every panel and door drawn with its sizes, orientation and edged edges. Opens in the optimiser; print it to PDF and send it with the quote.">✅ Customer Approval</button>
         </div>
       </div>
 
@@ -1730,6 +1731,16 @@ function viewSavedQuote(id){
   <div style="color:#6b8f7e;font-size:11px;margin-top:16px">Priced at the rates in force on the save date.</div>
   </body></html>`);
   w.document.close();
+}
+
+// The customer's visual approval sheet — panels and doors drawn with sizes, orientation and
+// edged edges in green. It's built by the optimiser, which is the only place that knows how to
+// draw a door, so this opens it there rather than keeping a second copy of that drawing code
+// here. Two PDFs, one job: print the quote, then print this, and send them together.
+function openApprovalSheet(){
+  if(!_currentJob){ alert('Open a job first.'); return; }
+  window.open('https://taysidecutandedge.github.io/tce-optimiser/?approval='
+    + encodeURIComponent(_currentJob.id), '_blank');
 }
 
 function printQuote() {

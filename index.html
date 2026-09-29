@@ -908,6 +908,39 @@ async function onLoginSuccess(){
   document.getElementById('userBarEmail').textContent=_sbUser.email;
   // Await so cloud library fully loads before bootApp continues
   await initCloudLibrary();
+  // A ?approval=<id> link from the admin — now that we're signed in, render it.
+  if(_pendingApproval){ const id=_pendingApproval; _pendingApproval=null; openApprovalForJob(id); }
+}
+
+// ── Approval sheet for a job we are NOT working on ──────────────────────────
+// The admin links here so the quote and the approval sheet can be sent together. It must not
+// disturb whatever job is open: the optimiser keeps its working job in localStorage, shared
+// across every tab, so actually LOADING the job would overwrite the cutlist on the saw — the
+// same way Karl's sheets once turned up in the media wall job. So this borrows the globals
+// for the length of one synchronous render, never calls save(), and puts them straight back.
+let _pendingApproval=null;
+async function openApprovalForJob(id){
+  const keep={parts, jobSheets, projectName};
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/tce_jobs?id=eq.'+id+'&select=job_data,job_name',{headers:sbAuthH()});
+    const rows=await r.json();
+    const d=rows&&rows[0]&&rows[0].job_data;
+    if(!d) throw new Error('job not found');
+    if(!(d.parts||[]).length) throw new Error('that job has no parts to approve');
+    try{
+      parts=d.parts||[]; jobSheets=d.jobSheets||[];
+      projectName=(rows[0].job_name)||d.projectName||'Job';
+      buildApprovalSheet();                       // synchronous — nothing can interleave
+      if(!window._optTitle) window._optTitle=document.title;
+      document.title=projectName+' - Order Approval';
+    } finally {
+      parts=keep.parts; jobSheets=keep.jobSheets; projectName=keep.projectName;
+    }
+    document.getElementById('printLayout').style.display='block';
+    document.body.style.overflow='hidden';
+  }catch(e){
+    alert('Could not open the approval sheet: '+e.message);
+  }
 }
 
 function doLogout(){
@@ -1412,6 +1445,9 @@ async function cloudDeleteJob(id,ev){
 
 // ── Boot sequence ─────────────────────────────
 async function bootApp(){
+  // ?approval=<jobId> — the admin's "Customer Approval" button. Noted before anything loads,
+  // acted on once we're signed in (see onLoginSuccess).
+  try{ _pendingApproval=new URLSearchParams(location.search).get('approval')||null; }catch(e){}
   // Load local data first so UI is populated immediately
   load();
   renderJobSheets();
@@ -5089,7 +5125,8 @@ function buildApprovalSheet(){
       +'<div style="font-size:10.5pt;color:#111;font-weight:bold;margin-top:2px">Order Approval</div>'
       +'<div style="font-size:9pt;color:#555;margin-top:1px">Job: '+esc(jobName)+(cust?' &nbsp;&middot;&nbsp; Customer: '+esc(cust):'')+'</div></div>'
     +'<div style="text-align:right;font-size:9pt;color:#555">'+dateStr+'<br>Please check &amp; approve</div></div>';
-  html+='<div style="font-size:9pt;color:#444;background:#f6f6f6;border:1px solid #e0e0e0;border-radius:5px;padding:8px 10px;margin-bottom:14px">Please confirm each item is the <b>correct size and orientation</b>, and that the <b>edgebanding is on the correct edges</b> (shown in <span style="color:#1f9d57;font-weight:bold">green</span>). Let us know to approve or change anything before we cut.</div>';
+  html+='<div style="font-size:9pt;color:#444;background:#f6f6f6;border:1px solid #e0e0e0;border-radius:5px;padding:8px 10px;margin-bottom:14px">Please confirm each item is the <b>correct size and orientation</b>, and that the <b>edgebanding is on the correct edges</b> (shown in <span style="color:#1f9d57;font-weight:bold">green</span>).'
+    +'<div style="margin-top:6px;padding-top:6px;border-top:1px solid #e0e0e0"><b>To approve:</b> reply to our email with <b>APPROVED</b>. Anything that needs changing, tell us in the same reply &mdash; nothing is cut until you confirm. Once cut, panels can\'t be altered, so please check the sizes against your own measurements.</div></div>';
   if(doors.length){
     html+='<div style="font-size:11pt;font-weight:bold;margin:6px 0 8px;border-bottom:1px solid #ccc;padding-bottom:3px">Doors</div><div style="display:flex;flex-wrap:wrap;gap:12px">';
     doors.forEach(o=>{ const d=o.d; html+='<div class="ap-card" style="border:1px solid #ddd;border-radius:6px;padding:8px 10px;width:200px;text-align:center">'+_apDoorSvg(d)
