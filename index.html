@@ -524,6 +524,7 @@ select option{background:var(--surf2)}
       <button class="btn btn-ghost btn-sm" onclick="addPart()">+ Add Part</button>
     </div>
     <div id="matCheckBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(240,165,0,.14);border:1px solid rgba(240,165,0,.5);border-radius:8px;color:#ffcf8a;font-size:12.5px;line-height:1.7"></div>
+    <div id="sheetEquivBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(40,120,170,.16);border:1px solid rgba(70,150,210,.5);border-radius:8px;color:#9cc;font-size:12.5px;line-height:1.7"></div>
     <div style="overflow-x:auto">
       <table class="ptbl">
         <thead><tr>
@@ -1206,6 +1207,7 @@ async function cloudSaveJob(quiet){
     ids:{libId,jsid,pid,ci},
     lastResult,
     quoteBasis:_quoteBasis,   // fresh-board count with offcuts OFF — the admin quotes from this
+    sheetEquiv:_sheetEquiv,   // fresh-board count worked out independently of how it was nested
     pwsOrder:_pwsOrder,       // supply-only PWS parts (never cut) — kept with the job to order
     customer: savedCustomer || null,
     customerTier: savedCustomerTier
@@ -1338,6 +1340,7 @@ async function cloudLoadJob(id){
       }
     }
     _quoteBasis=d.quoteBasis||null;   // the offcuts-off count the admin prices from
+    _sheetEquiv=d.sheetEquiv||null;
     _pwsOrder=d.pwsOrder||[];
     // Doors on the submission but not yet in the cutlist — say so, loudly, on load. A
     // customer's doors going unnoticed means they're missing off the quote and off the saw.
@@ -1437,7 +1440,7 @@ function _saveNest(){
         _lam:p._lam,_lamRole:p._lamRole,_finL:p._finL,_finW:p._finW,_lamOv:p._lamOv,_ebLabel:p._ebLabel,
         _isCrosscut:p._isCrosscut,_isPickupStrip:p._isPickupStrip,_isTrim:p._isTrim,_isRipStrip:p._isRipStrip,
         id:p.id,pid:p.pid})) }));
-    const payload=JSON.stringify({project:projectName||'',saved:Date.now(),sheets:slim});
+    const payload=JSON.stringify({project:projectName||'',saved:Date.now(),sheets:slim,sheetEquiv:_sheetEquiv});
     localStorage.setItem('clp_nest',payload);                  // current job (unchanged)
     // ALSO keep it under the job's own name. There was only ever ONE nest slot, so running
     // two jobs at once meant the second silently wiped the first — open the other one next
@@ -1542,6 +1545,7 @@ function _loadNest(){
     const d=JSON.parse(raw); if(!d||!d.sheets||!d.sheets.length) return false;
     if(String(d.project||'')!==String(projectName||'')) return false;   // different job → don't reuse
     _lastSheets=d.sheets; _lastUnplaced=[];
+    if(d.sheetEquiv) _sheetEquiv=d.sheetEquiv;
     return true;
   }catch(e){ return false; }
 }
@@ -2072,14 +2076,19 @@ function calculate(){
   if(runBtn){runBtn.textContent='⏳ Optimising...';runBtn.disabled=true;}
   // Use setTimeout so UI updates before heavy calculation starts
   setTimeout(()=>{
-    try{ _calculateInner(); }
+    try{ _calculateInner(); _computeSheetEquiv(); }
     finally{
       if(runBtn){runBtn.textContent=origText;runBtn.disabled=false;}
     }
   },30);
 }
 
-function _calculateInner(){
+// opts.dry → nest as if there were NO offcut stock, return the fresh-board tally and draw
+// nothing. That tally is the SHEET EQUIVALENT: what this job needs off new board, which is
+// what the customer is quoted, however it actually got cut. Works out on its own instead of
+// relying on someone remembering to calculate with offcuts off first.
+function _calculateInner(opts){
+  const _dry=!!(opts&&opts.dry);
   const cncMode=document.getElementById('cncMode')&&document.getElementById('cncMode').checked;
   const sawKerf=parseFloat(document.getElementById('kerf').value)||0;
   const cncKerf=parseFloat((document.getElementById('cncKerf')||{}).value)||8;
@@ -2155,7 +2164,7 @@ function _calculateInner(){
   };
 
   // ── Offcut stock matched to this job's materials (Phase 2) ─────────────
-  const useOffcuts = !!((document.getElementById('useOffcuts')||{}).checked);
+  const useOffcuts = _dry ? false : !!((document.getElementById('useOffcuts')||{}).checked);
   const offcutGuard = parseFloat((document.getElementById('offcutGuard')||{}).value) || 800;  // long edge (mm): offcuts up to this are used freely; bigger ones only when they save a board
   const _matchedOffcuts = (useOffcuts && _offcutStock.length) ? _offcutStock.map(oc=>{
     const js=matchSheet(oc.name);
@@ -2783,9 +2792,43 @@ function _calculateInner(){
                    mat:src.name||s.name||'',loc:src.location||''};
     }
     _usedOff[k].count++; } });
+  // Dry run: just report how many FRESH boards this job needs, and touch nothing on screen.
+  if(_dry){
+    const tally={};
+    best.sheets.forEach(s=>{ if(!s._isOffcut) tally[s.name]=(tally[s.name]||0)+1; });
+    return {tally, unplaced:best.unplaced.length};
+  }
   window._lastUsedOffcuts=Object.values(_usedOff);
   _validateNest(best.sheets);
   renderResults(best.sheets,best.unplaced);
+}
+// Work out the sheet equivalent after a normal calculate. Only needs a second pass when the
+// nest actually used offcuts — otherwise the nest on screen IS the fresh-board answer.
+function _computeSheetEquiv(){
+  try{
+    const usedOffcuts=(_lastSheets||[]).some(s=>s._isOffcut);
+    if(!usedOffcuts){
+      const t={}; (_lastSheets||[]).forEach(s=>{ t[s.name]=(t[s.name]||0)+1; });
+      _sheetEquiv=Object.keys(t).length?t:null;
+    } else {
+      const res=_calculateInner({dry:true});
+      _sheetEquiv=(res&&res.tally&&Object.keys(res.tally).length)?res.tally:null;
+    }
+    if(_sheetEquiv){ _quoteBasis=_quoteBasis||_sheetEquiv; try{ _saveNest(); }catch(e){} }
+    renderSheetEquiv();
+  }catch(e){}
+}
+function renderSheetEquiv(){
+  const el=document.getElementById('sheetEquivBar'); if(!el) return;
+  if(!_sheetEquiv||!(_lastSheets||[]).some(s=>s._isOffcut)){ el.style.display='none'; return; }
+  const used={}; (_lastSheets||[]).forEach(s=>{ if(!s._isOffcut) used[s.name]=(used[s.name]||0)+1; });
+  el.style.display='block';
+  el.innerHTML='<span style="font-weight:700">📄 Sheet equivalent</span> '
+    +'<span style="opacity:.8">— what this job needs off fresh board, whatever it was cut from. The quote prices from this.</span><br>'
+    + Object.keys(_sheetEquiv).map(m=>'<span style="display:inline-block;background:rgba(0,0,0,.25);border-radius:5px;padding:2px 8px;margin:3px 5px 0 0;font-family:var(--mono);font-size:12px">'
+        +esc(m)+': <b>'+_sheetEquiv[m]+'</b> fresh'
+        +(used[m]!=null&&used[m]!==_sheetEquiv[m]?' <span style="opacity:.65">(this nest opened '+used[m]+')</span>':'')
+        +'</span>').join('');
 }
 
 // Last line of defence. A nest that puts panels off the board or on top of each other is
@@ -2947,7 +2990,8 @@ async function undoOffcutsUsed(btn){
   await sbLoadOffcuts();
   if(btn){ btn.textContent='✓ Put back '+ok+(fail?(' · '+fail+' failed'):''); btn.style.background='#555'; }
 }
-let _quoteBasis=null;   // per-material FRESH board count with offcuts OFF — the customer quote is priced from this, so offcuts never affect it
+let _quoteBasis=null;
+let _sheetEquiv=null;   // fresh-board count worked out with offcuts ignored — what the customer is quoted   // per-material FRESH board count with offcuts OFF — the customer quote is priced from this, so offcuts never affect it
 function renderResults(sheets,unplaced){
   // Store for print
   _lastSheets=sheets; _lastUnplaced=unplaced;
