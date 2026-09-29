@@ -760,6 +760,10 @@ async function loadJobs() {
     catch(e){ if(i===tries.length-1) _jobs=[]; }
   }
   renderJobsTable();
+  // Draft the newest unquoted jobs in the background, so the list can tell you what's
+  // ready before you've opened anything. Delayed so the list paints first, and it bails
+  // out on its own if you're already looking at a job.
+  setTimeout(()=>{ _draftScan(false).catch(()=>{}); }, 800);
 }
 async function archiveJob(id, val){
   if(!_hasArchived) return;
@@ -797,7 +801,9 @@ function renderJobsTable() {
         <label id="showArchWrap" style="display:${_hasArchived?'inline-flex':'none'};align-items:center;gap:6px;font-size:12px;color:#6b8f7e">
           <input type="checkbox" ${_showArchived?'checked':''} onchange="_showArchived=this.checked;renderJobsList()"> Show archived
         </label>
+        <button class="btn btn-secondary btn-sm" onclick="_draftScan(true)" title="Price every unquoted job now and show which are ready to send">⚡ Draft quotes</button>
       </div>
+      <div id="draftStatus" style="display:none;font-size:11.5px;color:#8fae9f;background:#12241e;border:1px solid #1e3530;border-radius:6px;padding:7px 10px;margin-bottom:10px"></div>
       <div id="jobsListBody"></div>`;
   }
   const sa=document.getElementById('showArchWrap'); if(sa) sa.style.display=_hasArchived?'inline-flex':'none';
@@ -842,7 +848,7 @@ function renderJobsList(){
         const _noteInp=_showNote?`<input class="jl-note" data-ids="${_ids}" value="${_attr(L.invoice_note||'')}" placeholder="what's still to invoice/pay — e.g. shaker doors" style="flex-basis:100%;font-size:11px;background:#0d1f1a;border:1px solid ${_stM.color};border-radius:5px;padding:4px 7px;color:#e8f0ec">`:(_hasNote&&L.invoice_note?`<div style="flex-basis:100%;font-size:11px;color:#6b8f7e">📝 ${_attr(L.invoice_note)}</div>`:'');
         html+=`<div style="padding:8px 12px;border-top:1px solid #1a2a24;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <div class="jl-open" data-id="${L.id}" style="flex:1;min-width:140px;cursor:pointer">
-            <div style="font-size:13px;color:#e8f0ec">${_attr(jobDisplay(L.job_name))}${L.archived?' <span style="font-size:10px;color:#6b8f7e">(archived)</span>':''}</div>
+            <div style="font-size:13px;color:#e8f0ec">${_attr(jobDisplay(L.job_name))}${L.archived?' <span style="font-size:10px;color:#6b8f7e">(archived)</span>':''}${_draftBadge(L)}</div>
             <div style="font-size:11px;color:#6b8f7e">${L.saved_at?new Date(L.saved_at).toLocaleDateString('en-GB'):''}${revs.length>1?' · latest of '+revs.length:''}</div>
           </div>
           ${_statSel}
@@ -878,6 +884,128 @@ function renderJobsList(){
     const nt=e.target.closest('.jl-note'); if(nt){ setJobNote(nt.dataset.ids, nt.value); return; }
     const s=e.target.closest('.jl-acct'); if(s){ assignAccount(s.dataset.ids, s.value); return; }
   };
+}
+
+// ═══════════════════════════════════════════════════════════
+// AUTO-DRAFT  —  quote it before you open it
+// ═══════════════════════════════════════════════════════════
+// A job arrives, the readiness gate is run against it, and if it passes the quote is built and
+// saved as a draft. You open the job list and it already says "£866.64, ready to send".
+//
+// It does NOT price the job with a second copy of the pricing logic. It drives the real quote
+// screen — the same buildQuote you look at — and reads off what it produced. That is uglier
+// than a tidy pure function, and it is deliberate: every expensive mistake in this system has
+// come from two pieces of code that were supposed to agree and quietly didn't.
+//
+// _drafts holds the result per job id, for the badges in the list.
+let _drafts = {};          // jobId -> {ex, inc, blocks, warns, at, saved}
+let _draftBusy = false;
+let _draftScanned = false; // one automatic pass per page load; the button forces another
+
+function _draftBadge(job){
+  const d=_drafts[job.id];
+  if(!d) return '';
+  if(d.blocks && d.blocks.length)
+    return `<span class="gate-pill gp-block" title="${_attr(d.blocks.join(' · '))}">⛔ ${d.blocks.length} to fix</span>`;
+  const money='£'+d.ex.toFixed(2);
+  if(d.warns && d.warns.length)
+    return `<span class="gate-pill gp-warn" title="${_attr(d.warns.join(' · '))}">⚠ ${money} — check it</span>`;
+  return `<span class="gate-pill gp-ok" title="Drafted and ready to send">✅ ${money} ready</span>`;
+}
+
+// Price one job by borrowing the quote screen, then putting it back exactly as it was.
+// Never runs while a job is open in front of you — see _draftScan.
+async function _draftOne(job){
+  const tierEl=document.getElementById('qTier'), custEl=document.getElementById('qCustomer');
+  const wrap=document.getElementById('quoteBreakdown');
+  const keep={
+    job:_currentJob, ov:_quoteOverrides, rates:_currentCustomerRates,
+    tier:tierEl?tierEl.value:'retail', cust:custEl?custEl.value:'',
+    html:wrap?wrap.innerHTML:'', lines:_quoteLines, gate:_gate, basis:_gateBasis
+  };
+  try{
+    _currentJob=job; _quoteOverrides={};
+    let jd=null;
+    try{ jd = typeof job.job_data==='string'?JSON.parse(job.job_data):job.job_data; }catch(e){}
+    if(custEl){ populateCustomerDropdown(); custEl.value=(jd&&jd.customer)||job.client_name||''; }
+    if(tierEl) tierEl.value=(jd&&jd.customerTier)||'retail';
+    await buildQuote();
+    const t=document.querySelectorAll('.totals-row span:last-child');
+    const num=el=>parseFloat(String(el?el.textContent:'0').replace(/[£,\s]/g,''))||0;
+    const strip=s=>String(s||'').replace(/<[^>]+>/g,'');
+    return {
+      ex:num(t[0]), inc:num(t[2]),
+      blocks:_gate.filter(g=>g.lvl==='block').map(g=>strip(g.msg)),
+      warns:_gate.filter(g=>g.lvl==='warn').map(g=>strip(g.msg)),
+      lines:_quoteLines.slice(),
+      customer:custEl?custEl.value:'', tier:tierEl?tierEl.value:'retail',
+      at:new Date().toISOString()
+    };
+  } finally {
+    _currentJob=keep.job; _quoteOverrides=keep.ov; _currentCustomerRates=keep.rates;
+    if(tierEl) tierEl.value=keep.tier;
+    if(custEl){ populateCustomerDropdown(); custEl.value=keep.cust; }
+    if(wrap) wrap.innerHTML=keep.html;
+    _quoteLines=keep.lines; _gate=keep.gate; _gateBasis=keep.basis;
+  }
+}
+
+// Which jobs are worth drafting: newest first, not archived, and nothing quoted yet.
+// A job you've already quoted by hand is left alone — your figures win.
+async function _draftScan(force){
+  if(_draftBusy || !SB_TOKEN) return;
+  if(_draftScanned && !force) return;
+  // Never touch the quote screen while you're looking at it.
+  const qv=document.getElementById('quoteView');
+  if(qv && qv.style.display==='block') return;
+  _draftBusy=true; _draftScanned=true;
+  try{
+    let quoted=new Set();
+    try{
+      const qs=await sbFetch('tce_quotes','?select=job_id');
+      (qs||[]).forEach(q=>{ if(q.job_id!=null) quoted.add(String(q.job_id)); });
+    }catch(e){ /* no quotes table access — draft anyway, just don't skip */ }
+    const cands=_jobs.filter(j=>!j.archived && !quoted.has(String(j.id)) && !_drafts[j.id])
+                     .slice(0, force?40:8);
+    if(!cands.length) return;
+    _draftSay(`Drafting ${cands.length} quote${cands.length!==1?'s':''}…`);
+    let n=0;
+    for(const j of cands){
+      // Re-check each time round: if you opened a job mid-scan, stop immediately.
+      if(qv && qv.style.display==='block') break;
+      let full;
+      try{ full=(await sbFetch(`tce_jobs?id=eq.${j.id}&select=*`))[0]; }catch(e){ continue; }
+      if(!full || !full.job_data) continue;
+      let d;
+      try{ d=await _draftOne(full); }catch(e){ continue; }
+      if(!d) continue;
+      _drafts[j.id]=d; n++;
+      // Only a quote that passed the gate gets saved. A wrong one stays a warning, not a record.
+      if(!d.blocks.length && d.ex>0){
+        try{
+          await sbFetch('tce_quotes',{method:'POST',headers:{'Prefer':'return=minimal'},
+            body:{ job_id:j.id, job_name:j.job_name, customer_name:d.customer||null,
+                   customer_tier:d.tier,
+                   quote_data:{auto:true, drafted:d.at, tier:d.tier, lines:d.lines,
+                               gate:{warns:d.warns}},
+                   total_ex_vat:d.ex, total_inc_vat:d.inc }});
+          d.saved=true;
+        }catch(e){ d.saved=false; }
+      }
+      renderJobsList();
+    }
+    const ready=Object.values(_drafts).filter(d=>!d.blocks.length).length;
+    const stuck=Object.values(_drafts).filter(d=>d.blocks.length).length;
+    _draftSay(n ? `Drafted ${n}: ${ready} ready to send, ${stuck} need something fixed.` : '');
+  } finally {
+    _draftBusy=false;
+    renderJobsList();
+  }
+}
+function _draftSay(msg){
+  const el=document.getElementById('draftStatus'); if(!el) return;
+  el.textContent=msg||'';
+  el.style.display=msg?'block':'none';
 }
 
 async function openJob(id) {
