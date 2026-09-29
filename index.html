@@ -1194,6 +1194,9 @@ async function cloudSaveJob(quiet){
         id:p.id,pid:p.pid}))
     })),
     ebMap: _lastEbMap || {},
+    // Parts that wouldn't fit on any board. Saved so the admin's readiness check can say the
+    // quote is short of the cutlist — before it was only ever visible on this screen.
+    unplaced: (_lastUnplaced||[]).map(p=>({label:p.label, l:p.origL||p.l, w:p.origW||p.w, matName:p.matName||p.material||''})),
     lamMap, lamCount
   } : null;
 

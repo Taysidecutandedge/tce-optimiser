@@ -99,6 +99,22 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
 .qt .override-input{width:80px;padding:3px 6px;font-size:12px}
 .qt .override-label{font-size:11px;color:#6b8f7e}
 
+/* ── QUOTE READINESS GATE ── */
+.gate{border-radius:8px;padding:12px 14px;margin-bottom:14px;border:1px solid}
+.gate-h{font-size:14px;font-weight:600}
+.gate-sub{font-size:11.5px;color:#8fae9f;margin-top:4px}
+.gate-ok{background:#16301f;border-color:#2f6b43;color:#7fd39a}
+.gate-warn{background:#332a12;border-color:#7a5f1c;color:#f0c14b}
+.gate-block{background:#341c1c;border-color:#7a2b2b;color:#f88}
+.gate-list{margin:8px 0 0;padding-left:18px}
+.gate-list li{font-size:12.5px;line-height:1.55;margin-bottom:5px;color:#d8e6de}
+.gate-list li.gl-block::marker{color:#f87171}
+.gate-list li.gl-warn::marker{color:#f0a500}
+.gate-list b{color:#fff}
+.gate-pill{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:9px;vertical-align:middle;margin-left:6px}
+.gp-ok{background:#2f6b43;color:#d6f5e2}
+.gp-warn{background:#7a5f1c;color:#ffeab8}
+.gp-block{background:#7a2b2b;color:#ffd6d6}
 .totals-box{background:#1e3530;border:1px solid #2b4a40;border-radius:8px;padding:16px;max-width:320px;margin-left:auto}
 .totals-row{display:flex;justify-content:space-between;padding:5px 0;font-size:14px}
 .totals-row.grand{font-size:18px;font-weight:bold;color:#f0a500;border-top:1px solid #2b4a40;margin-top:8px;padding-top:12px}
@@ -497,6 +513,9 @@ let _quoteOverrides = {}; // matName → {boardPrice, cutRate, surcharge, ebTape
 // Every priced line of the quote currently on screen. Saved with the quote so the record is
 // the numbers you actually sent, not whatever today's rates would produce.
 let _quoteLines = [];
+// Readiness findings for the quote on screen. {lvl:'block'|'warn', msg}
+// 'block' = this quote is wrong or unverifiable as it stands. 'warn' = check it before sending.
+let _gate = [];
 function _qLine(group, item, detail, qty, rate, total){
   _quoteLines.push({group, item, detail, qty:Number(qty)||0, rate:Number(rate)||0, total:Number(total)||0});
 }
@@ -1178,6 +1197,7 @@ async function buildQuote() {
     });
   } else {
     // No results saved — show note
+    _gate = [{lvl:'block',msg:'No saved optimiser results — nothing to price.'}];
     wrap.innerHTML = `<div class="no-data" style="text-align:left;padding:20px">
       <p style="margin-bottom:8px">⚠ This job doesn't have saved optimiser results.</p>
       <p style="color:#6b8f7e;font-size:12px">Open the job in the optimiser, run Calculate, then Save Job again. The sheet counts and edgebanding metres will then be available here.</p>
@@ -1191,6 +1211,14 @@ async function buildQuote() {
   let rows = '';
   let grandEx = 0;
   _quoteLines = [];   // rebuilt on every render; snapshotted into the quote when you save
+  // ── Quote readiness gate ────────────────────────────────────────────────
+  // Everything that has gone wrong on a quote this month was silent: a material priced from
+  // a guess, doors never added, offcuts billed as boards, a total that didn't match the PDF.
+  // This is the list of things a quote must satisfy before it's safe to send — and the same
+  // list an automatic quote would have to pass before going out without being read.
+  _gate = [];
+  const gBlock=(m)=>_gate.push({lvl:'block',msg:m});
+  const gWarn =(m)=>_gate.push({lvl:'warn', msg:m});
 
   Object.entries(matData).forEach(([mat, data]) => {
     if (shaker.pureDoorMats.has(mat)) return;   // priced as shaker doors below
@@ -1201,6 +1229,15 @@ async function buildQuote() {
     const boardPrice = ov.boardPrice !== undefined ? ov.boardPrice : (autoPrice ?? 0);
     const surcharge = ov.surcharge || false;
     const cutRate = ov.cutRate !== undefined ? ov.cutRate : cutRateForMat(mat, jobData, tier);
+    // ── gate: material pricing ──
+    if(autoPrice === null && ov.boardPrice === undefined)
+      gBlock(`<b>${mat}</b> isn't in the price list — no board price. Add the board, or type a price in.`);
+    else if(!(boardPrice > 0) && (ov.boardSheets==null || ov.boardSheets>0))
+      gBlock(`<b>${mat}</b> prices at £0.00/sheet. Either the board row has no price, or the wrong board matched.`);
+    if(/\bTBC\b|to be confirmed/i.test(mat))
+      gBlock(`<b>${mat}</b> is still marked TBC — the material isn't decided.`);
+    if(!(cutRate > 0) && (ov.cutSheets==null || ov.cutSheets>0))
+      gWarn(`<b>${mat}</b> has no cutting rate — cutting charges nil on this material.`);
     // Edgebanding split by tape thickness (1mm, 2mm, …) — each its own line + rate,
     // so a board with e.g. 1mm and 2mm oak veneer edges charges both correctly.
     // Walnut is checked before oak: a walnut board should default to walnut tape, not be
@@ -1269,6 +1306,10 @@ async function buildQuote() {
             : `<span style="color:#e6a23c">No sheet equivalent on this job — pricing the ${shts} fresh sheet${shts!==1?'s':''} in this nest. Re-calculate in the optimiser to work it out.</span>`)
         +`</td></tr>`
       : '';
+    // ── gate: offcut pricing basis ──
+    // This is the one that cost £669 on Linsey Rev 3: offcuts counted as fresh boards.
+    if(offN && !(se && se[mat]!=null) && !(qb && qb[mat]!=null))
+      gBlock(`<b>${mat}</b> used ${offN} offcut${offN!==1?'s':''} but has no sheet equivalent — the ${shts} sheet${shts!==1?'s':''} being charged is the nest count, not the fresh-board requirement. Re-calculate in the optimiser.`);
     const boardBase = bShts * boardPrice;
     const boardTotal = surcharge ? boardBase * 1.08 : boardBase;
     const cutTotal = cShts * cutRate;
@@ -1465,7 +1506,57 @@ async function buildQuote() {
   const grandInc = grandEx * 1.20;
   const vatAmt = grandEx * 0.20;
 
-  wrap.innerHTML = `
+  // ── gate: whole-job checks ───────────────────────────────────────────────
+  {
+    // Doors ordered on the website but never exploded into parts. Paul's job went out
+    // without its doors because nothing said they were missing.
+    const wd = (jobData && jobData.doors) || [];
+    if(wd.length && !shaker.doors.length)
+      gBlock(`This job has <b>${wd.length} shaker door order${wd.length!==1?'s':''}</b> from the website that haven't been added to the cutlist. Open it in the optimiser and review the doors.`);
+    // A material name the customer's software used that we translated to one of ours.
+    // Silent translation is what turned "oak 1" into H1367 ST40.
+    const trans = new Set();
+    (jobData.parts||[]).forEach(p=>{
+      const s=(p.srcMat||p.srcMaterial||'').trim(), m=(p.matName||p.material||'').trim();
+      if(s && m && s.toLowerCase()!==m.toLowerCase()) trans.add(s+' → '+m);
+    });
+    if(trans.size) gWarn(`Material names were translated — check these are right: ${[...trans].map(t=>'<b>'+t+'</b>').join(', ')}`);
+    // Parts that wouldn't fit any board. They're in the cutlist but not in this quote.
+    const unp = (jobData.lastResult && jobData.lastResult.unplaced) || [];
+    if(unp.length) gBlock(`<b>${unp.length} part${unp.length!==1?'s':''} couldn't be nested</b> — they're in the cutlist but not priced here.`);
+    // TBC anywhere in the part labels or the job's own notes.
+    const tbc = (jobData.parts||[]).filter(p=>/\bTBC\b|to be confirmed/i.test(p.label||''));
+    if(tbc.length) gBlock(`<b>${tbc.length} part${tbc.length!==1?'s':''} marked TBC</b> — e.g. "${_attr((tbc[0].label||'').slice(0,60))}".`);
+    // Who it's for, and at what tier.
+    const _cust=(document.getElementById('qCustomer')||{}).value||'';
+    if(!_cust.trim()) gBlock('No customer selected — the quote has no one to go to and no tier behind its rates.');
+    else if(!_customers.some(c=>(c.name||'').toLowerCase()===_cust.trim().toLowerCase()))
+      gWarn(`<b>${_attr(_cust)}</b> isn't on file — pricing is falling back to the ${tier} tier.`);
+    if(!(grandEx>0)) gBlock('The quote totals £0.00.');
+    // Overridden sheet counts are legitimate but they're a manual decision, so say so.
+    const edited=Object.entries(_quoteOverrides).filter(([k,v])=>k.slice(0,2)!=='__' && v && (v.boardSheets!=null||v.cutSheets!=null||v.boardPrice!==undefined)).map(([k])=>k);
+    if(edited.length) gWarn(`Figures edited by hand on: ${edited.map(m=>'<b>'+m+'</b>').join(', ')}.`);
+  }
+  const _gBlocks=_gate.filter(g=>g.lvl==='block'), _gWarns=_gate.filter(g=>g.lvl==='warn');
+  const gatePanel = (()=>{
+    if(!_gate.length) return `<div class="gate gate-ok">
+      <div class="gate-h">✅ Ready to quote</div>
+      <div class="gate-sub">Every material priced from a real board, nothing outstanding, nothing guessed.</div></div>`;
+    const cls=_gBlocks.length?'gate-block':'gate-warn';
+    const head=_gBlocks.length
+      ? `⛔ Not ready — ${_gBlocks.length} thing${_gBlocks.length!==1?'s':''} would make this quote wrong`
+      : `⚠ Check before sending — ${_gWarns.length} thing${_gWarns.length!==1?'s':''} to look at`;
+    return `<div class="gate ${cls}">
+      <div class="gate-h">${head}</div>
+      <ul class="gate-list">
+        ${_gBlocks.map(g=>`<li class="gl-block">${g.msg}</li>`).join('')}
+        ${_gWarns.map(g=>`<li class="gl-warn">${g.msg}</li>`).join('')}
+      </ul>
+      ${_gBlocks.length?`<div class="gate-sub">You can still print this — the gate tells you, it doesn't stop you.</div>`:''}
+    </div>`;
+  })();
+
+  wrap.innerHTML = gatePanel + `
     <table class="qt">
       <thead><tr><th>Item</th><th>Detail</th><th></th><th></th><th class="r">Rate</th><th class="r">Total</th></tr></thead>
       <tbody>${rows}</tbody>
