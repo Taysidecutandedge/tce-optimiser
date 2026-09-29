@@ -509,6 +509,7 @@ select option{background:var(--surf2)}
       <span class="sec-ttl">Sheets in Job</span>
       <div style="display:flex;gap:5px">
         <button class="btn-lib" onclick="openLibModal()">📚 Library</button>
+        <button class="btn-lib" onclick="manageMatAliases()" title="Materials the optimiser maps automatically on import — check or forget a wrong one">🧠 Material memory</button>
         <button class="btn btn-ghost btn-sm" onclick="addBlankSheet()">+ Blank</button>
       </div>
     </div>
@@ -522,6 +523,7 @@ select option{background:var(--surf2)}
       <button class="btn btn-ghost btn-sm" onclick="addShakerDoor()">✂ Add Shaker Door</button>
       <button class="btn btn-ghost btn-sm" onclick="addPart()">+ Add Part</button>
     </div>
+    <div id="matCheckBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(240,165,0,.14);border:1px solid rgba(240,165,0,.5);border-radius:8px;color:#ffcf8a;font-size:12.5px;line-height:1.7"></div>
     <div style="overflow-x:auto">
       <table class="ptbl">
         <thead><tr>
@@ -1853,11 +1855,35 @@ function addPart(d){
     eb:d?.eb??makeEB(),
     color:nc(),
     door:d?.door||null,
-    laminate:d?.laminate??false
+    laminate:d?.laminate??false,
+    srcMat:d?.srcMat||null   // what the customer wrote, when it differs from the board we mapped to
   });
   if(!d){save();renderParts();}
 }
 function toggleLam(id){const p=parts.find(x=>x.id===id);if(p){p.laminate=!p.laminate;save();renderParts();}}
+
+// What the customer asked for vs what it's being cut from. You only ever see the mapped
+// material on screen, so a wrong mapping is invisible — this is the receipt.
+function _matTranslations(){
+  const m={};
+  (parts||[]).forEach(p=>{
+    if(!p.srcMat) return;
+    const k=p.srcMat+' → '+(p.matName||'');
+    m[k]=m[k]||{from:p.srcMat,to:p.matName||'',n:0};
+    m[k].n+=Math.max(1,parseInt(p.qty)||1);
+  });
+  return Object.values(m);
+}
+function renderMatCheck(){
+  const el=document.getElementById('matCheckBar'); if(!el) return;
+  const t=_matTranslations();
+  if(!t.length){ el.style.display='none'; el.innerHTML=''; return; }
+  el.style.display='block';
+  el.innerHTML='<span style="font-weight:700">⚠ Materials were translated on import — check against the customer\'s list:</span> '
+    + t.map(x=>'<span style="display:inline-block;background:rgba(0,0,0,.25);border-radius:5px;padding:2px 8px;margin:2px 4px 2px 0;font-family:var(--mono);font-size:12px">'
+        +esc(x.from)+' <span style="opacity:.7">→</span> <b>'+esc(x.to)+'</b> <span style="opacity:.7">×'+x.n+'</span></span>').join('')
+    + '<button onclick="manageMatAliases()" style="background:none;border:1px solid rgba(255,255,255,.35);color:inherit;border-radius:5px;font-size:11px;padding:2px 8px;cursor:pointer;margin-left:4px">Wrong? Fix the memory</button>';
+}
 
 function removePart(id){parts=parts.filter(p=>p.id!==id);save();renderParts();}
 function ps(id,k,v){const p=parts.find(x=>x.id===id);if(p){p[k]=v;save();}}
@@ -1922,6 +1948,7 @@ function effGrain(p){
 }
 
 function renderParts(){
+  try{ renderMatCheck(); }catch(e){}
   const tb=document.getElementById('partsTbody');
   tb.innerHTML='';
   parts.forEach(p=>{
@@ -4137,12 +4164,14 @@ function applyImport(){
   const autoCreated=[];   // boards not in the library, created straight from the cutlist
   const aliasMap={};      // effective material (key) -> mapped board name, from remembered aliases
   let aliasedCount=0;
+  const aliasApplied=[];   // what memory mapped, so it can be listed instead of just counted
   matsFound.forEach(mn=>{
     if(/shaker\s*door/i.test(mn)) return;          // shaker doors handled separately
     // Remembered from a previous import? Map straight to that board — no prompt.
     const al=_matAliasGet(mn); const alB=al?_resolveBoardRef(al.ref):null;
     if(alB){
       aliasMap[_matAliasKey(mn)]=alB.name; aliasedCount++;
+      aliasApplied.push({from:mn, to:alB.name});   // so the import can SHOW what it mapped
       if(!jobSheets.some(js=>(js.name||'').toLowerCase()===alB.name.toLowerCase())){
         jobSheets.push({id:jsid++,libRef:alB.libRef,name:alB.name,l:alB.l,w:alB.w,thick:alB.thick,
           cost:alB.cost,color:alB.color||nc(),grainLen:alB.grainLen,qty:1,trimT:15,trimB:15,trimL:15,trimR:15});
@@ -4245,9 +4274,14 @@ function applyImport(){
       const aliasName=aliasMap[_matAliasKey(board)];
       const matched=(!aliasName&&board)?importResolveSheet(board):null;
       const resolvedMat=aliasName||(matched?matched.name:(board||''));
+      // Keep what the CUSTOMER actually wrote. Without it there's no way to check a job
+      // against the submission — you only ever see the material after mapping, so a wrong
+      // mapping looks exactly like a correct one.
+      const srcMat=(board||'').trim();
       addPart({label,l,w,
         qty:qC>=0&&row[qC]!==''?Math.max(1,parseInt(row[qC])||1):1,
-        grainOverride:null,matName:resolvedMat,company:company||'',eb});
+        grainOverride:null,matName:resolvedMat,company:company||'',eb,
+        srcMat:(srcMat && srcMat.toLowerCase()!==String(resolvedMat).toLowerCase())?srcMat:null});
       normalAdded++;
     });
     if(!projectName){
@@ -4264,7 +4298,14 @@ function applyImport(){
   };
 
   const sheetMsg=sheetsAdded>0?'\n'+sheetsAdded+' sheet type'+(sheetsAdded!==1?'s':'')+' auto-added.':'';
-  const aliasMsg=aliasedCount>0?'\n'+aliasedCount+' material'+(aliasedCount!==1?'s':'')+' auto-mapped from memory.':'';
+  // SHOW what memory mapped, not just how many. A remembered mapping is applied with no
+  // prompt, so a wrong one is invisible: "oak 1" was once mapped to an MFC decor and every
+  // import after that quietly priced oak veneer as MFC.
+  const aliasMsg=aliasedCount>0
+    ? '\n\nAuto-mapped from memory — check these are right:\n'
+      + aliasApplied.map(a=>'   "'+a.from+'"  →  '+a.to).join('\n')
+      + '\n(Materials ▸ Forget remembered materials, if any are wrong.)'
+    : '';
   const newMsg=autoCreated.length?'\n\nNote: '+autoCreated.length+' board'+(autoCreated.length!==1?'s were':' was')+' not in your library, so created from the cutlist at 2800 x 2070 - please check size/thickness/cost:\n- '+autoCreated.join('\n- '):'';
 
   if(shakerRows.length>0){
@@ -4401,6 +4442,29 @@ let _matMapData=[], _matMapCatTried=false;
 function _matAliasAll(){ try{ return JSON.parse(localStorage.getItem('tce_mat_aliases')||'{}'); }catch(e){ return {}; } }
 function _matAliasKey(name){ return String(name||'').toLowerCase().replace(/\s+/g,' ').trim(); }
 function _matAliasGet(name){ const a=_matAliasAll(); return a[_matAliasKey(name)]||null; }
+// Remembered mappings are applied silently on every import, so a wrong one can mis-price
+// jobs indefinitely. This is how you see them and get rid of a bad one.
+function manageMatAliases(){
+  const a=_matAliasAll(); const keys=Object.keys(a);
+  if(!keys.length){ alert('No remembered material mappings yet.\n\nOne is saved each time you map an unrecognised material to a board during an import.'); return; }
+  const list=keys.map((k,i)=>(i+1)+'.  "'+k+'"  →  '+((a[k]&&a[k].name)||'?')).join('\n');
+  const pick=prompt('Remembered material mappings — these are applied automatically on every import:\n\n'
+    +list+'\n\nType a number to forget that one, ALL to clear the lot, or Cancel to leave them.','');
+  if(pick===null) return;
+  const s=String(pick).trim();
+  if(/^all$/i.test(s)){
+    if(!confirm('Forget all '+keys.length+' remembered mappings?\n\nFuture imports will ask you to map each unrecognised material again.')) return;
+    try{ localStorage.removeItem('tce_mat_aliases'); }catch(e){}
+    alert('All remembered mappings cleared.'); return;
+  }
+  const n=parseInt(s);
+  if(!(n>=1&&n<=keys.length)){ alert('Nothing changed.'); return; }
+  const k=keys[n-1];
+  if(!confirm('Forget "'+k+'" → '+((a[k]&&a[k].name)||'?')+' ?\n\nThe next import with that material will ask you to map it again.')) return;
+  delete a[k];
+  try{ localStorage.setItem('tce_mat_aliases',JSON.stringify(a)); }catch(e){}
+  alert('Forgotten. '+Object.keys(a).length+' mapping'+(Object.keys(a).length!==1?'s':'')+' left.');
+}
 function _matAliasSet(name,ref,target){ if(!name||!ref)return; const a=_matAliasAll(); a[_matAliasKey(name)]={ref,name:target}; try{ localStorage.setItem('tce_mat_aliases',JSON.stringify(a)); }catch(e){} }
 // Resolve a board reference ("lib:ID" or "cb:ID") to a usable board object, or null.
 function _resolveBoardRef(ref){
