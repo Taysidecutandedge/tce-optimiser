@@ -901,6 +901,17 @@ function renderJobsList(){
 let _drafts = {};          // jobId -> {ex, inc, blocks, warns, at, saved}
 let _draftBusy = false;
 let _draftScanned = false; // one automatic pass per page load; the button forces another
+let _draftCancel = false;  // set the instant you open a job — see _draftYield
+
+// Opening a job while a draft is mid-flight is the dangerous moment: the draft would finish,
+// put the screen back to ITS job, and quietly overwrite the one you just opened. So opening a
+// job raises a stop flag and then WAITS for the draft to let go before touching anything.
+async function _draftYield(ms){
+  _draftCancel = true;
+  const until = Date.now() + (ms||4000);
+  while(_draftBusy && Date.now() < until){ await new Promise(r=>setTimeout(r,60)); }
+  return !_draftBusy;   // false = it didn't let go in time; caller carries on regardless
+}
 
 function _draftBadge(job){
   const d=_drafts[job.id];
@@ -958,7 +969,7 @@ async function _draftScan(force){
   // Never touch the quote screen while you're looking at it.
   const qv=document.getElementById('quoteView');
   if(qv && qv.style.display==='block') return;
-  _draftBusy=true; _draftScanned=true;
+  _draftBusy=true; _draftScanned=true; _draftCancel=false;
   try{
     let quoted=new Set();
     try{
@@ -972,7 +983,7 @@ async function _draftScan(force){
     let n=0;
     for(const j of cands){
       // Re-check each time round: if you opened a job mid-scan, stop immediately.
-      if(qv && qv.style.display==='block') break;
+      if(_draftCancel || (qv && qv.style.display==='block')) break;
       let full;
       try{ full=(await sbFetch(`tce_jobs?id=eq.${j.id}&select=*`))[0]; }catch(e){ continue; }
       if(!full || !full.job_data) continue;
@@ -1014,6 +1025,9 @@ async function openJob(id) {
     alert('Please sign in first to open a saved job.');
     return;
   }
+  // Stop any background drafting and wait for it to release the quote screen, so it can't
+  // finish behind us and restore ITS job over the one you asked for.
+  await _draftYield(4000);
 
   // 1. Fetch job data first
   let full;
