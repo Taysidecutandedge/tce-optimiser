@@ -1299,6 +1299,14 @@ async function cloudLoadJob(id){
       if(nb) nb.value = (rows[0]&&rows[0].job_name) || pn || '';
     })();
     if(d.ids){libId=d.ids.libId||libId;jsid=d.ids.jsid||jsid;pid=d.ids.pid||pid;ci=d.ids.ci||ci;}
+    // The website sends the customer's own material name alongside the board they picked,
+    // under either srcMat or srcMaterial. Normalise to one field, and only keep it when it
+    // actually differs from the board — otherwise every part would flag a "translation".
+    (parts||[]).forEach(p=>{
+      const s=p.srcMat||p.srcMaterial||null;
+      p.srcMat=(s && String(s).toLowerCase().trim()!==String(p.matName||'').toLowerCase().trim())?String(s).trim():null;
+      if('srcMaterial' in p) delete p.srcMaterial;
+    });
     // Switching jobs: drop the previous job's cutting-mode state. Leaving it in memory meant
     // the next _cmSave wrote the OLD job's panels under the NEW job's name.
     _cmPanels=[]; _cmDone=new Set(); _cmRecut=new Set(); _cmIdx=0; _cmPrevCount=0;
@@ -1879,7 +1887,9 @@ function renderMatCheck(){
   const t=_matTranslations();
   if(!t.length){ el.style.display='none'; el.innerHTML=''; return; }
   el.style.display='block';
-  el.innerHTML='<span style="font-weight:700">⚠ Materials were translated on import — check against the customer\'s list:</span> '
+  const unmatched=t.filter(x=>/not\s*matched/i.test(x.to)||!x.to);
+  el.innerHTML='<span style="font-weight:700">'+(unmatched.length?'⚠ A material was NOT matched to a board — ':'⚠ Materials were translated — ')
+    +'check against the customer\'s list:</span> '
     + t.map(x=>'<span style="display:inline-block;background:rgba(0,0,0,.25);border-radius:5px;padding:2px 8px;margin:2px 4px 2px 0;font-family:var(--mono);font-size:12px">'
         +esc(x.from)+' <span style="opacity:.7">→</span> <b>'+esc(x.to)+'</b> <span style="opacity:.7">×'+x.n+'</span></span>').join('')
     + '<button onclick="manageMatAliases()" style="background:none;border:1px solid rgba(255,255,255,.35);color:inherit;border-radius:5px;font-size:11px;padding:2px 8px;cursor:pointer;margin-left:4px">Wrong? Fix the memory</button>';
