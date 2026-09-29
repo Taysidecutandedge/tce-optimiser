@@ -1736,9 +1736,25 @@ async function buildQuote() {
     if(tbc.length) gBlock(`<b>${tbc.length} part${tbc.length!==1?'s':''} marked TBC</b> — e.g. "${_attr((tbc[0].label||'').slice(0,60))}".`);
     // Who it's for, and at what tier.
     const _cust=(document.getElementById('qCustomer')||{}).value||'';
+    const _custRec=_customers.find(c=>(c.name||'').toLowerCase()===_cust.trim().toLowerCase());
     if(!_cust.trim()) gBlock('No customer selected — the quote has no one to go to and no tier behind its rates.');
-    else if(!_customers.some(c=>(c.name||'').toLowerCase()===_cust.trim().toLowerCase()))
+    else if(!_custRec)
       gWarn(`<b>${_attr(_cust)}</b> isn't on file — pricing is falling back to the ${tier} tier.`);
+    else {
+      // Somewhere real to send it. The accounts were created with made-up placeholder
+      // addresses (…@tce.local), which look filled in but bounce. A quote can't be "ready"
+      // when the address is invented.
+      const _em=(_custRec.email||'').trim();
+      const _jdEm=(jobData && jobData.contact && jobData.contact.email || '').trim();
+      if(!_em)
+        gBlock(`<b>${_attr(_cust)}</b> has no email address on file.${_jdEm?` The enquiry came from <b>${_attr(_jdEm)}</b> — add it on the Customers tab.`:''}`);
+      else if(/@tce\.local$/i.test(_em) || /^noreply\+/i.test(_em))
+        gBlock(`<b>${_attr(_cust)}</b>'s email is a placeholder (<b>${_attr(_em)}</b>) — mail to it will bounce.${_jdEm?` The enquiry came from <b>${_attr(_jdEm)}</b>.`:''}`);
+      else if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(_em))
+        gBlock(`<b>${_attr(_cust)}</b>'s email doesn't look valid: <b>${_attr(_em)}</b>.`);
+      else if(_jdEm && _jdEm.toLowerCase()!==_em.toLowerCase())
+        gWarn(`This enquiry came from <b>${_attr(_jdEm)}</b>, but the quote would go to <b>${_attr(_em)}</b>.`);
+    }
     if(!(grandEx>0)) gBlock('The quote totals £0.00.');
     // Overridden figures are legitimate — billing nil cutting on offcut work is a real decision.
     // But say WHAT was changed and what it was before, so the reason is still readable in a
@@ -2563,10 +2579,112 @@ async function saveCutEbRates() {
 // ═══════════════════════════════════════════════════════════
 // CUSTOMERS
 // ═══════════════════════════════════════════════════════════
+// ── Finding the real email addresses ────────────────────────────────────────
+// The accounts were created with invented placeholders (noreply+…@tce.local). They look
+// filled in and they bounce. But the real addresses are already in the system: every website
+// enquiry carries the sender's contact details. This reads them back out and offers each one
+// for you to accept, rather than making you type seven addresses from memory.
+function _isPlaceholderEmail(e){
+  e=(e||'').trim();
+  return !e || /@tce\.local$/i.test(e) || /^noreply\+/i.test(e);
+}
+let _emailFinds = [];
+async function findCustomerEmails(){
+  const box=document.getElementById('emailFinder');
+  if(box){ box.style.display='block'; box.innerHTML='<div style="color:#8fae9f;font-size:12px">Reading your website enquiries…</div>'; }
+  let jobs=[];
+  try{ jobs = await sbFetch('tce_jobs','?select=id,client_name,job_data,saved_at&order=saved_at.desc&limit=300'); }
+  catch(e){ if(box) box.innerHTML='<div style="color:#f87171;font-size:12px">Could not read the jobs: '+_attr(e.message)+'</div>'; return; }
+  // Most recent contact wins for each company — people change address, and the newest
+  // enquiry is the one they actually wrote from.
+  const best={};
+  jobs.forEach(j=>{
+    let d=j.job_data; if(typeof d==='string'){ try{ d=JSON.parse(d); }catch(e){ return; } }
+    const c=d&&d.contact; if(!c) return;
+    const em=(c.email||'').trim();
+    if(_isPlaceholderEmail(em) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) return;
+    const who=String(d.customer||j.client_name||c.name||'').trim(); if(!who) return;
+    const k=who.toLowerCase().replace(/\s+/g,' ').replace(/\bltd\b\.?/g,'').trim();
+    const t=new Date(j.saved_at).getTime()||0;
+    if(!best[k] || t>best[k].t) best[k]={who, name:c.name||'', email:em, phone:c.phone||'', t, seen:0};
+    best[k].seen++;
+  });
+  // Match each customer on file to a contact, by the same loose name key.
+  _emailFinds=[];
+  _customers.forEach(c=>{
+    const k=String(c.name||'').toLowerCase().replace(/\s+/g,' ').replace(/\bltd\b\.?/g,'').trim();
+    const hit=best[k];
+    if(!hit) return;
+    const cur=(c.email||'').trim();
+    if(cur.toLowerCase()===hit.email.toLowerCase()) return;     // already right
+    _emailFinds.push({id:c.id, company:c.name, current:cur, email:hit.email,
+                      contact:hit.name, phone:hit.phone, seen:hit.seen,
+                      placeholder:_isPlaceholderEmail(cur)});
+  });
+  if(!box) return;
+  const unmatched=_customers.filter(c=>_isPlaceholderEmail(c.email) && !_emailFinds.some(f=>f.id===c.id));
+  if(!_emailFinds.length){
+    box.innerHTML=`<div style="font-size:12px;color:#8fae9f">No new addresses found in your enquiries.`
+      +(unmatched.length?` Still needing one by hand: <b>${unmatched.map(c=>_attr(c.name)).join(', ')}</b>.`:'')+`</div>`;
+    return;
+  }
+  box.innerHTML=`
+    <div style="font-size:12.5px;color:#e8f0ec;margin-bottom:8px">
+      Found ${_emailFinds.length} address${_emailFinds.length!==1?'es':''} in your website enquiries.
+      Check each one before applying — this is where quotes will be sent.
+    </div>
+    ${_emailFinds.map((f,i)=>`
+      <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid #1e3530;flex-wrap:wrap">
+        <div style="flex:1;min-width:210px">
+          <div style="font-size:12.5px;color:#e8f0ec">${_attr(f.company)}</div>
+          <div style="font-size:11px;color:#6b8f7e">
+            ${f.placeholder?'<span style="color:#e6a23c">placeholder</span>':_attr(f.current)||'(blank)'}
+            &nbsp;→&nbsp; <b style="color:#7fd39a">${_attr(f.email)}</b>
+            ${f.contact?' · '+_attr(f.contact):''}${f.phone?' · '+_attr(f.phone):''}
+            · from ${f.seen} enquir${f.seen===1?'y':'ies'}
+          </div>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="applyFoundEmail(${i})">Use this</button>
+      </div>`).join('')}
+    <div style="padding-top:10px;border-top:1px solid #1e3530;margin-top:4px">
+      <button class="btn btn-primary btn-sm" onclick="applyFoundEmail('all')">Use all ${_emailFinds.length}</button>
+      <button class="btn btn-secondary btn-sm" onclick="document.getElementById('emailFinder').style.display='none'">Close</button>
+    </div>
+    ${unmatched.length?`<div style="font-size:11px;color:#e6a23c;margin-top:8px">No enquiry found for: <b>${unmatched.map(c=>_attr(c.name)).join(', ')}</b> — type those in by hand.</div>`:''}`;
+}
+async function applyFoundEmail(which){
+  const list = which==='all' ? _emailFinds.slice() : [_emailFinds[which]];
+  let done=0, failed=[];
+  for(const f of list){
+    if(!f) continue;
+    try{
+      await sbFetch(`tce_customers?id=eq.${f.id}`,{method:'PATCH',headers:{'Prefer':'return=minimal'},
+        body:{ email:f.email, contact_name:f.contact||undefined, phone:f.phone||undefined }});
+      done++;
+    }catch(e){ failed.push(f.company+': '+e.message); }
+  }
+  await loadCustomers();
+  if(failed.length) alert('Some did not save:\n\n'+failed.join('\n'));
+  else showToast(done+' email'+(done!==1?'s':'')+' updated ✓');
+  findCustomerEmails();
+}
+
 function renderCustomers() {
   const wrap = document.getElementById('customersWrap');
   if (!_customers.length) { wrap.innerHTML='<div class="no-data">No customers yet. Add your first customer above.</div>'; return; }
-  wrap.innerHTML = _customers.map(c=>`
+  // How many are still unsendable — shown up front, because a placeholder looks filled in.
+  const _bad=_customers.filter(c=>_isPlaceholderEmail(c.email));
+  wrap.innerHTML = (_bad.length?`
+    <div class="gate gate-warn" style="margin-bottom:12px">
+      <div class="gate-h">⚠ ${_bad.length} customer${_bad.length!==1?'s have':' has'} no real email address</div>
+      <div class="gate-sub">These read as filled in but they're placeholders — a quote sent to one would bounce.
+        The real addresses are on your website enquiries.</div>
+      <div style="margin-top:9px">
+        <button class="btn btn-primary btn-sm" onclick="findCustomerEmails()">🔎 Find them from my enquiries</button>
+      </div>
+    </div>`:'')
+    + `<div id="emailFinder" style="display:none;background:#12241e;border:1px solid #2b4a40;border-radius:8px;padding:12px 14px;margin-bottom:12px"></div>`
+    + _customers.map(c=>`
     <div class="cust-card" style="flex-direction:column;align-items:stretch;gap:12px">
       <div style="display:flex;align-items:center;gap:12px">
         <div style="flex:1">
