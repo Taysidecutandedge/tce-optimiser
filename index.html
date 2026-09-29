@@ -2959,6 +2959,14 @@ function renderResults(sheets,unplaced){
     if(!sheets.some(s=>s._isOffcut)){
       const qb={}; sheets.forEach(s=>{ if(!s._isOffcut) qb[s.name]=(qb[s.name]||0)+1; });
       _quoteBasis=qb;
+    } else if(!_quoteBasis){
+      // Nested ON offcuts with no basis recorded. The customer is still quoted for fresh
+      // board, so fall back to the fresh boards this nest DID open — never the offcuts.
+      // Without this the admin had nothing and priced every offcut as a full sheet.
+      const qb={}; sheets.forEach(s=>{ if(!s._isOffcut) qb[s.name]=(qb[s.name]||0)+1; });
+      if(Object.keys(qb).length) _quoteBasis=qb;
+      const warn=document.getElementById('nestSavedTag');
+      if(warn){ warn.textContent='⚠ quote basis estimated — re-calculate with offcuts OFF to lock it'; warn.style.color='#ffc46b'; warn.style.display='inline-block'; }
     }
   }catch(e){}
   document.querySelector('.app')?.classList.add('results'); // narrow the input panel so the cut diagrams get room
