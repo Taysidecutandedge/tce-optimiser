@@ -677,6 +677,20 @@ select option{background:var(--surf2)}
 // ═══════════════════════════════════════════════
 let library=[], jobSheets=[], parts=[];
 let _offcutStock=[]; // in-stock offcuts for the nester (Phase 2)
+// What the board is actually made of. A veneer or decor is the SURFACE; this is the core
+// underneath, and two boards with different cores are never the same board however similar
+// their names read. Checked most-specific first, so "birch ply" is birch, not plain ply.
+function _coreOf(name){
+  const s=String(name||'').toLowerCase();
+  if(/\bbirch\b/.test(s)) return 'birch';
+  if(/poplar|garnica/.test(s)) return 'poplar';
+  if(/\bosb\b/.test(s)) return 'osb';
+  if(/chip(board)?|particle/.test(s)) return 'chip';
+  if(/\bmdf\b/.test(s)) return 'mdf';
+  if(/\bply(wood)?\b/.test(s)) return 'ply';
+  if(/\bmfc\b|melamine|eurodekor/.test(s)) return 'mfc';
+  return null;   // unknown core — don't block a match on it
+}
 // How long an offcut can sit in stock before it's worth checking the rack rather than
 // trusting the list — most of the pile is older than this, and an offcut nobody has
 // touched in a month has often been used, cut down or binned without being logged.
@@ -2078,6 +2092,17 @@ function _calculateInner(){
 
   // Match material name to job sheet
   const matchSheet=mn=>{
+    if(!mn)return null;
+    // The CORE is never noise. "19mm Oak Veneer Birch" and "19mm Oak Veneer MDF" are
+    // different boards — different price, different weight — but "mdf" and "ply" sat in the
+    // stop-word list, so both reduced to "oak veneer" and matched each other. An offcut on a
+    // birch core was being offered for an MDF job.
+    const mCore=_coreOf(mn);
+    const jobSheetsAll=jobSheets;
+    jobSheets=jobSheets.filter(js=>{ const c=_coreOf(js.name); return !mCore||!c||c===mCore; });
+    try{ return _matchSheetInner(mn); } finally { jobSheets=jobSheetsAll; }
+  };
+  const _matchSheetInner=mn=>{
     if(!mn)return null;
     // Normalise: lowercase, strip supplier prefix only — KEEP thickness (it distinguishes 12mm from 18mm)
     const clean=s=>s.toLowerCase()
