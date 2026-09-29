@@ -1977,14 +1977,14 @@ Rob
 Tayside Cut & Edge
 07876614414`;
 
-  const step=(n,txt,btn,onclick,note)=>`
+  const step=(n,txt,btn,onclick,note,id)=>`
     <div style="display:flex;gap:12px;align-items:flex-start;padding:11px 0;border-bottom:1px solid #1e3530">
-      <div style="flex:0 0 22px;height:22px;border-radius:50%;background:#1e3530;color:#8fae9f;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center">${n}</div>
+      <div style="flex:0 0 22px;height:22px;border-radius:50%;background:${n?'#1e3530':'transparent'};color:#8fae9f;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center">${n}</div>
       <div style="flex:1">
         <div style="font-size:13px;color:#e8f0ec">${txt}</div>
         ${note?`<div style="font-size:11px;color:#6b8f7e;margin-top:2px">${note}</div>`:''}
       </div>
-      <button class="btn btn-secondary btn-sm" onclick="${onclick}">${btn}</button>
+      <button class="btn ${id?'btn-primary':'btn-secondary'} btn-sm" ${id?`id="${id}"`:''} onclick="${onclick}">${btn}</button>
     </div>`;
 
   const gateHtml = blocks.length
@@ -2006,8 +2006,11 @@ Tayside Cut & Edge
         <button class="btn btn-secondary btn-sm" onclick="document.getElementById('sendPackOv').remove()">✕ Close</button>
       </div>
       ${gateHtml}
-      ${step(1,'Print the quote','🖨 Quote','printQuote()','Save as PDF from the print dialog.')}
-      ${step(2,'Print the customer approval sheet','✅ Approval','openApprovalSheet()','Opens in the optimiser, then print to PDF.')}
+      ${step(1,'Build the quote and the approval sheet as PDFs','⚙ Build both PDFs','spBuildPdfs()',
+             'No printing, no saving — they attach themselves. Open each one below to check it before sending.',
+             'spBuildBtn')}
+      ${step(2,'Or print them yourself','🖨 Quote','printQuote()','Then drop the files in below. Use this if a built PDF doesn\'t look right.')}
+      ${step('','&nbsp;','✅ Approval','openApprovalSheet()','')}
       <div style="padding:14px 0 0">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
           <div style="font-size:13px;color:#e8f0ec">3 &nbsp;Email</div>
@@ -2085,6 +2088,7 @@ function _spRenderFiles(){
   el.innerHTML=_spAttach.map((a,i)=>
     `<div style="display:inline-flex;align-items:center;gap:6px;background:#16301f;border:1px solid #2f6b43;border-radius:14px;padding:3px 10px;margin:3px;font-size:11px;color:#a8d8bd">
        📄 ${_attr(a.filename)} <span style="color:#6b8f7e">${(a.bytes/1024).toFixed(0)}kB</span>
+       ${a.url?`<a href="${a.url}" target="_blank" onclick="event.stopPropagation()" style="color:#7fd39a;text-decoration:underline" title="Open it and check before you send">open</a>`:''}
        <span onclick="event.stopPropagation();_spAttach.splice(${i},1);_spRenderFiles()" style="cursor:pointer;color:#8fae9f" title="Remove">✕</span>
      </div>`).join('');
 }
@@ -2156,7 +2160,7 @@ function openApprovalSheet(){
     + encodeURIComponent(_currentJob.id), '_blank');
 }
 
-function printQuote() {
+function printQuote(opts) {
   if (!_currentJob) return;
   const tier = document.getElementById('qTier').value;
   const custName = document.getElementById('qCustomer').value || '—';
@@ -2337,9 +2341,137 @@ function printQuote() {
   <div class="footer">Tayside Cut &amp; Edge · Cutting &amp; Edgebanding Services · Verify all dimensions before cutting<br>Invoicing via RCC Joinery Bespoke Solutions · VAT Reg No. GB 329 3466 83</div>
   </body></html>`;
 
-  const w=window.open('','_blank','width=750,height=600');
-  w.document.write(html); w.document.close();
-  setTimeout(()=>w.print(),400);
+  // silent:true — the PDF builder wants the document, not a print window.
+  if(!(opts&&opts.silent)){
+    const w=window.open('','_blank','width=750,height=600');
+    w.document.write(html); w.document.close();
+    setTimeout(()=>w.print(),400);
+  }
+  return html;
+}
+
+// ═══════════════════════════════════════════════════════════
+// MAKING THE PDFs  —  so there's nothing to save and drag
+// ═══════════════════════════════════════════════════════════
+// The browser can't hand a file to your mail app, but it CAN build one and hand it to our own
+// send function. Both documents are produced from the exact HTML that printing produces —
+// printQuote for the quote, and the optimiser's own approval sheet for the approval — so
+// neither is a second version of anything.
+//
+// The honest limitation: these are rendered by photographing the page, so the text inside them
+// is a picture rather than selectable text. That's why Send Pack shows you each one to open
+// before it sends.
+const PDFLIB_URL='https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.14.0/html2pdf.bundle.min.js';
+let _pdfLibPromise=null;
+function _loadPdfLib(){
+  if(window.html2pdf) return Promise.resolve(true);
+  if(_pdfLibPromise) return _pdfLibPromise;
+  _pdfLibPromise=new Promise(res=>{
+    const s=document.createElement('script');
+    s.src=PDFLIB_URL;
+    s.onload=()=>res(!!window.html2pdf);
+    s.onerror=()=>{ _pdfLibPromise=null; res(false); };
+    document.head.appendChild(s);
+  });
+  return _pdfLibPromise;
+}
+
+// Render a detached element to a PDF blob at A4.
+async function _elToPdfBlob(el){
+  return await html2pdf().set({
+    margin: 0,
+    image: {type:'jpeg', quality:0.96},
+    html2canvas: {scale:2, useCORS:true, backgroundColor:'#ffffff', logging:false},
+    jsPDF: {unit:'mm', format:'a4', orientation:'portrait'},
+    pagebreak: {mode:['css','legacy'], avoid:['.ap-card','tr']}
+  }).from(el).outputPdf('blob');
+}
+
+// The quote. Built from printQuote's own HTML, minus the window it normally opens.
+async function buildQuotePdfBlob(){
+  if(!await _loadPdfLib()) throw new Error('could not load the PDF builder (no internet?)');
+  const html=printQuote({silent:true});
+  if(!html) throw new Error('the quote produced nothing to print');
+  const frame=document.createElement('iframe');
+  frame.style.cssText='position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0';
+  document.body.appendChild(frame);
+  try{
+    frame.contentDocument.open(); frame.contentDocument.write(html); frame.contentDocument.close();
+    await new Promise(r=>setTimeout(r,250));
+    return await _elToPdfBlob(frame.contentDocument.body);
+  } finally { frame.remove(); }
+}
+
+// The approval sheet. Loaded from the optimiser in a hidden frame — same site, so we can read
+// it — which means it is literally the same sheet the ✅ button shows, not a copy of it.
+async function buildApprovalPdfBlob(jobId){
+  if(!await _loadPdfLib()) throw new Error('could not load the PDF builder (no internet?)');
+  const frame=document.createElement('iframe');
+  frame.style.cssText='position:fixed;left:-10000px;top:0;width:900px;height:1400px;border:0';
+  frame.src='https://taysidecutandedge.github.io/tce-optimiser/?approval='+encodeURIComponent(jobId);
+  document.body.appendChild(frame);
+  try{
+    // Wait for the optimiser to sign in, fetch the job and draw the sheet.
+    const doc=await new Promise((res,rej)=>{
+      const giveUp=setTimeout(()=>rej(new Error('the approval sheet took too long to build')), 30000);
+      const tick=setInterval(()=>{
+        let d=null; try{ d=frame.contentDocument; }catch(e){}
+        const pages=d && d.getElementById('printPages');
+        if(pages && pages.querySelector('.ap-doc') && pages.innerHTML.length>500){
+          clearInterval(tick); clearTimeout(giveUp); setTimeout(()=>res(d), 400);
+        }
+      }, 300);
+    });
+    const src=doc.getElementById('printPages');
+    // Copy into our own page so the fonts and layout are ours to control while rendering.
+    const holder=document.createElement('div');
+    holder.style.cssText='position:fixed;left:-10000px;top:0;width:794px;background:#fff;color:#111;font-family:Arial,sans-serif';
+    holder.innerHTML=src.innerHTML;
+    document.body.appendChild(holder);
+    try{ return await _elToPdfBlob(holder); } finally { holder.remove(); }
+  } finally { frame.remove(); }
+}
+
+function _blobToBase64(blob){
+  return new Promise((res,rej)=>{
+    const r=new FileReader();
+    r.onload=()=>res(String(r.result).split(',')[1]||'');
+    r.onerror=()=>rej(new Error('could not read the generated file'));
+    r.readAsDataURL(blob);
+  });
+}
+
+// Build both, attach them, and leave them openable so you can look before you send.
+async function spBuildPdfs(){
+  if(!_currentJob){ alert('Open a job first.'); return; }
+  const btn=document.getElementById('spBuildBtn');
+  const ref=(String(_currentJob.job_name||'Job').match(/TCE-\d+/i)||[])[0]
+            || String(_currentJob.job_name||'Job').replace(/[^\w\- ]+/g,'').trim() || 'Job';
+  if(btn){ btn.disabled=true; btn.textContent='Building…'; }
+  _spSay('Building the quote PDF…');
+  try{
+    const q=await buildQuotePdfBlob();
+    _spAddBlob(ref+' Quote.pdf', q);
+    _spSay('Building the approval sheet — this one takes a few seconds…');
+    try{
+      const a=await buildApprovalPdfBlob(_currentJob.id);
+      _spAddBlob(ref+' Approval.pdf', a);
+      _spSay('Both PDFs ready. Open them to check, then send.','ok');
+    }catch(e){
+      // The quote is still worth having even if the approval sheet fails.
+      _spSay('Quote built, but the approval sheet failed: '+e.message+' — print that one by hand.','warn');
+    }
+  }catch(e){
+    _spSay('Could not build the PDFs: '+e.message+' — print and drop them in instead.','err');
+  } finally {
+    if(btn){ btn.disabled=false; btn.textContent='⚙ Build both PDFs'; }
+  }
+}
+async function _spAddBlob(filename, blob){
+  const content=await _blobToBase64(blob);
+  _spAttach=_spAttach.filter(a=>a.filename!==filename);
+  _spAttach.push({filename, content, bytes:blob.size, url:URL.createObjectURL(blob)});
+  _spRenderFiles();
 }
 
 // ═══════════════════════════════════════════════════════════
