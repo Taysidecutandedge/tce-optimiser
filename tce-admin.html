@@ -1827,14 +1827,108 @@ Tayside Cut & Edge
         <label style="font-size:11px;color:#6b8f7e">Message — edit freely, this is what gets copied</label>
         <textarea id="spBody" rows="16"
           style="width:100%;background:#0d1f1a;border:1px solid #2b4a40;border-radius:5px;color:#e8f0ec;padding:9px;font-size:12px;line-height:1.5;font-family:inherit;margin-top:2px;resize:vertical">${_attr(body)}</textarea>
+        <div id="spDrop" style="margin-top:10px;border:1.5px dashed #2b4a40;border-radius:8px;padding:14px;text-align:center;cursor:pointer;background:#0d1f1a">
+          <div style="font-size:12px;color:#8fae9f">Drop the two PDFs here, or click to pick them</div>
+          <div style="font-size:11px;color:#6b8f7e;margin-top:3px">The quote and the approval sheet you just printed</div>
+          <div id="spFiles" style="margin-top:8px"></div>
+        </div>
+        <input type="file" id="spFileIn" accept="application/pdf" multiple style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:11px;gap:10px">
+          <div id="spStatus" style="font-size:11px;color:#6b8f7e;flex:1">
+            ${email?'':'<span style="color:#e6a23c">No email address on file for this customer.</span>'}
+          </div>
+          <button class="btn btn-primary" id="spSendBtn" onclick="_spSend()">📨 Send it</button>
+        </div>
         <div style="font-size:11px;color:#6b8f7e;margin-top:7px">
-          Attach the two PDFs yourself — a web page isn't allowed to put files into your mail app.
-          ${email?'':'<span style="color:#e6a23c">No email address on file for this customer.</span>'}
+          “Send it” emails from cutlist@taysidecutandedge.co.uk with both PDFs attached, and copies you in.
+          “Open in email” instead drafts it in your mail app for you to attach and send by hand.
         </div>
       </div>
     </div>`;
   document.body.appendChild(ov);
   ov.addEventListener('click',e=>{ if(e.target===ov) ov.remove(); });
+  _spWireDrop();
+}
+
+// ── Attachments ─────────────────────────────────────────────────────────────
+// Held as base64 so they can be posted to the send function. Cleared when the panel closes.
+let _spAttach = [];
+function _spWireDrop(){
+  _spAttach=[];
+  const zone=document.getElementById('spDrop'), input=document.getElementById('spFileIn');
+  if(!zone||!input) return;
+  zone.onclick=()=>input.click();
+  input.onchange=()=>_spTake(input.files);
+  ['dragenter','dragover'].forEach(ev=>zone.addEventListener(ev,e=>{
+    e.preventDefault(); e.stopPropagation(); zone.style.borderColor='#f0a500'; }));
+  ['dragleave','drop'].forEach(ev=>zone.addEventListener(ev,e=>{
+    e.preventDefault(); e.stopPropagation(); zone.style.borderColor='#2b4a40'; }));
+  zone.addEventListener('drop',e=>_spTake(e.dataTransfer.files));
+}
+function _spTake(fileList){
+  const files=[...(fileList||[])];
+  files.forEach(f=>{
+    if(f.type!=='application/pdf' && !/\.pdf$/i.test(f.name)){
+      _spSay('“'+f.name+'” isn\'t a PDF — skipped.','warn'); return;
+    }
+    const rd=new FileReader();
+    rd.onload=()=>{
+      // strip the "data:application/pdf;base64," prefix — the function wants the payload only
+      const b64=String(rd.result).split(',')[1]||'';
+      _spAttach=_spAttach.filter(a=>a.filename!==f.name);   // re-dropping the same file replaces it
+      _spAttach.push({filename:f.name, content:b64, bytes:f.size});
+      _spRenderFiles();
+    };
+    rd.readAsDataURL(f);
+  });
+}
+function _spRenderFiles(){
+  const el=document.getElementById('spFiles'); if(!el) return;
+  el.innerHTML=_spAttach.map((a,i)=>
+    `<div style="display:inline-flex;align-items:center;gap:6px;background:#16301f;border:1px solid #2f6b43;border-radius:14px;padding:3px 10px;margin:3px;font-size:11px;color:#a8d8bd">
+       📄 ${_attr(a.filename)} <span style="color:#6b8f7e">${(a.bytes/1024).toFixed(0)}kB</span>
+       <span onclick="event.stopPropagation();_spAttach.splice(${i},1);_spRenderFiles()" style="cursor:pointer;color:#8fae9f" title="Remove">✕</span>
+     </div>`).join('');
+}
+function _spSay(msg,kind){
+  const el=document.getElementById('spStatus'); if(!el) return;
+  const c=kind==='err'?'#f87171':kind==='warn'?'#e6a23c':kind==='ok'?'#7fd39a':'#6b8f7e';
+  el.innerHTML=`<span style="color:${c}">${msg}</span>`;
+}
+async function _spSend(){
+  const to=((document.getElementById('spTo')||{}).value||'').trim();
+  const subject=((document.getElementById('spSubj')||{}).value||'').trim();
+  const body=((document.getElementById('spBody')||{}).value||'');
+  const btn=document.getElementById('spSendBtn');
+  if(!to){ _spSay('No email address to send to.','err'); return; }
+  if(!_spAttach.length && !confirm('No PDFs attached. Send the message on its own?')) return;
+  // A red gate here means the quote is wrong, not just unusual. Ask out loud.
+  if(_gate.some(g=>g.lvl==='block') &&
+     !confirm('The readiness check says this quote isn\'t ready:\n\n'
+       + _gate.filter(g=>g.lvl==='block').map(g=>'  • '+g.msg.replace(/<[^>]+>/g,'')).join('\n')
+       + '\n\nSend it anyway?')) return;
+  btn.disabled=true; _spSay('Sending…');
+  try{
+    const r=await fetch(SB_URL+'/functions/v1/tce-send-quote',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+SB_TOKEN,'apikey':SB_KEY},
+      body:JSON.stringify({
+        to, subject, body,
+        job_id:_currentJob?_currentJob.id:null,
+        job_name:_currentJob?_currentJob.job_name:'',
+        attachments:_spAttach.map(a=>({filename:a.filename, content:a.content}))
+      })
+    });
+    const out=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(out.error||('send failed ('+r.status+')'));
+    _spSay('✅ Sent to '+to+'. A copy is in your inbox.','ok');
+    btn.textContent='Sent';
+  }catch(e){
+    // Say what actually happened and leave everything on screen — the message and the
+    // attachments are still here, so "Open in email" is a working fallback, not a restart.
+    _spSay('Could not send: '+e.message+' — use “Open in email” instead.','err');
+    btn.disabled=false;
+  }
 }
 function _spCopy(){
   const t=document.getElementById('spBody');
