@@ -524,6 +524,7 @@ select option{background:var(--surf2)}
       <button class="btn btn-ghost btn-sm" onclick="addPart()">+ Add Part</button>
     </div>
     <div id="matCheckBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(240,165,0,.14);border:1px solid rgba(240,165,0,.5);border-radius:8px;color:#ffcf8a;font-size:12.5px;line-height:1.7"></div>
+    <div id="doorBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(212,130,10,.12);border:1px solid rgba(212,130,10,.45);border-radius:8px;color:#e8c99a;font-size:12.5px;line-height:1.7"></div>
     <div id="sheetEquivBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(40,120,170,.16);border:1px solid rgba(70,150,210,.5);border-radius:8px;color:#9cc;font-size:12.5px;line-height:1.7"></div>
     <div style="overflow-x:auto">
       <table class="ptbl">
@@ -1977,6 +1978,7 @@ function effGrain(p){
 
 function renderParts(){
   try{ renderMatCheck(); }catch(e){}
+  try{ renderDoorBar(); }catch(e){}
   const tb=document.getElementById('partsTbody');
   tb.innerHTML='';
   parts.forEach(p=>{
@@ -3913,6 +3915,56 @@ function explodeShakerDoor(doorRef,H,W,qty,cfg,ebFrame,ebPanel,company){
 }
 
 let _shakerDoors=[], _shakerNormalParts=null;
+
+// ── Changing a door after it's been added ──────────────────────────────────
+// An exploded door is just parts, so a customer changing their mind meant deleting every
+// stile, rail and panel by hand and starting again. Each part carries the full door spec,
+// so the door can be rebuilt from it, edited, and exploded afresh.
+function _doorsOnJob(){
+  const m={};
+  (parts||[]).forEach(p=>{ const d=p.door; if(!d||!d.ref) return;
+    if(!m[d.ref]) m[d.ref]={spec:d, n:0};
+    m[d.ref].n+=Math.max(1,parseInt(p.qty)||1); });
+  return m;
+}
+function _matFromName(n){
+  const s=String(n||'').toLowerCase();
+  if(s.includes('oak')) return 'oak';
+  if(s.includes('medite')) return 'medite';
+  return 'finsa';
+}
+function editShakerDoor(ref){
+  const all=_doorsOnJob(); const rec=all[ref];
+  if(!rec){ alert('Door '+ref+' is not on this job any more.'); return; }
+  const d=rec.spec;
+  const rows=(parts||[]).filter(p=>p.door&&p.door.ref===ref);
+  if(!confirm('Edit door '+ref+' ('+d.h+'×'+d.w+'mm, '+d.qty+' off)?\n\n'
+    +'Its '+rows.length+' cutlist row'+(rows.length!==1?'s':'')+' will be removed and rebuilt from what you confirm next.\n'
+    +'Anything already cut from them stays cut — check the ticks afterwards.')) return;
+  parts=(parts||[]).filter(p=>!(p.door&&p.door.ref===ref));
+  const door={ h:d.h, w:d.w, qty:d.qty||1, label:'Shaker Door '+ref, company:d.company||'', notes:'',
+    cfg:{ outerRail:d.outerRail||70, midRail:d.midRail||d.outerRail||70,
+          panels:d.panels||1, centres:Array.isArray(d.centres)?d.centres.slice():[],
+          frameThk:parseInt(String(d.frameMat||'').match(/(\d+)/)||[])[1]||22,
+          panelThk:parseInt(String(d.panelMat||'').match(/(\d+)/)||[])[1]||9,
+          frameOversize:10, panelTongue:10, mat:_matFromName(d.frameMat) } };
+  save(); renderParts();
+  openShakerModal([door],null);
+}
+function renderDoorBar(){
+  const el=document.getElementById('doorBar'); if(!el) return;
+  const all=_doorsOnJob(); const refs=Object.keys(all).sort();
+  if(!refs.length){ el.style.display='none'; el.innerHTML=''; return; }
+  el.style.display='block';
+  el.innerHTML='<span style="font-weight:700">✂ Shaker doors on this job</span> '
+    +'<span style="opacity:.75">— change one and its parts are rebuilt</span><br>'
+    + refs.map(r=>{ const d=all[r].spec;
+        return '<span style="display:inline-block;background:rgba(0,0,0,.25);border-radius:5px;padding:3px 8px;margin:3px 5px 0 0;font-family:var(--mono);font-size:12px">'
+          +'<b>'+esc(r)+'</b> '+d.h+'×'+d.w+' ×'+(d.qty||1)+' · '+(d.panels||1)+' panel'+((d.panels||1)!==1?'s':'')
+          +' · rail '+(d.outerRail||70)
+          +' <button onclick="editShakerDoor(\''+esc(r)+'\')" style="background:none;border:1px solid rgba(255,255,255,.35);color:inherit;border-radius:4px;font-size:11px;padding:1px 6px;margin-left:6px;cursor:pointer">✎ change</button></span>';
+      }).join('');
+}
 
 function addShakerDoor(){
   const h=parseInt(prompt('Shaker door \u2014 finished HEIGHT (mm):','')); if(!h||h<=0) return;
