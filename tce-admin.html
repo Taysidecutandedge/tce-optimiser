@@ -455,6 +455,11 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
 // ═══════════════════════════════════════════════════════════
 const SB_URL = 'https://mxjduublgtlpqtdgutzi.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im14amR1dWJsZ3RscHF0ZGd1dHppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwOTg2MjMsImV4cCI6MjA5MTY3NDYyM30.wfG9a91Udp7KQ7ywda6aNS9k-n79qtrGSe-epuCuk34';
+// Edge Functions won't accept the legacy anon key above — Supabase moved that gateway to the
+// newer key format. The database still takes the old one, which is why everything else works.
+// This is the PUBLISHABLE key: public by design, safe in the page, and limited by the same
+// row-level security rules. The secret key never appears here.
+const SB_PUBLISHABLE = 'sb_publishable_QepvL-AwS2XqnEgwDPWtwg_95OckPzI';
 let ADMIN_PIN = localStorage.getItem('tce_admin_pin') || '3984';
 let SB_TOKEN = null;
 
@@ -1911,7 +1916,7 @@ async function _spSend(){
   try{
     const r=await fetch(SB_URL+'/functions/v1/tce-send-quote',{
       method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+SB_TOKEN,'apikey':SB_KEY},
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+SB_TOKEN,'apikey':SB_PUBLISHABLE},
       body:JSON.stringify({
         to, subject, body,
         job_id:_currentJob?_currentJob.id:null,
