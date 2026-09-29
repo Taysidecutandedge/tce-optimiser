@@ -1119,6 +1119,76 @@ function getShakerInfo(jobData){
   return {doors, pureDoorMats};
 }
 
+// ═══════════════════════════════════════════════════════════
+// WHAT THE JOB CONTAINS  —  ONE implementation, three callers
+// ═══════════════════════════════════════════════════════════
+// The screen, the PDF and the readiness gate all need the same answer: how many sheets of each
+// board, how many metres of each tape, how much glue-up. That answer used to be worked out
+// separately in each place, and the copies drifted — the PDF's copy never read lamMap, so it
+// quoted £42.72 less than the screen and nothing flagged it. One function now, so a fix to it
+// is a fix everywhere and the three can't disagree.
+// Returns { matData, ebExtra }. matData is keyed by board name:
+//   sheets   — boards in the nest, offcuts NOT counted
+//   offcuts  — offcuts used (informational; priced via sheetEquiv, never as boards)
+//   ebByThk  — {tapeThickness: mm} edging on that board
+//   ebMmLam  — mm of wide tape on laminated (glued-up) edges
+//   lamM2/lamN — glue-up area and panel count
+// ebExtra is edging on a decor that isn't a board in this job (e.g. "Mdf Card") — kept separate
+// so it's charged as its own line rather than silently dropped.
+function _matDataFor(jobData){
+  const matData = {};
+  const ebExtra = [];
+  const blank = ()=>({sheets:0, ebMm:0, ebMmLam:0, ebByThk:{}, offcuts:0});
+  // Seed from the parts list so every material in the job is present even before the nest
+  // is read. Without this a board could be on screen and missing from the PDF.
+  [...new Set((jobData?.parts||[]).map(p=>p.matName))].forEach(m=>{ if(m) matData[m]=blank(); });
+  if(!jobData?.lastResult) return {matData, ebExtra};
+  // NEVER count an offcut as a board to charge for. It's stock already paid for, and the
+  // customer quote prices fresh boards only. Counting every sheet meant a job nested with
+  // offcuts ON billed each offcut at the full sheet price.
+  (jobData.lastResult.sheets||[]).forEach(s=>{
+    if(!matData[s.name]) matData[s.name]=blank();
+    if(s._isOffcut){ matData[s.name].offcuts=(matData[s.name].offcuts||0)+1; return; }
+    matData[s.name].sheets++;
+  });
+  // A board can carry edging in several tape thicknesses (e.g. 1mm AND 2mm oak veneer).
+  // Split by thickness so each gets its own priced line/rate — none gets lumped or dropped.
+  Object.entries(jobData.lastResult.ebMap||{}).forEach(([key,mm])=>{
+    const isLam=/LAMINATED/i.test(key);
+    let mat=key.split(' · ').slice(1).join(' · ');
+    if(isLam) mat=mat.replace(/\s*·\s*LAMINATED.*$/i,'').trim();
+    const thk=(key.match(/^\s*(\d+(?:\.\d+)?)\s*mm/)||[])[1]||'1';
+    if(matData[mat]){
+      if(isLam) matData[mat].ebMmLam=(matData[mat].ebMmLam||0)+mm;
+      else { matData[mat].ebByThk=matData[mat].ebByThk||{}; matData[mat].ebByThk[thk]=(matData[mat].ebByThk[thk]||0)+mm; }
+    } else {
+      ebExtra.push({ label:key.replace(/^\s*\d+(\.\d+)?mm\s*·\s*/,''), mm, isLam, thk });
+    }
+  });
+  // ⧉ LAM ×2 glue-up: area (m²) and panel count per material.
+  Object.entries(jobData.lastResult.lamMap||{}).forEach(([mat,m2])=>{
+    if(!(m2>0)) return;
+    if(!matData[mat]) matData[mat]=blank();
+    matData[mat].lamM2=(matData[mat].lamM2||0)+m2;
+  });
+  Object.entries(jobData.lastResult.lamCount||{}).forEach(([mat,n])=>{
+    if(!(n>0)) return;
+    if(!matData[mat]) matData[mat]=blank();
+    matData[mat].lamN=(matData[mat].lamN||0)+n;
+  });
+  // Jobs saved before the optimiser sent a panel count (or the area) — work both out from the
+  // parts list, so an older job still prices its glue-up properly without needing a re-save.
+  (jobData.parts||[]).forEach(p=>{
+    if(!p.laminate) return;
+    const m=p.matName||''; if(!m) return;
+    if(!matData[m]) matData[m]=blank();
+    const q=Math.max(1,parseInt(p.qty)||1);
+    if(!jobData.lastResult.lamCount) matData[m].lamN=(matData[m].lamN||0)+q;
+    if(!jobData.lastResult.lamMap)   matData[m].lamM2=(matData[m].lamM2||0)+((Number(p.l)||0)/1000)*((Number(p.w)||0)/1000)*q;
+  });
+  return {matData, ebExtra};
+}
+
 async function buildQuote() {
   if (!_currentJob) return;
   const tier = document.getElementById('qTier').value;
@@ -1139,63 +1209,10 @@ async function buildQuote() {
   try { jobData = typeof _currentJob.job_data === 'string' ? JSON.parse(_currentJob.job_data) : _currentJob.job_data; }
   catch(e) { wrap.innerHTML='<div class="no-data">Could not parse job data</div>'; return; }
 
-  // Count sheets and EB per material
-  const matData = {};
-  if (jobData?.parts) {
-    // Estimate from parts — count unique materials
-    const matNames = [...new Set(jobData.parts.map(p=>p.matName))];
-    matNames.forEach(m => { if(m) matData[m] = {sheets:0, ebMm:0, ebMmLam:0, ebByThk:{}}; });
-  }
-  const _ebExtra = [];   // edgebanding not tied to a board (e.g. MDF Card) — charged as its own line, never dropped
+  // Sheets, edging and glue-up per material — same single source the PDF and the gate use.
+  const {matData, ebExtra:_ebExtra} = _matDataFor(jobData);
 
-  // Note: actual sheet/EB counts come from the optimiser run
-  // If job was saved with results, use those; otherwise show estimate
-  if (jobData?.lastResult) {
-    // NEVER count an offcut as a board to charge for. It's stock already paid for, and the
-    // customer quote prices fresh boards only. Counting every sheet meant a job nested with
-    // offcuts ON billed each offcut at the full sheet price.
-    jobData.lastResult.sheets?.forEach(s => {
-      if(!matData[s.name]) matData[s.name]={sheets:0,ebMm:0,ebMmLam:0,ebByThk:{},offcuts:0};
-      if(s._isOffcut){ matData[s.name].offcuts=(matData[s.name].offcuts||0)+1; return; }
-      matData[s.name].sheets++;
-    });
-    // A board can carry edging in several tape thicknesses (e.g. 1mm AND 2mm oak veneer).
-    // Split by thickness so each gets its own priced line/rate — none gets lumped or dropped.
-    Object.entries(jobData.lastResult.ebMap||{}).forEach(([key,mm])=>{
-      const isLam=/LAMINATED/i.test(key);
-      let mat=key.split(' · ').slice(1).join(' · ');
-      if(isLam) mat=mat.replace(/\s*·\s*LAMINATED.*$/i,'').trim();   // laminated edge on a known board → wide-tape line
-      const thk=(key.match(/^\s*(\d+(?:\.\d+)?)\s*mm/)||[])[1]||'1';   // tape thickness from the "Nmm ·" prefix
-      if(matData[mat]){
-        if(isLam) matData[mat].ebMmLam=(matData[mat].ebMmLam||0)+mm;
-        else { matData[mat].ebByThk=matData[mat].ebByThk||{}; matData[mat].ebByThk[thk]=(matData[mat].ebByThk[thk]||0)+mm; }
-      } else {
-        // decor isn't a board in this job (e.g. "Mdf Card") — charge as a standalone edging line
-        _ebExtra.push({ label:key.replace(/^\s*\d+(\.\d+)?mm\s*·\s*/,''), mm, isLam, thk });
-      }
-    });
-    // ⧉ LAM ×2 glue-up area per material (m²) — priced as its own line below.
-    Object.entries(jobData.lastResult.lamMap||{}).forEach(([mat,m2])=>{
-      if(!(m2>0)) return;
-      if(!matData[mat]) matData[mat]={sheets:0,ebMm:0,ebMmLam:0,ebByThk:{}};
-      matData[mat].lamM2=(matData[mat].lamM2||0)+m2;
-    });
-    Object.entries(jobData.lastResult.lamCount||{}).forEach(([mat,n])=>{
-      if(!(n>0)) return;
-      if(!matData[mat]) matData[mat]={sheets:0,ebMm:0,ebMmLam:0,ebByThk:{}};
-      matData[mat].lamN=(matData[mat].lamN||0)+n;
-    });
-    // Jobs saved before the optimiser sent a panel count (or the area) — work both out from the
-    // parts list, so an older job still prices its glue-up properly without needing a re-save.
-    (jobData.parts||[]).forEach(p=>{
-      if(!p.laminate) return;
-      const m=p.matName||''; if(!m) return;
-      if(!matData[m]) matData[m]={sheets:0,ebMm:0,ebMmLam:0,ebByThk:{}};
-      const q=Math.max(1,parseInt(p.qty)||1);
-      if(!jobData.lastResult.lamCount) matData[m].lamN=(matData[m].lamN||0)+q;
-      if(!jobData.lastResult.lamMap)   matData[m].lamM2=(matData[m].lamM2||0)+((Number(p.l)||0)/1000)*((Number(p.w)||0)/1000)*q;
-    });
-  } else {
+  if (!jobData?.lastResult) {
     // No results saved — show note
     _gate = [{lvl:'block',msg:'No saved optimiser results — nothing to price.'}];
     wrap.innerHTML = `<div class="no-data" style="text-align:left;padding:20px">
@@ -1704,44 +1721,8 @@ function printQuote() {
   let jobData;
   try { jobData = typeof _currentJob.job_data==='string'?JSON.parse(_currentJob.job_data):_currentJob.job_data; } catch(e){return;}
 
-  const matData = {};
-  const _ebExtra = [];
-  // Offcuts are never charged as boards — same rule as the on-screen quote.
-  jobData?.lastResult?.sheets?.forEach(s=>{
-    if(!matData[s.name]) matData[s.name]={sheets:0,ebMm:0,ebMmLam:0,ebByThk:{},offcuts:0};
-    if(s._isOffcut){ matData[s.name].offcuts=(matData[s.name].offcuts||0)+1; return; }
-    matData[s.name].sheets++;
-  });
-  Object.entries(jobData?.lastResult?.ebMap||{}).forEach(([key,mm])=>{
-    const isLam=/LAMINATED/i.test(key);
-    let mat=key.split(' · ').slice(1).join(' · ');
-    if(isLam) mat=mat.replace(/\s*·\s*LAMINATED.*$/i,'').trim();
-    const thk=(key.match(/^\s*(\d+(?:\.\d+)?)\s*mm/)||[])[1]||'1';
-    if(matData[mat]){ if(isLam) matData[mat].ebMmLam=(matData[mat].ebMmLam||0)+mm; else { matData[mat].ebByThk=matData[mat].ebByThk||{}; matData[mat].ebByThk[thk]=(matData[mat].ebByThk[thk]||0)+mm; } }
-    else _ebExtra.push({label:key.replace(/^\s*\d+(\.\d+)?mm\s*·\s*/,''), mm, isLam, thk});
-  });
-  // ⧉ LAM ×2 glue-up area and panel count. The screen reads these; this path never did,
-  // so the laminating line priced at zero here even once the arithmetic was added.
-  Object.entries(jobData?.lastResult?.lamMap||{}).forEach(([mat,m2])=>{
-    if(!(m2>0)) return;
-    if(!matData[mat]) matData[mat]={sheets:0,ebMm:0,ebMmLam:0,ebByThk:{}};
-    matData[mat].lamM2=(matData[mat].lamM2||0)+m2;
-  });
-  Object.entries(jobData?.lastResult?.lamCount||{}).forEach(([mat,n])=>{
-    if(!(n>0)) return;
-    if(!matData[mat]) matData[mat]={sheets:0,ebMm:0,ebMmLam:0,ebByThk:{}};
-    matData[mat].lamN=(matData[mat].lamN||0)+n;
-  });
-  // Older jobs saved before the optimiser sent these — work them out from the parts list,
-  // exactly as the screen does, so an old job still prices its glue-up on the PDF.
-  (jobData?.parts||[]).forEach(p=>{
-    if(!p.laminate) return;
-    const m=p.matName||''; if(!m) return;
-    if(!matData[m]) matData[m]={sheets:0,ebMm:0,ebMmLam:0,ebByThk:{}};
-    const q=Math.max(1,parseInt(p.qty)||1);
-    if(!jobData?.lastResult?.lamCount) matData[m].lamN=(matData[m].lamN||0)+q;
-    if(!jobData?.lastResult?.lamMap)  matData[m].lamM2=(matData[m].lamM2||0)+((Number(p.l)||0)/1000)*((Number(p.w)||0)/1000)*q;
-  });
+  // Exactly what the screen used — one function, so the PDF cannot quietly differ from it.
+  const {matData, ebExtra:_ebExtra} = _matDataFor(jobData);
 
   const defaultCutRate = getDefaultCutRate(jobData, tier);
   const shaker = getShakerInfo(jobData);
