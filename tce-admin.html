@@ -2852,6 +2852,7 @@ async function loadCustomBoards() {
     ]);
     _suppliers = sup || [];
     _customBoards = boards || [];
+    _migrateLocalDensities();   // one-off: lift any densities still stuck in this browser
   } catch(e) {
     _suppliers = [{name:'Lathams',surcharge_pct:8},{name:'Other',surcharge_pct:0}];
     _customBoards = [];
@@ -3025,6 +3026,57 @@ async function deleteSupplier(id) {
 // An explicit per-board figure always wins — set it by clicking the kg/m³ on the weight line.
 function densOverrides(){ try{ return JSON.parse(localStorage.getItem('tce_board_density')||'{}'); }catch(e){ return {}; } }
 function densKey(name){ return String(name||'').toLowerCase().replace(/\s+/g,' ').trim(); }
+
+// A board's display name: "Medite Premier FR L-MDF" at 18mm shows as "18mm Medite Premier
+// FR L-MDF". Same rule as the optimiser uses, so the two agree on what a board is called.
+function _cbDisplayName(b){
+  const n=String(b&&b.board_name||'').trim(), t=b&&b.thickness_mm;
+  if(!t) return n;
+  return new RegExp('(^|\\s)'+t+'\\s*mm\\b','i').test(n) ? n : (t+'mm '+n);
+}
+// Density lives ON the board record, so it follows the board to every device. It used to live
+// in this browser's local storage only, which meant a density set on the laptop was simply
+// absent on the iPad and the weight line quietly reverted to a guess.
+function _boardRowsFor(name){
+  const k=densKey(name);
+  return (_customBoards||[]).filter(b=>densKey(_cbDisplayName(b))===k || densKey(b.board_name)===k);
+}
+// Densities set before this change are sitting in one browser's local storage. Lift them onto
+// the board records the first time that browser signs in, then forget the local copy. Silent
+// on purpose — it's housekeeping, and it only ever fills a blank, never overwrites a figure.
+let _densMigrated=false;
+function _migrateLocalDensities(){
+  if(_densMigrated || !SB_TOKEN) return;
+  _densMigrated=true;
+  let ov; try{ ov=densOverrides(); }catch(e){ return; }
+  const keys=Object.keys(ov||{}); if(!keys.length) return;
+  (async()=>{
+    let moved=0;
+    for(const k of keys){
+      const v=parseFloat(ov[k]); if(!(v>0)) continue;
+      const rows=(_customBoards||[]).filter(b=>densKey(_cbDisplayName(b))===k || densKey(b.board_name)===k);
+      if(!rows.length) continue;                       // not one of our boards — leave it be
+      if(rows.some(b=>parseFloat(b.density_kgm3)>0)) { delete ov[k]; continue; }  // already set
+      try{
+        for(const b of rows){
+          await sbFetch(`tce_custom_boards?id=eq.${b.id}`,{method:'PATCH',headers:{'Prefer':'return=minimal'},body:{density_kgm3:v}});
+        }
+        delete ov[k]; moved++;
+      }catch(e){ /* column not added yet, or offline — try again next load */ _densMigrated=false; return; }
+    }
+    if(moved){
+      try{ localStorage.setItem('tce_board_density', JSON.stringify(ov)); }catch(e){}
+      try{ const b=await sbFetch('tce_custom_boards?select=*&order=board_name,thickness_mm,sheet_size'); if(b) _customBoards=b; }catch(e){}
+      showToast(moved+' board densit'+(moved===1?'y':'ies')+' moved to the cloud ✓');
+    }
+  })();
+}
+function _boardDensityFromRecord(name){
+  const rows=_boardRowsFor(name);
+  for(const b of rows){ const d=parseFloat(b.density_kgm3); if(d>0) return d; }
+  return null;
+}
+
 function setBoardDensity(name){
   const k=densKey(name); if(!k) return;
   const cur=densOverrides();
@@ -3035,11 +3087,35 @@ function setBoardDensity(name){
     +'   18mm poplar + 0.8mm HPL both sides = 574.\n\n'
     +'Leave blank to go back to the automatic guess.', now);
   if(v===null) return;
-  if(String(v).trim()==='') delete cur[k]; else { const n=parseFloat(v); if(!(n>0)){ alert('Enter a number in kg/m³'); return; } cur[k]=n; }
+  let val=null;
+  if(String(v).trim()!==''){ val=parseFloat(v); if(!(val>0)){ alert('Enter a number in kg/m³'); return; } }
+  const rows=_boardRowsFor(name);
+  if(rows.length){
+    // A board we have on file — save it to the record, on every size of that board, so the
+    // figure is the same wherever it's opened.
+    (async()=>{
+      try{
+        for(const b of rows){
+          await sbFetch(`tce_custom_boards?id=eq.${b.id}`,{method:'PATCH',headers:{'Prefer':'return=minimal'},
+            body:{density_kgm3: val}});
+        }
+        // Drop any stale local copy so the record is the only answer.
+        if(cur[k]!=null){ delete cur[k]; try{ localStorage.setItem('tce_board_density', JSON.stringify(cur)); }catch(e){} }
+        await loadCustomBoards();
+        showToast(val==null ? 'Density cleared ✓' : `${name} set to ${val} kg/m³ ✓`);
+        if(typeof buildQuote==='function') buildQuote();
+      }catch(e){ alert('Could not save the density: '+e.message); }
+    })();
+    return;
+  }
+  // Not one of our boards (an Egger décor, say) — keep the old local behaviour.
+  if(val==null) delete cur[k]; else cur[k]=val;
   try{ localStorage.setItem('tce_board_density', JSON.stringify(cur)); }catch(e){}
   if(typeof buildQuote==='function') buildQuote();
 }
 function boardDensity(name){
+  const rec=_boardDensityFromRecord(name);
+  if(rec>0) return rec;
   const ov=densOverrides()[densKey(name)];
   if(ov>0) return ov;
   const s=String(name||'').toLowerCase();
@@ -3148,19 +3224,20 @@ async function lamSaveBoard(){
   if(!face){ if(!confirm('No laminate price entered — save with laminate at £0?\n\nYou can edit the board price later when the quote comes in.')) return; }
   const c=lamCost(L,W,faces,board,face);
   try{
-    await sbFetch('tce_custom_boards',{method:'POST',headers:{'Prefer':'return=minimal'},body:{
-      board_name:name, thickness_mm:Math.round(thick), sheet_size:Math.round(L)+'x'+Math.round(W),
-      base_cost:Number(c.total.toFixed(2)), supplier:'Lathams'
-    }});
     // The laminate faces are part of this board, not a ⧉ LAM glue-up, so nothing on the job
     // will ever flag them. Bake them into the board's density instead — otherwise the weight
-    // line reports a bare core and overstates the saving against MFC.
+    // line reports a bare core and overstates the saving against MFC. Saved on the record, so
+    // it's the same figure on every device.
+    let eff=null;
     try{
       const t=(Number(thick)||18)/1000;
-      const eff=Math.round(boardDensity(name) + (faces*HPL_T*HPL_DENSITY)/t);
-      const ov=densOverrides(); ov[densKey(name)]=eff;
-      localStorage.setItem('tce_board_density', JSON.stringify(ov));
+      eff=Math.round(boardDensity(name) + (faces*HPL_T*HPL_DENSITY)/t);
     }catch(e){}
+    await sbFetch('tce_custom_boards',{method:'POST',headers:{'Prefer':'return=minimal'},body:{
+      board_name:name, thickness_mm:Math.round(thick), sheet_size:Math.round(L)+'x'+Math.round(W),
+      base_cost:Number(c.total.toFixed(2)), supplier:'Lathams',
+      density_kgm3: eff>0 ? eff : null
+    }});
     await loadCustomBoards();
     showToast(name+' saved at £'+c.total.toFixed(2)+'/sheet ✓');
   }catch(e){ alert('Error saving board: '+e.message); }

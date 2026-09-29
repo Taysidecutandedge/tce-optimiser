@@ -4562,7 +4562,7 @@ let _matMapPending=[], _cbCatalogue=[];
 async function sbLoadBoardCatalogue(){
   if(!_sbToken){ _cbCatalogue=[]; return; }
   try{
-    const r=await fetch(SB_URL+'/rest/v1/tce_custom_boards?select=id,board_name,thickness_mm,sheet_size,base_cost&order=board_name,thickness_mm',{headers:sbAuthH()});
+    const r=await fetch(SB_URL+'/rest/v1/tce_custom_boards?select=id,board_name,thickness_mm,sheet_size,base_cost,density_kgm3&order=board_name,thickness_mm',{headers:sbAuthH()});
     _cbCatalogue = r.ok ? (await r.json()) : [];
   }catch(e){ _cbCatalogue=[]; }
 }
@@ -4767,8 +4767,19 @@ let _palletCfg={ bundleMax:4, smallMax:900, stripNarrow:200, maxHeight:1000, max
 function _boardDensity(name){                 // kg/m³
   // Per-board figures set in admin win over the name guess, so pallet weights and quote
   // weights never disagree (a board named "U645 ST9 Light Weight" has no clue in the name).
+  const key=String(name||'').toLowerCase().replace(/\s+/g,' ').trim();
+  // First the board's own record — it travels with the board, so this phone and that laptop
+  // give the same weight. (It used to be local-only, so they didn't.)
   try{
-    const ov=JSON.parse(localStorage.getItem('tce_board_density')||'{}')[String(name||'').toLowerCase().replace(/\s+/g,' ').trim()];
+    for(const b of (_cbCatalogue||[])){
+      const d=parseFloat(b.density_kgm3);
+      if(!(d>0)) continue;
+      if(String(_cbName(b)).toLowerCase().replace(/\s+/g,' ').trim()===key) return d;
+      if(String(b.board_name||'').toLowerCase().replace(/\s+/g,' ').trim()===key) return d;
+    }
+  }catch(e){}
+  try{
+    const ov=JSON.parse(localStorage.getItem('tce_board_density')||'{}')[key];
     if(ov>0) return ov;
   }catch(e){}
   const s=String(name||'').toLowerCase();
