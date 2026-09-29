@@ -516,6 +516,9 @@ let _quoteLines = [];
 // Readiness findings for the quote on screen. {lvl:'block'|'warn', msg}
 // 'block' = this quote is wrong or unverifiable as it stands. 'warn' = check it before sending.
 let _gate = [];
+// Per material, the figures BEFORE any hand edit — so the gate can report a change as
+// "cutting 0 instead of 4" rather than just "edited".
+let _gateBasis = {};
 function _qLine(group, item, detail, qty, rate, total){
   _quoteLines.push({group, item, detail, qty:Number(qty)||0, rate:Number(rate)||0, total:Number(total)||0});
 }
@@ -1234,6 +1237,7 @@ async function buildQuote() {
   // This is the list of things a quote must satisfy before it's safe to send — and the same
   // list an automatic quote would have to pass before going out without being read.
   _gate = [];
+  _gateBasis = {};   // mat → what the figures would be with no hand edits, so a warn can say "instead of N"
   const gBlock=(m)=>_gate.push({lvl:'block',msg:m});
   const gWarn =(m)=>_gate.push({lvl:'warn', msg:m});
 
@@ -1306,6 +1310,8 @@ async function buildQuote() {
     const shts=(se && se[mat]!=null) ? se[mat]
              : (qb && qb[mat]!=null) ? qb[mat]
              : data.sheets;
+    // Remember the un-edited figures for this material before the overrides are applied.
+    _gateBasis[mat] = {shts, autoPrice, autoCut: cutRateForMat(mat, jobData, tier)};
     // Boards and cutting get their own counts. On offcut work you can bill nil material
     // but still charge the handling, or the other way round.
     const bShts = ov.boardSheets!=null ? ov.boardSheets : shts;
@@ -1550,9 +1556,25 @@ async function buildQuote() {
     else if(!_customers.some(c=>(c.name||'').toLowerCase()===_cust.trim().toLowerCase()))
       gWarn(`<b>${_attr(_cust)}</b> isn't on file — pricing is falling back to the ${tier} tier.`);
     if(!(grandEx>0)) gBlock('The quote totals £0.00.');
-    // Overridden sheet counts are legitimate but they're a manual decision, so say so.
-    const edited=Object.entries(_quoteOverrides).filter(([k,v])=>k.slice(0,2)!=='__' && v && (v.boardSheets!=null||v.cutSheets!=null||v.boardPrice!==undefined)).map(([k])=>k);
-    if(edited.length) gWarn(`Figures edited by hand on: ${edited.map(m=>'<b>'+m+'</b>').join(', ')}.`);
+    // Overridden figures are legitimate — billing nil cutting on offcut work is a real decision.
+    // But say WHAT was changed and what it was before, so the reason is still readable in a
+    // week, or by someone who wasn't the one who typed it.
+    Object.entries(_quoteOverrides).forEach(([mat,v])=>{
+      if(mat.slice(0,2)==='__' || !v) return;
+      const base=_gateBasis[mat]||{};
+      const bits=[];
+      if(v.boardSheets!=null && base.shts!=null && v.boardSheets!==base.shts)
+        bits.push(`boards <b>${v.boardSheets}</b> instead of ${base.shts}`);
+      if(v.cutSheets!=null && base.shts!=null && v.cutSheets!==base.shts)
+        bits.push(`cutting <b>${v.cutSheets}</b> instead of ${base.shts}`);
+      if(v.boardPrice!==undefined && base.autoPrice!=null && +v.boardPrice!==+base.autoPrice)
+        bits.push(`board price <b>£${(+v.boardPrice).toFixed(2)}</b> instead of £${(+base.autoPrice).toFixed(2)}`);
+      if(v.boardPrice!==undefined && base.autoPrice==null)
+        bits.push(`board price <b>£${(+v.boardPrice).toFixed(2)}</b> typed in — not from the price list`);
+      if(v.cutRate!==undefined && base.autoCut!=null && +v.cutRate!==+base.autoCut)
+        bits.push(`cutting rate <b>£${(+v.cutRate).toFixed(2)}</b> instead of £${(+base.autoCut).toFixed(2)}`);
+      if(bits.length) gWarn(`<b>${mat}</b> — ${bits.join(', ')}.`);
+    });
   }
   const _gBlocks=_gate.filter(g=>g.lvl==='block'), _gWarns=_gate.filter(g=>g.lvl==='warn');
   const gatePanel = (()=>{
