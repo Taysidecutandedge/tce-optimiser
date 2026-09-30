@@ -1510,11 +1510,24 @@ function _resumeNestUI(){
     const show=id=>{const el=document.getElementById(id); if(el) el.style.display='inline-flex';};
     show('cutModeBtn'); show('labelBtn'); show('dxfBtn');
     const ma=document.getElementById('mainArea');
-    if(ma) ma.innerHTML='<div style="padding:40px;text-align:center;font-family:var(--mono)">'
-      +'<div style="color:var(--ok);font-size:15px;font-weight:700">✓ Cut plan restored — '+_lastSheets.length+' sheet'+(_lastSheets.length!==1?'s':'')+'</div>'
-      +'<div style="color:var(--txt2);font-size:13px;margin-top:8px;font-family:var(--sans)">Same layout as before the refresh. Press <b style="color:var(--ok)">✂ Cutting Mode</b> to carry on where you left off.</div>'
-      +'<div style="color:var(--acc);font-size:12px;margin-top:10px;font-family:var(--sans)">⚠ Pressing Calculate will build a <b>new</b> layout — only do that if you haven\'t started cutting.</div>'
-      +'</div>';
+    if(!ma) return;
+    // Draw the actual cut plan — the sheets, the offcuts to fetch, what's still to cut.
+    // This used to REPLACE the whole screen with a "restored" note, wiping the results that
+    // had just been rendered. It told you the plan was safe while hiding the plan, which is
+    // no use when you need to know which offcuts to go and find.
+    // ".stat" is the summary row renderResults draws — if it isn't there, the results aren't.
+    if(!ma.querySelector('.stat')){
+      try{ renderResults(_lastSheets, _lastUnplaced||[]); }catch(e){}
+    }
+    if(!document.getElementById('nestResumeBar')){
+      const bar=document.createElement('div');
+      bar.id='nestResumeBar';
+      bar.style.cssText='margin:0 0 14px;padding:11px 14px;border:1px solid #2f6b43;background:rgba(47,107,67,.12);border-radius:8px';
+      bar.innerHTML='<div style="color:var(--ok);font-size:14px;font-weight:700;font-family:var(--mono)">✓ Cut plan restored — '+_lastSheets.length+' sheet'+(_lastSheets.length!==1?'s':'')+'</div>'
+        +'<div style="color:var(--txt2);font-size:12.5px;margin-top:4px">Same layout as before. Press <b style="color:var(--ok)">✂ Cutting Mode</b> to carry on where you left off.</div>'
+        +'<div style="color:var(--acc);font-size:11.5px;margin-top:6px">⚠ Calculate builds a <b>new</b> layout — it will ask first if you have cuts marked.</div>';
+      ma.insertBefore(bar, ma.firstChild);
+    }
   }catch(e){}
 }
 // Last-resort recovery: rebuild the cut plan from the sheet layouts the saw published to the
