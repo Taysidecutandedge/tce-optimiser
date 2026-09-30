@@ -2111,6 +2111,19 @@ function renderParts(){
 // ═══════════════════════════════════════════════════════════════
 
 function calculate(){
+  // Re-nesting a job that is part-cut is legitimate — you re-nest to use offcuts, or after a
+  // cutlist change. But it should never be something you discover you've done. The ticks do
+  // survive (they re-match by part name and size), and saying so up front removes the
+  // heart-in-mouth moment of watching a morning's work apparently vanish.
+  try{
+    const cutSoFar=(typeof _cmDone!=='undefined' && _cmDone) ? _cmDone.size : 0;
+    if(cutSoFar>0 && _lastSheets && _lastSheets.length){
+      if(!confirm('⚠ This job has '+cutSoFar+' panel'+(cutSoFar!==1?'s':'')+' already marked as cut.\n\n'
+        +'Calculating builds a NEW layout. Your cuts are not lost — they are re-matched by part '
+        +'name and size — but panels will move to different sheets.\n\n'
+        +'Carry on and re-nest?')) return;
+    }
+  }catch(e){}
   // Show progress indicator while optimising
   const runBtn=document.querySelector('.btn-run');
   const origText=runBtn?runBtn.textContent:'';
@@ -5568,6 +5581,9 @@ let _cmIdx=0;       // current panel index
 let _cmDone=new Set(); // indices of confirmed panels
 let _cmRecut=new Set(); // indices marked for recut
 let _cmPrevCount=-1; // detect recalculation
+// Cuts that belong to this job's panels but are filed under a different job name — the
+// fingerprint of a rename. Offered to the operator rather than applied silently.
+let _cmOrphans=null;
 
 function _cmSig(){
   // content signature of the current layout — used to match saved progress to THIS exact job
@@ -5628,11 +5644,21 @@ async function cmReconcileFromCloud(){
     if(!r.ok) return {ok:false,count:0};
     rows=await r.json();
   }catch(e){ return {ok:false,count:0}; }
-  // Match a confirm to THIS job. Exact job-name match first; if the job was renamed
-  // (e.g. "Swaans (Don Street)" vs "…(Don Street MFC)") fall back to one containing the other,
-  // so a rename can't wipe out the cut history mid-job.
+  // Match a confirm to THIS job. By the job's ID where we have one — that survives any
+  // rename. Renaming "Karl Updated" to "Karl 7" orphaned 27 confirmed cuts, because the
+  // only link between a cut and its job was the name someone typed.
   const co=p=>String(p.company||'').trim().toLowerCase();
-  const mine=rows.map(x=>x.panel||{}).filter(p=>!proj||co(p)===proj);
+  const allP=rows.map(x=>x.panel||{});
+  const myId=(typeof _loadedCloudJobId!=='undefined' && _loadedCloudJobId!=null) ? String(_loadedCloudJobId) : null;
+  let mine=[];
+  if(myId){
+    mine=allP.filter(p=>p.jobId!=null && String(p.jobId)===myId);
+    // Older confirms pre-date the ID and carry only a name. Take those by name as well,
+    // but never take an ID that belongs to a DIFFERENT job — an ID is never ambiguous.
+    if(proj) mine=mine.concat(allP.filter(p=>p.jobId==null && co(p)===proj));
+  } else {
+    mine=allP.filter(p=>!proj||co(p)===proj);
+  }
   // Rename tolerance, but a bare prefix is not enough. "Dianne" is a prefix of
   // "Dianne Rev3 Doors" — a completely different job — and matching it silently ticked
   // panels that had never been cut. Only accept a tail that reads like a revision or
@@ -5640,7 +5666,7 @@ async function cmReconcileFromCloud(){
   const TAIL_OK=/^[\s\-–—_.,()]*(?:(?:rev|revision|v)\s*\.?\s*\d+|final|copy)?[\s\-–—_.,()]*$/i;
   let loose=mine;
   if(!loose.length && proj){
-    const cand=rows.map(x=>x.panel||{}).filter(p=>{
+    const cand=allP.filter(p=>{
       const c=co(p); if(!c) return false;
       const [lng,shrt]=c.length>proj.length?[c,proj]:[proj,c];
       return lng.indexOf(shrt)===0 && TAIL_OK.test(lng.slice(shrt.length));
@@ -5648,6 +5674,23 @@ async function cmReconcileFromCloud(){
     // Ambiguous (two different jobs both look like renames of this one)? Take neither.
     const names=new Set(cand.map(co));
     loose = names.size<=1 ? cand : [];
+  }
+  // Nothing matched, but the job HAS been cut under some other name? Say so instead of
+  // showing a clean sheet. Today that silence cost a morning: 27 confirmed cuts sat in the
+  // cloud under "Karl Updated" while the screen said nothing had been cut at all.
+  _cmOrphans=null;
+  if(!loose.length){
+    const mySig=new Set(_cmPanels.map(p=>(p.label||'')+'|'+(p.origL||'')+'|'+(p.origW||'')));
+    const byName={};
+    allP.forEach(p=>{
+      const sig=(p.label||'')+'|'+(p.origL||'')+'|'+(p.origW||'');
+      if(!mySig.has(sig)) return;                 // not a panel from this job at all
+      const n=String(p.company||'').trim(); if(!n) return;
+      (byName[n]=byName[n]||[]).push(p);
+    });
+    // Only worth mentioning if a good share of that job's panels are ours.
+    const best=Object.entries(byName).sort((a,b)=>b[1].length-a[1].length)[0];
+    if(best && best[1].length>=3) _cmOrphans={name:best[0], panels:best[1]};
   }
   // PRIMARY: match on the panel's exact position on its sheet (sheetIdx + x + y). Counting
   // by label alone marked the first N matching panels as done regardless of which sheet they
@@ -5701,6 +5744,26 @@ function _cmSheetOrder(sheet){
     .forEach(cx=>byCol[cx].sort((a,b)=>a.y-b.y).forEach(p=>out.push(p)));
   return out;
 }
+// Tick the panels that were confirmed under the job's old name. The old cloud rows are left
+// exactly as they are — they're the record of what happened, and rewriting history to tidy a
+// display would be the wrong trade. From here on, new confirms carry the job's ID, so this
+// job won't be orphaned by a rename again.
+async function cmAdoptOrphanCuts(){
+  const o=_cmOrphans; if(!o||!o.panels.length) return 0;
+  const rem={};
+  o.panels.forEach(p=>{ const k=(p.label||'')+'|'+(p.origL||'')+'|'+(p.origW||''); rem[k]=(rem[k]||0)+1; });
+  let n=0;
+  _cmPanels.forEach((p,i)=>{
+    if(_cmRecut.has(i)||_cmDone.has(i)) return;
+    const k=(p.label||'')+'|'+(p.origL||'')+'|'+(p.origW||'');
+    if(rem[k]>0){ _cmDone.add(i); rem[k]--; n++; }
+  });
+  _cmIdx=0; for(let i=0;i<_cmPanels.length;i++){ if(!_cmDone.has(i)){ _cmIdx=i; break; } }
+  _cmSave(); cmRender();
+  if(typeof cmToast==='function') cmToast('✅ Took on '+n+' cut panel'+(n!==1?'s':'')+' from "'+o.name+'"');
+  _cmOrphans=null;
+  return n;
+}
 async function openCuttingMode(){
   if(!_lastSheets.length){alert('Run Calculate first.');return;}
   _cmPanels=[];
@@ -5713,7 +5776,12 @@ async function openCuttingMode(){
   // Local fast-restore (offline fallback). Cloud reconcile below is authoritative.
   const restored=_cmLoad();
   if(!restored && newCount!==_cmPrevCount){ _cmDone=new Set(); _cmRecut=new Set(); }
-  if(!_cmSession) _cmSession=(projectName||'job')+'-'+Date.now();
+  // The session name must belong to the job in front of you. It used to be inherited from
+  // whatever was open before, which is how Karl's cuts were logged under "stephen office".
+  const _wantSess=(projectName||'job');
+  if(!_cmSession || String(_cmSession).replace(/-\d{10,}$/,'')!==_wantSess){
+    _cmSession=_wantSess+'-'+Date.now();
+  }
   _cmPrevCount=newCount;
   // Rebuild "what's cut" from the cloud cut-log so confirmed panels can never be
   // lost to a refresh, a session timeout, a re-nest, or a different device.
@@ -5732,6 +5800,18 @@ async function openCuttingMode(){
       +rec.matched+' of '+rec.expected+' are in the same place on the board as before.\n\n'
       +'What is left to cut is right. Which sheet a cut panel is shown on may not be — so work from the ticks, not from where they sit.');
   } else if(rec&&rec.ok&&rec.count>0&&typeof cmToast==='function') cmToast('✅ Restored '+rec.count+' already-cut panel'+(rec.count!==1?'s':'')+' from the cloud');
+  // Nothing ticked, but this job's panels HAVE been cut under an older name. Say so out loud.
+  // Silence here is what let a morning's cutting look like it had never happened.
+  if(_cmOrphans && !_cmDone.size){
+    const o=_cmOrphans;
+    if(confirm('⚠ Nothing is ticked for "'+(projectName||'this job')+'".\n\n'
+      +'But '+o.panels.length+' panel'+(o.panels.length!==1?'s':'')+' from this cutlist '
+      +(o.panels.length!==1?'were':'was')+' confirmed as cut under the name:\n\n    "'+o.name+'"\n\n'
+      +'That usually means the job was renamed. Bring those cuts onto this job?\n\n'
+      +'Check them against what is physically stacked before you cut anything.')){
+      await cmAdoptOrphanCuts();
+    }
+  }
 }
 function closeCuttingMode(){
   document.getElementById('cuttingMode').classList.remove('active');
@@ -5801,6 +5881,10 @@ async function cmEmitCutEvent(p, opts){
       action:opts.reprint?'reprint':'confirm',
       panel:{
         label:p.label, origL:p.origL, origW:p.origW,
+        // The job's ID, so a confirm belongs to a JOB and not to whatever the job was called
+        // that afternoon. Renaming "Karl Updated" to "Karl 7" orphaned a day of cutting,
+        // because the only link was the name. The name is still written for older readers.
+        jobId:(typeof _loadedCloudJobId!=='undefined' && _loadedCloudJobId!=null) ? String(_loadedCloudJobId) : null,
         eb:p.eb, grain:p.grain, company:p.company||projectName||'',
         sheetName:p.sheetName, sheetIdx:p.sheetIdx,
         x:p.x, y:p.y, w:p.w, h:p.h,          // position on the sheet → station marks it off on the map
