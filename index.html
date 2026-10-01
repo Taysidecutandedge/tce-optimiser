@@ -2129,7 +2129,16 @@ function calculate(){
   // survive (they re-match by part name and size), and saying so up front removes the
   // heart-in-mouth moment of watching a morning's work apparently vanish.
   try{
-    const cutSoFar=(typeof _cmDone!=='undefined' && _cmDone) ? _cmDone.size : 0;
+    // Count ONLY cuts that belong to this job and this exact set of panels. _cmDone lingers
+    // in memory from whatever was open before, so counting it blindly announced that a
+    // brand-new cutlist already had 84 panels cut. The saved state carries the job name and
+    // a signature of the panels, so it can say whether those ticks are really ours.
+    let cutSoFar=0;
+    if(typeof _cmDone!=='undefined' && _cmDone && _cmDone.size && _cmPanels && _cmPanels.length){
+      let st=null;
+      try{ st=JSON.parse(localStorage.getItem(_cmKey())||'null'); }catch(e){}
+      if(st && String(st.job||'')===String(projectName||'') && st.sig===_cmSig()) cutSoFar=_cmDone.size;
+    }
     if(cutSoFar>0 && _lastSheets && _lastSheets.length){
       if(!confirm('⚠ This job has '+cutSoFar+' panel'+(cutSoFar!==1?'s':'')+' already marked as cut.\n\n'
         +'Calculating builds a NEW layout. Your cuts are not lost — they are re-matched by part '
@@ -6886,6 +6895,14 @@ function newProject(){
   jobSheets=[]; parts=[];
   jsid=1; pid=1; ci=0;
   projectName='';
+  // Drop the previous job's cutting-mode state too. Leaving it behind meant a brand-new
+  // cutlist inherited the last job's ticks — and Calculate then warned that 84 panels of a
+  // list you'd only just typed were already cut.
+  _cmPanels=[]; _cmDone=new Set(); _cmRecut=new Set(); _cmIdx=0; _cmPrevCount=-1;
+  _cmSession=''; _cmSince=0; _cmOrphans=null;
+  _lastSheets=[]; _lastUnplaced=[];
+  const _nrb=document.getElementById('nestResumeBar'); if(_nrb) _nrb.remove();
+  ['cutModeBtn','labelBtn','dxfBtn'].forEach(id=>{const el=document.getElementById(id); if(el) el.style.display='none';});
   document.getElementById('projectNameInput').value='';
   save();
   renderJobSheets(); renderParts();
