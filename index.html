@@ -1214,7 +1214,11 @@ async function cloudSaveJob(quiet){
   // Save the actual LAYOUT, not just the sheet names. Only names were stored, so a job
   // reopened on another machine — or after the browser's copy was overwritten — had no cut
   // plan to recover and had to be re-nested from scratch.
-  const lastResult = _lastSheets && _lastSheets.length ? {
+  // Only save a cut plan that actually belongs to THESE parts. _lastSheets is whatever was
+  // last nested, and it does not clear when you type a new cutlist — so saving a fresh job
+  // before calculating stored the previous job's nest against it. "Karl door s" ended up
+  // holding 15 sheets of Karl 7's carcass, and opening it showed Karl 7's cutlist.
+  const lastResult = (_lastSheets && _lastSheets.length && _nestMatchesParts()) ? {
     sheets: _lastSheets.map(s=>({
       name:s.name, fullL:s.fullL, fullW:s.fullW, uw:s.uw, uh:s.uh, thick:s.thick,
       cost:s.cost, color:s.color, jsid:s.jsid,
@@ -1370,10 +1374,18 @@ async function cloudLoadJob(id){
       _lastEbMap=d.lastResult.ebMap||{};
       // If the saved copy carries the real layout, this job is ready to cut as it stands —
       // put it straight back on screen so nobody is pushed into a re-nest to get going.
+      // …but only if that saved layout is actually made of this job's parts. Jobs saved
+      // before the check below went in can carry another job's nest, and restoring one
+      // silently would put the wrong cutlist in front of the saw.
       if(_lastSheets.some(s=>s&&s.placements&&s.placements.length)){
-        _lastUnplaced=[];
-        try{ _saveNest(); }catch(e){}
-        setTimeout(()=>{ try{ renderResults(_lastSheets,_lastUnplaced); _resumeNestUI(); }catch(e){} },0);
+        if(_nestMatchesParts()){
+          _lastUnplaced=[];
+          try{ _saveNest(); }catch(e){}
+          setTimeout(()=>{ try{ renderResults(_lastSheets,_lastUnplaced); _resumeNestUI(); }catch(e){} },0);
+        } else {
+          _lastSheets=[]; _lastUnplaced=[];
+          setTimeout(()=>{ try{ alert('⚠ The cut plan saved with this job belongs to a different cutlist, so it has not been loaded.\n\nThe parts list is correct. Press Calculate to nest THIS job.'); }catch(e){} }, 600);
+        }
       }
     }
     _quoteBasis=d.quoteBasis||null;   // the offcuts-off count the admin prices from
@@ -1489,6 +1501,27 @@ function _saveNest(){
     _pruneNests();
   }catch(e){}
 }
+// Does the nest on screen actually belong to the parts on screen?
+//
+// _lastSheets survives typing a whole new cutlist. Nothing clears it, so the layout from the
+// last job sits there looking authoritative. Rather than remember which job a nest came from
+// — one more thing to get out of step — just ask the nest what it contains and compare.
+// A nest is ours if nearly every panel in it is a part we actually have.
+function _nestMatchesParts(){
+  if(!_lastSheets || !_lastSheets.length) return false;
+  const want=new Set();
+  (parts||[]).forEach(p=>{ want.add(String(p.label||'')+'|'+Math.round(p.l||0)+'x'+Math.round(p.w||0)); });
+  if(!want.size) return false;
+  let total=0, hit=0;
+  _lastSheets.forEach(s=>(s.placements||[]).forEach(pl=>{
+    if(pl._isCrosscut||pl._isPickupStrip||pl._isTrim||pl._isRipStrip) return;   // saw-made offcuts
+    total++;
+    if(want.has(String(pl.label||'')+'|'+Math.round(pl.origL||0)+'x'+Math.round(pl.origW||0))) hit++;
+  }));
+  // Allow a little slack for a part edited since the nest ran; a wholesale mismatch is a
+  // different job's layout and must never be saved or shown against this one.
+  return total>0 && (hit/total)>=0.9;
+}
 function _nestKey(proj){ const p=String(proj||'').toLowerCase().replace(/\s+/g,' ').trim(); return p?('clp_nest_'+p):''; }
 // Keep the last 8 job nests; bin the oldest so storage can't fill up.
 function _pruneNests(){
@@ -1507,6 +1540,14 @@ function _pruneNests(){
 function _resumeNestUI(){
   try{
     if(!_lastSheets||!_lastSheets.length) return;
+    // A nest left over from another job must never be presented as this job's cut plan.
+    // Showing one is how "Karl door s" displayed Karl 7's cutlist.
+    if(!_nestMatchesParts()){
+      _lastSheets=[]; _lastUnplaced=[];
+      ['cutModeBtn','labelBtn','dxfBtn'].forEach(id=>{const el=document.getElementById(id); if(el) el.style.display='none';});
+      const rb=document.getElementById('nestResumeBar'); if(rb) rb.remove();
+      return;
+    }
     const show=id=>{const el=document.getElementById(id); if(el) el.style.display='inline-flex';};
     show('cutModeBtn'); show('labelBtn'); show('dxfBtn');
     const ma=document.getElementById('mainArea');
