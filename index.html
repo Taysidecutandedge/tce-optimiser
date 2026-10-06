@@ -687,7 +687,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-10-06-c';
+const TCE_BUILD='2026-10-06-d';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -2280,20 +2280,25 @@ async function _cutTallyFromCloud(){
     // SECOND re-nest looked only for cuts made since the first, found none, and put every
     // already-cut panel back into the job. One variable, two jobs; now they're separate.
     const winStart=new Date(Math.max(_cutResetAt||0, Date.now()-180*24*3600*1000)).toISOString();
-    const url=SB_URL+'/rest/v1/tce_cut_events?select=panel&action=eq.confirm&created_at=gte.'+encodeURIComponent(winStart)+'&order=id.desc&limit=5000';
+    const url=SB_URL+'/rest/v1/tce_cut_events?select=panel,session_id&action=eq.confirm&created_at=gte.'+encodeURIComponent(winStart)+'&order=id.desc&limit=5000';
     let r=await fetch(url,{headers:sbAuthH()});
     if(r.status===401 && typeof sbDoRefresh==='function' && await sbDoRefresh()) r=await fetch(url,{headers:sbAuthH()});
     if(!r.ok) return tally;
     const rows=await r.json();
     const seen=new Set();
-    rows.map(x=>x.panel||{}).forEach(p=>{
+    rows.forEach(row=>{
+      const p=row.panel||{};
       const mine = myId ? (p.jobId!=null ? String(p.jobId)===myId : String(p.company||'').trim().toLowerCase()===proj)
                         : String(p.company||'').trim().toLowerCase()===proj;
       if(!mine) return;
-      // The same physical panel confirmed twice must only count once.
+      // De-duplicate a double-tap or a reprint — but ONLY within the same cutting session.
+      // Position alone was wrong: a re-nest reuses sheet 1 at 0,0 for a completely different
+      // panel, so two genuine cuts collapsed into one, the tally undercounted, and a panel
+      // you had already cut went straight back into the plan.
+      const sess=String(row.session_id||'');
       const uniq = (p.x!=null&&p.y!=null&&p.sheetIdx!=null)
-        ? 'P|'+p.sheetIdx+'|'+Math.round(p.x)+'|'+Math.round(p.y)
-        : 'L|'+(p.label||'')+'|'+(p.panelNum||'')+'|'+(p.origL||'')+'|'+(p.origW||'');
+        ? sess+'|P|'+p.sheetIdx+'|'+Math.round(p.x)+'|'+Math.round(p.y)
+        : sess+'|L|'+(p.label||'')+'|'+(p.panelNum||'')+'|'+(p.origL||'')+'|'+(p.origW||'');
       if(seen.has(uniq)) return; seen.add(uniq);
       const k=String(p.label||'')+'|'+Math.round(p.origL||0)+'x'+Math.round(p.origW||0);
       tally[k]=(tally[k]||0)+1;
