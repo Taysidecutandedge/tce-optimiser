@@ -1354,7 +1354,7 @@ function _resetJobState(opts){
   _lastSheets=[]; _lastUnplaced=[]; _lastEbMap={}; _lastEbGT=0; _lastEbDetail=[]; _lastBoardNeed=[];
   // Cutting mode
   _cmPanels=[]; _cmDone=new Set(); _cmRecut=new Set(); _cmIdx=0; _cmPrevCount=-1;
-  _cmSession=''; _cmSince=0; _cmOrphans=null;
+  _cmSession=''; _cmSince=0; _cutResetAt=0; _cmOrphans=null;
   _cmPublishedSheet=null; _cmFocusKey=null; _cmReview=false;
   // Quoting basis — belongs to the nest, so it goes with it
   _quoteBasis=null; _sheetEquiv=null;
@@ -2225,7 +2225,11 @@ async function _cutTallyFromCloud(){
     if(!_sbToken) return tally;
     const proj=String(projectName||'').trim().toLowerCase();
     const myId=(_loadedCloudJobId!=null)?String(_loadedCloudJobId):null;
-    const winStart=new Date(Math.max(_cmSince||0, Date.now()-180*24*3600*1000)).toISOString();
+    // Bounded by "Reset cuts" ONLY — never by _cmSince. _cmSince moves forward on every
+    // exclusion re-nest (so the fresh nest isn't wrongly ticked), and using it here meant the
+    // SECOND re-nest looked only for cuts made since the first, found none, and put every
+    // already-cut panel back into the job. One variable, two jobs; now they're separate.
+    const winStart=new Date(Math.max(_cutResetAt||0, Date.now()-180*24*3600*1000)).toISOString();
     const url=SB_URL+'/rest/v1/tce_cut_events?select=panel&action=eq.confirm&created_at=gte.'+encodeURIComponent(winStart)+'&order=id.desc&limit=5000';
     let r=await fetch(url,{headers:sbAuthH()});
     if(r.status===401 && typeof sbDoRefresh==='function' && await sbDoRefresh()) r=await fetch(url,{headers:sbAuthH()});
@@ -5794,7 +5798,10 @@ function _cmSig(){
   for(let i=0;i<_cmPanels.length;i++){const p=_cmPanels[i];s+='|'+p.sheetIdx+','+(p.label||'')+','+Math.round(p.w)+'x'+Math.round(p.h);}
   return s;
 }
-let _cmSince=0;   // cuts made before this time are ignored on reload (set by "Reset cuts")
+let _cmSince=0;   // cuts made before this time are ignored when TICKING a nest. Moves forward
+                  // on every exclusion re-nest, because the new nest's panels have no confirms.
+let _cutResetAt=0; // cuts made before this time don't exist at all. ONLY "Reset cuts" moves it,
+                  // so the already-cut tally still sees the whole job after any number of re-nests.
 // Cut progress is stored PER JOB. There used to be one shared slot, so running two jobs
 // meant each overwrote the other's ticks — and a half-written state could end up carrying
 // one job's name with the other job's panels, which is how both jobs showed the same
@@ -5802,7 +5809,7 @@ let _cmSince=0;   // cuts made before this time are ignored on reload (set by "R
 function _cmKey(){ const p=String(projectName||'').toLowerCase().replace(/\s+/g,' ').trim(); return p?('tce_cm_state_'+p):'tce_cm_state'; }
 function _cmSave(){
   try{
-    const payload=JSON.stringify({job:projectName||'',sig:_cmSig(),done:[..._cmDone],recut:[..._cmRecut],idx:_cmIdx,session:_cmSession,since:_cmSince,t:Date.now()});
+    const payload=JSON.stringify({job:projectName||'',sig:_cmSig(),done:[..._cmDone],recut:[..._cmRecut],idx:_cmIdx,session:_cmSession,since:_cmSince,resetAt:_cutResetAt,t:Date.now()});
     localStorage.setItem(_cmKey(), payload);
     localStorage.setItem('tce_cm_state', payload);   // keep the legacy slot pointed at the live job
   }catch(e){}
@@ -5818,6 +5825,7 @@ function _cmLoad(){
     _cmDone=new Set(st.done||[]); _cmRecut=new Set(st.recut||[]);
     _cmIdx=(typeof st.idx==='number')?st.idx:0; if(st.session)_cmSession=st.session;
     if(st.since) _cmSince=st.since;
+    if(st.resetAt) _cutResetAt=st.resetAt;
     return true;
   }catch(e){return false;}
 }
@@ -5825,7 +5833,9 @@ function cmResetCuts(){
   if(!confirm('Clear all marked cuts for this job and start fresh?'))return;
   _cmDone=new Set(); _cmRecut=new Set(); _cmIdx=0;
   _cmSession=(projectName||'job')+'-'+Date.now();
-  _cmSince=Date.now();    // ignore every confirm logged before now, so reload starts clean
+  // A real reset: those cuts are gone for every purpose — ticking AND the already-cut tally.
+  _cmSince=Date.now();
+  _cutResetAt=Date.now();
   _cmSave(); cmRender();
 }
 // Rebuild the "already cut" set from the cloud cut-log. This is the authoritative
