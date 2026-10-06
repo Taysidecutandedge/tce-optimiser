@@ -6128,9 +6128,25 @@ function cmConfirm(){
   for(let i=_cmIdx+1;i<_cmPanels.length;i++){ if(!_cmDone.has(i)&&_cmPanels[i].sheetIdx===_curSheet){next=i;break;} }
   // 2) otherwise any earlier undone panel still left on this sheet
   if(next<0){ for(let i=0;i<_cmIdx;i++){ if(!_cmDone.has(i)&&_cmPanels[i].sheetIdx===_curSheet){next=i;break;} } }
-  // 3) sheet finished -> first undone panel anywhere (the next sheet)
-  if(next<0){ for(let i=0;i<_cmPanels.length;i++){ if(!_cmDone.has(i)){next=i;break;} } }
+  // 3) Sheet finished -> carry on FORWARD to the next sheet that still needs cutting.
+  //    It used to jump to the first undone panel anywhere, which is index 0 — so finishing
+  //    a sheet threw you back to sheet 1 if you'd skipped it. You work the boards in the
+  //    order the stack and the offcuts dictate, and the app should follow you, not reorder you.
+  let _wrapped=false;
+  if(next<0){
+    for(let s=_curSheet+1; s<_lastSheets.length && next<0; s++){
+      for(let i=0;i<_cmPanels.length;i++){ if(!_cmDone.has(i)&&_cmPanels[i].sheetIdx===s){next=i;break;} }
+    }
+  }
+  // 4) Nothing left ahead — only now go back for sheets skipped earlier, and say so, so
+  //    jumping backwards is never a surprise.
+  if(next<0){
+    for(let i=0;i<_cmPanels.length;i++){ if(!_cmDone.has(i)){next=i;_wrapped=true;break;} }
+  }
   _cmIdx=next<0?_cmPanels.length:next;
+  if(_wrapped && next>=0 && typeof cmToast==='function'){
+    cmToast('↩ Back to sheet '+(_cmPanels[next].sheetIdx+1)+' — the sheets ahead are done');
+  }
   _cmSave();
   cmCheckOffcutDone(_curSheet);   // if that was the last panel on an offcut, mark it used + offer to log the remainder
   cmRender();
