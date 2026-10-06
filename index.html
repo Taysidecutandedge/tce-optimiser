@@ -419,6 +419,9 @@ select option{background:var(--surf2)}
     <button class="btn btn-sm" id="cutModeBtn" style="background:var(--ok);color:#000;font-weight:700;display:none" onclick="openCuttingMode()">✂ Cutting Mode</button>
     <button class="btn btn-sm" id="labelBtn" style="background:#9c27b0;color:#fff;font-weight:700;display:none" onclick="openLabelPrint()">🏷 Print Labels</button>
       <a href="tce-admin.html" target="_blank" style="background:#1a2a3a;color:#8ab;border:1px solid #2b4a40;border-radius:6px;padding:7px 14px;cursor:pointer;font-size:12px;text-decoration:none;display:inline-flex;align-items:center;gap:5px">🔒 Admin</a>
+      <!-- Which build this device is actually running. Tap to force a fresh copy. -->
+      <span id="tceBuildTag" onclick="_tceCheckBuild()" title="The version running on THIS device. Tap to check for a newer one."
+        style="font-size:10px;color:#5d7a6e;font-family:var(--mono);cursor:pointer;padding:4px 6px"></span>
   </div>
 </header>
 
@@ -674,6 +677,53 @@ select option{background:var(--surf2)}
 </div>
 
 <script>
+// ═══════════════════════════════════════════════
+// BUILD STAMP + STALE-VERSION CHECK
+// ═══════════════════════════════════════════════
+// GitHub Pages lets a browser hold on to an old copy of this file indefinitely, and nothing
+// says so. That has cost real board: the iPad sat on a build without the duplicate protection
+// and cut the same panel four times while the desktop was running the fix.
+//
+// So the app asks the server what the current build is, and if it isn't the one running, it
+// says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
+// that is your decision, not the app's.
+const TCE_BUILD='2026-10-06-c';
+function _tceShowUpdateBar(serverBuild){
+  if(document.getElementById('tceUpdateBar')) return;
+  const b=document.createElement('div');
+  b.id='tceUpdateBar';
+  b.style.cssText='position:fixed;left:0;right:0;top:0;z-index:200000;background:#7a2b2b;color:#fff;'
+    +'font-family:system-ui,sans-serif;font-size:14px;padding:10px 14px;display:flex;align-items:center;'
+    +'gap:12px;box-shadow:0 2px 10px rgba(0,0,0,.45)';
+  b.innerHTML='<span style="flex:1"><b>⚠ This device is running an old version.</b> '
+    +'Running '+TCE_BUILD+', the current one is '+serverBuild+'. '
+    +'Fixes you have been told about are NOT active here.</span>'
+    +'<button id="tceUpdNow" style="background:#fff;color:#7a2b2b;border:0;border-radius:6px;padding:8px 14px;font-weight:700;cursor:pointer">Update now</button>'
+    +'<button id="tceUpdLater" style="background:none;color:#fff;border:1px solid rgba(255,255,255,.5);border-radius:6px;padding:8px 12px;cursor:pointer">Later</button>';
+  document.body.appendChild(b);
+  document.getElementById('tceUpdNow').onclick=()=>{
+    // Cache-busted URL — a plain reload is exactly what has been failing to pick up the new file.
+    const u=location.pathname+'?v='+Date.now();
+    try{ if(window.caches&&caches.keys) caches.keys().then(ks=>ks.forEach(k=>caches.delete(k))); }catch(e){}
+    location.replace(u);
+  };
+  document.getElementById('tceUpdLater').onclick=()=>b.remove();
+}
+async function _tceCheckBuild(){
+  try{
+    const r=await fetch(location.pathname+'?buildcheck='+Date.now(),{cache:'reload'});
+    if(!r.ok) return;
+    const t=await r.text();
+    // Anchored on "const TCE_BUILD='" so it reads the real constant, not this regex.
+    const m=t.match(/const TCE_BUILD='([^']+)'/);
+    if(m && m[1] && m[1]!==TCE_BUILD) _tceShowUpdateBar(m[1]);
+  }catch(e){}
+}
+// On load, and again hourly for a screen left open all day in the workshop.
+setTimeout(()=>{ const el=document.getElementById('tceBuildTag'); if(el) el.textContent='v'+TCE_BUILD; }, 0);
+setTimeout(_tceCheckBuild, 2500);
+setInterval(_tceCheckBuild, 60*60*1000);
+
 // ═══════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════

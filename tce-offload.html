@@ -78,6 +78,7 @@
     <span class="printstat" id="pendStat" style="color:#e6a23c;cursor:pointer" onclick="pollPendingOffcuts()" title="Print queued offcut labels now"></span>
   </div>
   <div id="linkWarn" onclick="pollCutEvents();runPrintQ();" title="Tap to retry now" style="display:none;background:#5a1a1a;color:#ffc9c9;font-weight:700;padding:10px 16px;font-size:15px;text-align:center;cursor:pointer;border-bottom:2px solid #a33"></div>
+  <div id="dupWarn" style="display:none;background:#5a3a12;color:#ffc46b;font-weight:700;padding:10px 16px;font-size:15px;text-align:center;border-bottom:2px solid #a37a33"></div>
   <div class="mainrow">
     <div class="maincol">
       <div class="now" id="now">
@@ -148,6 +149,46 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
+// ═══════════════════════════════════════════════
+// BUILD STAMP + STALE-VERSION CHECK
+// ═══════════════════════════════════════════════
+// GitHub Pages lets a browser hold on to an old copy of this file indefinitely, and nothing
+// says so. A device can run week-old code while you are told a fix is live. So the app asks
+// the server what the current build is and says plainly when it is behind. It never reloads
+// by itself — that is your call, not the app's.
+const TCE_BUILD='2026-10-06-c';
+function _tceShowUpdateBar(serverBuild){
+  if(document.getElementById('tceUpdateBar')) return;
+  const b=document.createElement('div');
+  b.id='tceUpdateBar';
+  b.style.cssText='position:fixed;left:0;right:0;top:0;z-index:200000;background:#7a2b2b;color:#fff;'
+    +'font-family:system-ui,sans-serif;font-size:14px;padding:10px 14px;display:flex;align-items:center;'
+    +'gap:12px;box-shadow:0 2px 10px rgba(0,0,0,.45)';
+  b.innerHTML='<span style="flex:1"><b>⚠ This device is running an old version.</b> '
+    +'Running '+TCE_BUILD+', the current one is '+serverBuild+'. '
+    +'Fixes you have been told about are NOT active here.</span>'
+    +'<button id="tceUpdNow" style="background:#fff;color:#7a2b2b;border:0;border-radius:6px;padding:8px 14px;font-weight:700;cursor:pointer">Update now</button>'
+    +'<button id="tceUpdLater" style="background:none;color:#fff;border:1px solid rgba(255,255,255,.5);border-radius:6px;padding:8px 12px;cursor:pointer">Later</button>';
+  document.body.appendChild(b);
+  document.getElementById('tceUpdNow').onclick=()=>{
+    const u=location.pathname+'?v='+Date.now();
+    try{ if(window.caches&&caches.keys) caches.keys().then(ks=>ks.forEach(k=>caches.delete(k))); }catch(e){}
+    location.replace(u);
+  };
+  document.getElementById('tceUpdLater').onclick=()=>b.remove();
+}
+async function _tceCheckBuild(){
+  try{
+    const r=await fetch(location.pathname+'?buildcheck='+Date.now(),{cache:'reload'});
+    if(!r.ok) return;
+    const t=await r.text();
+    const m=t.match(/const TCE_BUILD='([^']+)'/);
+    if(m && m[1] && m[1]!==TCE_BUILD) _tceShowUpdateBar(m[1]);
+  }catch(e){}
+}
+setTimeout(_tceCheckBuild, 2500);
+setInterval(_tceCheckBuild, 60*60*1000);
+
 const SB_URL='https://mxjduublgtlpqtdgutzi.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im14amR1dWJsZ3RscHF0ZGd1dHppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwOTg2MjMsImV4cCI6MjA5MTY3NDYyM30.wfG9a91Udp7KQ7ywda6aNS9k-n79qtrGSe-epuCuk34';
 // DYMO Connect's web service grabs the first FREE port in 41951–41960, so we
@@ -260,6 +301,32 @@ async function pollCutEvents(){
     _cutPollBusy=false;
   }
 }
+// ── Only one print station per computer ────────────────────────────────────
+// Two stations = two independent print queues hitting the same DYMO. The queue is
+// serialised precisely because the 550 drops a job when two arrive together, so a second
+// station quietly loses labels — looks like a printer dropout, isn't one.
+const _stationId=Math.random().toString(36).slice(2)+'-'+Date.now();
+function _stationBeat(){
+  try{
+    localStorage.setItem('tce_station_'+_stationId, String(Date.now()));
+    const now=Date.now(); let others=0;
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(!k||k.indexOf('tce_station_')!==0) continue;
+      if(k==='tce_station_'+_stationId) continue;
+      const t=parseInt(localStorage.getItem(k))||0;
+      if(now-t<12000) others++; else localStorage.removeItem(k);   // tidy up dead ones
+    }
+    const el=document.getElementById('dupWarn');
+    if(el){
+      el.style.display=others?'block':'none';
+      el.textContent=others?('⚠ Another print station is open on this computer — close it. Two stations share one printer and labels get dropped.'):'';
+    }
+  }catch(e){}
+}
+setInterval(_stationBeat,5000); _stationBeat();
+window.addEventListener('beforeunload',()=>{ try{ localStorage.removeItem('tce_station_'+_stationId); }catch(e){} });
+
 function setLinkWarn(txt){
   const el=document.getElementById('linkWarn'); if(!el) return;
   el.textContent=txt||''; el.style.display=txt?'block':'none';
