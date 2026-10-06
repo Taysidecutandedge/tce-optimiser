@@ -2214,7 +2214,41 @@ function renderParts(){
 //   grain=N (none):    _pw=panel width, _ph=panel length, rotation allowed
 // ═══════════════════════════════════════════════════════════════
 
-function calculate(){
+// How many of each panel are already cut, from the cloud cut log.
+//
+// Taken from the log rather than from _cmDone on screen, because the screen's ticks are
+// wiped by the very re-nest we're protecting against. The log is the durable record, so
+// this still works on the second and third re-nest, and on another device.
+async function _cutTallyFromCloud(){
+  const tally={};
+  try{
+    if(!_sbToken) return tally;
+    const proj=String(projectName||'').trim().toLowerCase();
+    const myId=(_loadedCloudJobId!=null)?String(_loadedCloudJobId):null;
+    const winStart=new Date(Math.max(_cmSince||0, Date.now()-180*24*3600*1000)).toISOString();
+    const url=SB_URL+'/rest/v1/tce_cut_events?select=panel&action=eq.confirm&created_at=gte.'+encodeURIComponent(winStart)+'&order=id.desc&limit=5000';
+    let r=await fetch(url,{headers:sbAuthH()});
+    if(r.status===401 && typeof sbDoRefresh==='function' && await sbDoRefresh()) r=await fetch(url,{headers:sbAuthH()});
+    if(!r.ok) return tally;
+    const rows=await r.json();
+    const seen=new Set();
+    rows.map(x=>x.panel||{}).forEach(p=>{
+      const mine = myId ? (p.jobId!=null ? String(p.jobId)===myId : String(p.company||'').trim().toLowerCase()===proj)
+                        : String(p.company||'').trim().toLowerCase()===proj;
+      if(!mine) return;
+      // The same physical panel confirmed twice must only count once.
+      const uniq = (p.x!=null&&p.y!=null&&p.sheetIdx!=null)
+        ? 'P|'+p.sheetIdx+'|'+Math.round(p.x)+'|'+Math.round(p.y)
+        : 'L|'+(p.label||'')+'|'+(p.panelNum||'')+'|'+(p.origL||'')+'|'+(p.origW||'');
+      if(seen.has(uniq)) return; seen.add(uniq);
+      const k=String(p.label||'')+'|'+Math.round(p.origL||0)+'x'+Math.round(p.origW||0);
+      tally[k]=(tally[k]||0)+1;
+    });
+  }catch(e){}
+  return tally;
+}
+
+async function calculate(){
   // Re-nesting a job that is part-cut is legitimate — you re-nest to use offcuts, or after a
   // cutlist change. But it should never be something you discover you've done. The ticks do
   // survive (they re-match by part name and size), and saying so up front removes the
@@ -2232,8 +2266,8 @@ function calculate(){
     }
     if(cutSoFar>0 && _lastSheets && _lastSheets.length){
       if(!confirm('⚠ This job has '+cutSoFar+' panel'+(cutSoFar!==1?'s':'')+' already marked as cut.\n\n'
-        +'Calculating builds a NEW layout. Your cuts are not lost — they are re-matched by part '
-        +'name and size — but panels will move to different sheets.\n\n'
+        +'Calculating builds a NEW layout of WHAT IS LEFT TO CUT. Panels you have already cut '
+        +'are left out of it — they are listed separately so you can still see them.\n\n'
         +'Carry on and re-nest?')) return;
     }
   }catch(e){}
@@ -2241,13 +2275,55 @@ function calculate(){
   const runBtn=document.querySelector('.btn-run');
   const origText=runBtn?runBtn.textContent:'';
   if(runBtn){runBtn.textContent='⏳ Optimising...';runBtn.disabled=true;}
+  // What's already cut, straight from the cut log — so a second or third re-nest still
+  // knows, and so does another device.
+  let _tally={};
+  try{ _tally=await _cutTallyFromCloud(); }catch(e){}
+  const _hasCut=Object.values(_tally).some(n=>n>0);
   // Use setTimeout so UI updates before heavy calculation starts
   setTimeout(()=>{
-    try{ _calculateInner(); _computeSheetEquiv(); }
+    try{
+      _calculateInner(_hasCut?{exclude:_tally}:undefined);
+      // The sheet equivalent prices the WHOLE job, so it must never exclude anything.
+      _computeSheetEquiv();
+      if(_hasCut){
+        // The new plan is remaining work only. Old ticks refer to the old layout and would
+        // tick the wrong panels, so clear them and ignore earlier confirms from here on.
+        _cmDone=new Set(); _cmRecut=new Set(); _cmIdx=0; _cmPanels=[];
+        _cmSince=Date.now();
+        try{ _cmSave(); }catch(e){}
+        _renderAlreadyCut();
+      }
+    }
     finally{
       if(runBtn){runBtn.textContent=origText;runBtn.disabled=false;}
     }
   },30);
+}
+// Show what was left out, so re-nesting never hides work you've done.
+function _renderAlreadyCut(){
+  try{
+    const list=window._lastExcludedCut||[];
+    const ma=document.getElementById('mainArea'); if(!ma||!list.length) return;
+    const g={};
+    list.forEach(x=>{ const k=x.label+'|'+Math.round(x.l)+'x'+Math.round(x.w)+'|'+x.mat;
+      g[k]=(g[k]||0)+1; });
+    const rows=Object.entries(g).sort((a,b)=>a[0].localeCompare(b[0])).map(([k,n])=>{
+      const [lbl,size,mat]=k.split('|');
+      return '<div style="display:flex;gap:10px;font-size:12px;padding:2px 0;color:var(--txt2)">'
+        +'<span style="flex:1">'+esc(lbl)+'</span>'
+        +'<span style="font-family:var(--mono)">'+esc(size)+'</span>'
+        +'<span style="color:var(--txt3);min-width:150px">'+esc(mat)+'</span>'
+        +'<span style="font-family:var(--mono);color:var(--ok)">✓ '+n+'</span></div>';
+    }).join('');
+    const box=document.createElement('div');
+    box.id='alreadyCutBox';
+    box.style.cssText='margin:0 0 14px;padding:11px 14px;border:1px solid #2f6b43;background:rgba(47,107,67,.10);border-radius:8px';
+    box.innerHTML='<div style="color:var(--ok);font-weight:700;font-size:13px;font-family:var(--mono)">✓ Already cut — left out of this plan ('+list.length+' panel'+(list.length!==1?'s':'')+')</div>'
+      +'<div style="font-size:11.5px;color:var(--txt3);margin:3px 0 7px">These are cut and stacked. The layout below is only what is still to cut.</div>'+rows;
+    const old=document.getElementById('alreadyCutBox'); if(old) old.remove();
+    ma.insertBefore(box, ma.firstChild);
+  }catch(e){}
 }
 
 // opts.dry → nest as if there were NO offcut stock, return the fresh-board tally and draw
@@ -2343,6 +2419,12 @@ function _calculateInner(opts){
   // Build base pieces array (same for all strategies)
   const allNoGrain=jobSheets.every(s=>s.grainLen===false);
   const basePieces=[];
+  // Panels already cut are not work. Re-nesting used to put them back in the pot, so the
+  // optimiser laid them out again — taking up board, and sending you to the rack for an
+  // offcut to hold panels that were already stacked by the saw. Counted down as we go, so
+  // if 4 of 6 Deck panels are cut, only 2 get nested.
+  const _exclude = (opts && opts.exclude) ? {...opts.exclude} : null;
+  const _excluded = [];
   parts.forEach(p=>{
     const ms=matchSheet(p.matName);
     let grain=effGrain(p);
@@ -2379,9 +2461,15 @@ function _calculateInner(opts){
       }
       if(grain==='W'){piece._pw=pl;piece._ph=pw;}
       else{piece._pw=pw;piece._ph=pl;}
+      // Already cut? Count it off and leave it out of the nest.
+      if(_exclude){
+        const k=String(piece.label||'')+'|'+Math.round(pl)+'x'+Math.round(pw);
+        if(_exclude[k]>0){ _exclude[k]--; _excluded.push({label:piece.label, l:pl, w:pw, mat:p.matName||''}); continue; }
+      }
       basePieces.push(piece);
     }
   });
+  window._lastExcludedCut=_excluded;
 
   // Assign stable original index to basePieces once (used for deterministic sort tie-break)
   basePieces.forEach((p,i)=>{p._origIdx=i;});
