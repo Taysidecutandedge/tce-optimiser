@@ -1195,6 +1195,9 @@ async function cloudSaveAsRevision(){
 async function cloudSaveJob(quiet){
   const name=document.getElementById('cloudJobName').value.trim()||(projectName||'Unnamed Job');
   if(!name){ if(quiet) return; return alert('Please enter a job name.'); }
+  // Which job this save is for. If you switch jobs while it's in flight, the write is
+  // abandoned rather than landing on whatever is open by the time it finishes.
+  const _saveEpoch=_jobEpoch;
   // Build compact lastResult for admin pricing panel
   // Only store what the admin needs — sheet counts per material and EB totals
   // Never store full placements (too large, not needed for pricing)
@@ -1269,6 +1272,13 @@ async function cloudSaveJob(quiet){
       +'This will create a SECOND job with that name, not update the existing one.\n\n'
       +'If you meant to update it, cancel and open it from the list first.\n\nCreate a new job anyway?')) return;
   }
+  // Did the job change while we were gathering all that up (or waiting on a confirm)? Then
+  // this save belongs to a job that is no longer open — drop it rather than write it to
+  // whichever job happens to be open now.
+  if(_saveEpoch!==_jobEpoch){
+    if(!quiet) alert('The job changed while saving, so nothing was written.\n\nOpen the job you meant and save again.');
+    return;
+  }
   try{
     // Update existing job if one was loaded, otherwise create new
     const isUpdate = !!_loadedCloudJobId;
@@ -1322,15 +1332,57 @@ function _setNestSaved(txt){
   clearTimeout(el._t); el._t=setTimeout(()=>{ el.style.display='none'; }, 6000);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ONE OWNER FOR "WHICH JOB IS OPEN"
+// ═══════════════════════════════════════════════════════════════════════════
+// Every job-bleed fault has had the same shape: a dozen variables hold pieces of the open
+// job, and each place that switches jobs has to remember to clear all of them. It never
+// does. Karl's cuts were logged as "stephen office"; both Stephen jobs showed one cutlist;
+// a brand-new list claimed 84 panels were cut; the doors job saved Karl 7's nest.
+//
+// So switching job goes through here, and here knows the whole list. Add a new piece of
+// job state? Add it to this function, and every entry point gets it for free.
+//
+// _jobEpoch ticks on every switch. Anything slow and asynchronous should capture it and
+// check it still matches before writing — if it doesn't, the job moved on and the result
+// belongs to a job that is no longer open.
+let _jobEpoch=0;
+function _resetJobState(opts){
+  const o=opts||{};
+  _jobEpoch++;
+  // The cut plan and everything derived from it
+  _lastSheets=[]; _lastUnplaced=[]; _lastEbMap={}; _lastEbGT=0; _lastEbDetail=[]; _lastBoardNeed=[];
+  // Cutting mode
+  _cmPanels=[]; _cmDone=new Set(); _cmRecut=new Set(); _cmIdx=0; _cmPrevCount=-1;
+  _cmSession=''; _cmSince=0; _cmOrphans=null;
+  _cmPublishedSheet=null; _cmFocusKey=null; _cmReview=false;
+  // Quoting basis — belongs to the nest, so it goes with it
+  _quoteBasis=null; _sheetEquiv=null;
+  // Where the job came from. cloudLoadJob repopulates these straight after.
+  if(!o.keepOrigin){ _jobContact=null; _jobSource=null; _jobRef=null; _webDoors=null; }
+  if(!o.keepCloudId){ _loadedCloudJobId=null; }
+  if(!o.keepPws){ _pwsOrder=[]; }
+  try{ clearTimeout(_autoNestTimer); }catch(e){}
+  // UI left over from the job that was open
+  try{
+    const rb=document.getElementById('nestResumeBar'); if(rb) rb.remove();
+    ['cutModeBtn','labelBtn','dxfBtn'].forEach(id=>{const el=document.getElementById(id); if(el) el.style.display='none';});
+  }catch(e){}
+  return _jobEpoch;
+}
+
 async function cloudLoadJob(id){
   try{
     const r=await fetch(SB_URL+'/rest/v1/tce_jobs?id=eq.'+id+'&select=job_data,job_name',{headers:sbAuthH()});
     const rows=await r.json();
     if(!rows||!rows[0]||!rows[0].job_data)throw new Error('Job not found');
     const d=rows[0].job_data;
+    // Switching job: wipe everything that belonged to the last one, in one place.
+    _resetJobState();
+    const _epoch=_jobEpoch;
     if(d.library)library=d.library;
-    if(d.jobSheets)jobSheets=d.jobSheets;
-    if(d.parts)parts=d.parts;
+    jobSheets=d.jobSheets||[];
+    parts=d.parts||[];
     // Set the project name. Website submissions send the company as projectName and the
     // customer's own job reference in contact.notes (e.g. "stephen office") — prefer that as
     // the project name, and remember the company so the Save dialog pre-picks the account.
@@ -1364,10 +1416,7 @@ async function cloudLoadJob(id){
       p.srcMat=(s && String(s).toLowerCase().trim()!==String(p.matName||'').toLowerCase().trim())?String(s).trim():null;
       if('srcMaterial' in p) delete p.srcMaterial;
     });
-    // Switching jobs: drop the previous job's cutting-mode state. Leaving it in memory meant
-    // the next _cmSave wrote the OLD job's panels under the NEW job's name.
-    _cmPanels=[]; _cmDone=new Set(); _cmRecut=new Set(); _cmIdx=0; _cmPrevCount=0;
-    _cmSession=''; _cmSince=0;
+    // (cutting-mode state was cleared by _resetJobState above)
     // Restore lastResult so admin panel can generate quotes without recalculating
     if(d.lastResult){
       _lastSheets=d.lastResult.sheets||[];
@@ -1675,6 +1724,7 @@ window.onload=async()=>{
     try{
       const data=JSON.parse(embedded.textContent);
       if(data&&data.jobSheets){
+        _resetJobState();   // a different job — clear the last one first
         projectName=data.projectName||'';
         library=data.library||[];
         jobSheets=data.jobSheets||[];
@@ -4320,8 +4370,10 @@ function applyImport(){
   // A fresh cutlist is a DIFFERENT job. Cut it loose from whatever was loaded before, or
   // Save quietly files it under the old job's name — which is how Karl's cutlist ended up
   // saved as "stephen office" — and the auto-save would overwrite that job outright.
-  if(_loadedCloudJobId){
-    _loadedCloudJobId=null;
+  // One call clears the lot: nest, cut ticks, session, quote basis, origin.
+  const _hadCloudJob=!!_loadedCloudJobId;
+  _resetJobState();
+  if(_hadCloudJob){
     const nb=document.getElementById('cloudJobName'); if(nb) nb.value='';
     if(typeof _setNestSaved==='function') _setNestSaved('new cutlist — name it before saving');
   }
@@ -6936,14 +6988,7 @@ function newProject(){
   jobSheets=[]; parts=[];
   jsid=1; pid=1; ci=0;
   projectName='';
-  // Drop the previous job's cutting-mode state too. Leaving it behind meant a brand-new
-  // cutlist inherited the last job's ticks — and Calculate then warned that 84 panels of a
-  // list you'd only just typed were already cut.
-  _cmPanels=[]; _cmDone=new Set(); _cmRecut=new Set(); _cmIdx=0; _cmPrevCount=-1;
-  _cmSession=''; _cmSince=0; _cmOrphans=null;
-  _lastSheets=[]; _lastUnplaced=[];
-  const _nrb=document.getElementById('nestResumeBar'); if(_nrb) _nrb.remove();
-  ['cutModeBtn','labelBtn','dxfBtn'].forEach(id=>{const el=document.getElementById(id); if(el) el.style.display='none';});
+  _resetJobState();   // nest, cut ticks, session, quote basis, origin — the lot
   document.getElementById('projectNameInput').value='';
   save();
   renderJobSheets(); renderParts();
@@ -7023,6 +7068,7 @@ function loadJob(){
         if(!data||!data.jobSheets||!data.parts)
           return alert('Invalid file — please use a file saved from this optimiser.');
 
+        _resetJobState();   // a different job — clear the last one first
         projectName=data.projectName||'';
         library=data.library||[];
         jobSheets=data.jobSheets||[];
