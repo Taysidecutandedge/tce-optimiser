@@ -457,7 +457,7 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
 // says so. A device can run week-old code while you are told a fix is live. So the app asks
 // the server what the current build is and says plainly when it is behind. It never reloads
 // by itself — that is your call, not the app's.
-const TCE_BUILD='2026-10-07-e';
+const TCE_BUILD='2026-10-07-f';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -1501,7 +1501,17 @@ async function buildQuote() {
   Object.entries(matData).forEach(([mat, data]) => {
     if (shaker.pureDoorMats.has(mat)) return;   // priced as shaker doors below
     const _hasEb = data.ebByThk && Object.keys(data.ebByThk).length;
-    if (!data.sheets && !_hasEb && !data.ebMmLam) return;
+    // What this material is actually charged on. Worked out HERE, before deciding whether the
+    // material is worth a section at all — because the old test looked only at the nest's own
+    // sheet count, and a board whose panels were all cut already has a nest count of nil. The
+    // 18mm MDF on Linsey had a sheet equivalent of 4 and a glue-up of 2 panels sitting in the
+    // job, and this line threw the whole board away before either was read. The fix this
+    // morning put the right numbers in the data; they were being dropped one step later.
+    const _seV = _lookupMat((jobData&&jobData.sheetEquiv)||null, mat);
+    const _qbV = _lookupMat((jobData&&jobData.quoteBasis)||null, mat);
+    const _shtsAuto = (_seV!=null) ? _seV : (_qbV!=null) ? _qbV : data.sheets;
+    const _hasLam = (data.lamN>0) || (data.lamM2>0);
+    if (!_shtsAuto && !_hasEb && !data.ebMmLam && !_hasLam) return;
     const ov = _quoteOverrides[mat] || {};
     const autoPrice = lookupBoardPrice(mat, tier);
     const boardPrice = ov.boardPrice !== undefined ? ov.boardPrice : (autoPrice ?? 0);
@@ -1564,10 +1574,7 @@ async function buildQuote() {
     // boards, because nine offcuts is not nine sheets' worth of sawing either.
     const se=(jobData&&jobData.sheetEquiv)||null;
     const qb=(jobData&&jobData.quoteBasis)||null;
-    const _seV=_lookupMat(se, mat), _qbV=_lookupMat(qb, mat);
-    const shts=(_seV!=null) ? _seV
-             : (_qbV!=null) ? _qbV
-             : data.sheets;
+    const shts=_shtsAuto;   // worked out at the top of the loop, where the skip test needs it
     // Remember the un-edited figures for this material before the overrides are applied.
     _gateBasis[mat] = {shts, autoPrice, autoCut: cutRateForMat(mat, jobData, tier)};
     // Boards and cutting get their own counts. On offcut work you can bill nil material
@@ -2405,7 +2412,13 @@ function printQuote(opts) {
   Object.entries(matData).forEach(([mat,data])=>{
     if(shaker.pureDoorMats.has(mat)) return;
     const _hasEb=data.ebByThk&&Object.keys(data.ebByThk).length;
-    if(!data.sheets&&!_hasEb&&!data.ebMmLam) return;
+    // Same test as the on-screen quote, and for the same reason: a board whose panels are all
+    // cut already has a nest count of nil, and judging it on that dropped it off the PDF too.
+    const _seV=_lookupMat((jobData&&jobData.sheetEquiv)||null, mat);
+    const _qbV=_lookupMat((jobData&&jobData.quoteBasis)||null, mat);
+    const _shtsAuto=(_seV!=null)?_seV:(_qbV!=null)?_qbV:data.sheets;
+    const _hasLam=(data.lamN>0)||(data.lamM2>0);
+    if(!_shtsAuto&&!_hasEb&&!data.ebMmLam&&!_hasLam) return;
     const ov=_quoteOverrides[mat]||{};
     const autoPrice=lookupBoardPrice(mat,tier);
     const boardPrice=ov.boardPrice!==undefined?ov.boardPrice:(autoPrice??0);
@@ -2442,10 +2455,7 @@ function printQuote(opts) {
     const qb=(jobData&&jobData.quoteBasis)||null;
     // Sheet equivalent first, same as the on-screen quote — the two must never disagree.
     const se=(jobData&&jobData.sheetEquiv)||null;
-    const _seV=_lookupMat(se, mat), _qbV=_lookupMat(qb, mat);
-    const shts=(_seV!=null) ? _seV
-             : (_qbV!=null) ? _qbV
-             : data.sheets;
+    const shts=_shtsAuto;   // worked out at the top of the loop, where the skip test needs it
     const bShts = ov.boardSheets!=null ? ov.boardSheets : shts;
     const cShts = ov.cutSheets  !=null ? ov.cutSheets   : shts;
     const boardBase=bShts*boardPrice;
