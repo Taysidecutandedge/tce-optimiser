@@ -687,7 +687,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-10-07-d';
+const TCE_BUILD='2026-10-07-e';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -1284,6 +1284,9 @@ async function cloudSaveJob(quiet){
         id:p.id,pid:p.pid}))
     })),
     ebMap: _lastEbMap || {},
+    // Edging for the WHOLE job when the plan on screen is only part of it (already-cut panels
+    // left out, or offcuts standing in for board). Null when the plan is the whole job.
+    ebMapFull: _ebMapFull || null,
     // Parts that wouldn't fit on any board. Saved so the admin's readiness check can say the
     // quote is short of the cutlist — before it was only ever visible on this screen.
     unplaced: (_lastUnplaced||[]).map(p=>({label:p.label, l:p.origL||p.l, w:p.origW||p.w, matName:p.matName||p.material||''})),
@@ -1407,7 +1410,7 @@ function _resetJobState(opts){
   _cmSession=''; _cmSince=0; _cutResetAt=0; _cmOrphans=null;
   _cmPublishedSheet=null; _cmFocusKey=null; _cmReview=false;
   // Quoting basis — belongs to the nest, so it goes with it
-  _quoteBasis=null; _sheetEquiv=null;
+  _quoteBasis=null; _sheetEquiv=null; _ebMapFull=null;
   // Where the job came from. cloudLoadJob repopulates these straight after.
   if(!o.keepOrigin){ _jobContact=null; _jobSource=null; _jobRef=null; _webDoors=null; }
   if(!o.keepCloudId){ _loadedCloudJobId=null; }
@@ -1471,6 +1474,7 @@ async function cloudLoadJob(id){
     if(d.lastResult){
       _lastSheets=d.lastResult.sheets||[];
       _lastEbMap=d.lastResult.ebMap||{};
+      _ebMapFull=d.lastResult.ebMapFull||null;
       // If the saved copy carries the real layout, this job is ready to cut as it stands —
       // put it straight back on screen so nobody is pushed into a re-nest to get going.
       // …but only if that saved layout is actually made of this job's parts. Jobs saved
@@ -2408,6 +2412,42 @@ function _renderAlreadyCut(){
   }catch(e){}
 }
 
+// How much tape this layout needs, per tape type. Pulled out of the render so the dry run can
+// use the very same arithmetic: the plan on screen is only the work that's LEFT, so its edging
+// is only the edging that's left, and a quote built on it charges for none of the tape already
+// run. On Linsey Rev 5 that was 135m of oak down to 3m, plus both Mdf Card lines gone entirely.
+// Shorten a sheet name to its code (strip the thickness suffix and supplier words).
+// Top level, not inside the function below: the edging summary further down calls it too, and
+// it used to live inside the render where both could see it.
+function ebSheetCode(name){
+  let s=String(name||'').replace(/\s*\d+(\.\d+)?mm\s*$/i,'').trim();
+  return s.replace(/^(egger|kronospan|pfleiderer|sonae|swiss)\s+/i,'').trim();
+}
+function _ebTotalsFor(sheets){
+  const ebMap={}; let ebGT=0; const ebDet={};
+  (sheets||[]).forEach(s=>(s.placements||[]).forEach(p=>{
+    if(!p.eb) return;
+    const isLam=/·LAM/.test(p.label||'');   // doubled-up panel → needs wider tape, list it separately
+    ['L1','L2','W1','W2'].forEach(side=>{
+      if(!p.eb[side])return;
+      const isLong=(side==='L1'||side==='L2');
+      const len=isLong?(Number(p.origL)||0):(Number(p.origW)||0);
+      // MDF (not veneered) is edged with your generic Mdf Card 0.6mm tape and tracked
+      // against the "Mdf Card" rolls — it is NOT decor-matched like the Egger boards.
+      const _isMdf=/\bmdf\b/i.test(s.name)&&!/\b(oak|walnut|veneer|birch|ply|melamine|hpl|laminate|valch|sonoma)\b/i.test(s.name);
+      const tk=_isMdf?'0.6':((p.eb.tk&&p.eb.tk[side])||'1');
+      const _decorRaw=_isMdf?'Mdf Card':s.name;                       // used to match your rolls
+      const _decorDisp=_isMdf?'Mdf Card':ebSheetCode(s.name);         // shown in the panel
+      const key=`${tk}mm · ${_decorDisp}${isLam?' · LAMINATED (wide tape)':''}`;
+      ebMap[key]=(ebMap[key]||0)+len; ebGT+=len;
+      const dk=tk+'|'+_decorRaw+(isLam?'|LAM':'');
+      if(!ebDet[dk]) ebDet[dk]={decor:_decorRaw+(isLam?' (laminated)':''),tk,lenMm:0,count:0};
+      ebDet[dk].lenMm+=len; ebDet[dk].count++;
+    });
+  }));
+  return {ebMap, ebGT, ebDet};
+}
+
 // opts.dry → nest as if there were NO offcut stock, return the fresh-board tally and draw
 // nothing. That tally is the SHEET EQUIVALENT: what this job needs off new board, which is
 // what the customer is quoted, however it actually got cut. Works out on its own instead of
@@ -3133,7 +3173,9 @@ function _calculateInner(opts){
   if(_dry){
     const tally={};
     best.sheets.forEach(s=>{ if(!s._isOffcut) tally[s.name]=(tally[s.name]||0)+1; });
-    return {tally, unplaced:best.unplaced.length};
+    // The sheets go back too. This run is the WHOLE job — nothing excluded, no offcuts — so
+    // its edging and glue-up totals are the ones the customer should be charged for.
+    return {tally, unplaced:best.unplaced.length, sheets:best.sheets};
   }
   window._lastUsedOffcuts=Object.values(_usedOff);
   _validateNest(best.sheets);
@@ -3157,10 +3199,16 @@ function _computeSheetEquiv(){
     if(!usedOffcuts && !keepExcluded.length){
       const t={}; (_lastSheets||[]).forEach(s=>{ t[s.name]=(t[s.name]||0)+1; });
       _sheetEquiv=Object.keys(t).length?t:null;
+      _ebMapFull=null;   // the plan IS the whole job, so its own edging is already right
     } else {
       // Whole job, offcuts ignored, nothing excluded -- what the customer is charged for.
       const res=_calculateInner({dry:true});
       _sheetEquiv=(res&&res.tally&&Object.keys(res.tally).length)?res.tally:null;
+      // Boards were never the only thing the exclusion took off the quote. Edging comes off the
+      // nest too, so a plan holding one uncut panel carried one panel's worth of tape. Keep the
+      // whole-job figure alongside the sheet count and let the admin price from it.
+      const _full=(res&&res.sheets)?_ebTotalsFor(res.sheets).ebMap:null;
+      _ebMapFull=(_full&&Object.keys(_full).length)?_full:null;
     }
     // The dry run above overwrote the excluded list with its own (empty) one. The green
     // "already cut" box reads that list and is rendered after us, so put it back.
@@ -3347,6 +3395,7 @@ async function undoOffcutsUsed(btn){
 }
 let _quoteBasis=null;
 let _sheetEquiv=null;   // fresh-board count worked out with offcuts ignored — what the customer is quoted   // per-material FRESH board count with offcuts OFF — the customer quote is priced from this, so offcuts never affect it
+let _ebMapFull=null;    // whole-job edging, for when the plan on screen is only the remaining work
 function renderResults(sheets,unplaced){
   // Store for print
   _lastSheets=sheets; _lastUnplaced=unplaced;
@@ -3388,34 +3437,7 @@ function renderResults(sheets,unplaced){
   const placed=sheets.reduce((a,s)=>a+s.placements.length,0);
 
   // EB totals keyed by thickness only (for ordering — you don't care which side, just total per tape type)
-  // Helper: shorten sheet name to code only (strip thickness suffix, supplier words)
-  const ebSheetCode=name=>{
-    // Strip trailing thickness e.g. "18mm", "25mm"
-    let s=name.replace(/\s*\d+(\.\d+)?mm\s*$/i,'').trim();
-    // Strip leading supplier words e.g. "Egger ", "Kronospan "
-    s=s.replace(/^(egger|kronospan|pfleiderer|sonae|swiss)\s+/i,'').trim();
-    return s;
-  };
-  const ebMap={};let ebGT=0; const ebDet={};
-  sheets.forEach(s=>s.placements.forEach(p=>{
-    const isLam=/·LAM/.test(p.label||'');   // doubled-up panel → needs wider tape, list it separately
-    ['L1','L2','W1','W2'].forEach(side=>{
-      if(!p.eb[side])return;
-      const isLong=(side==='L1'||side==='L2');
-      const len=isLong?(Number(p.origL)||0):(Number(p.origW)||0);
-      // MDF (not veneered) is edged with your generic Mdf Card 0.6mm tape and tracked
-      // against the "Mdf Card" rolls — it is NOT decor-matched like the Egger boards.
-      const _isMdf=/\bmdf\b/i.test(s.name)&&!/\b(oak|walnut|veneer|birch|ply|melamine|hpl|laminate|valch|sonoma)\b/i.test(s.name);
-      const tk=_isMdf?'0.6':(p.eb.tk[side]||'1');
-      const _decorRaw=_isMdf?'Mdf Card':s.name;                       // used to match your rolls
-      const _decorDisp=_isMdf?'Mdf Card':ebSheetCode(s.name);         // shown in the panel
-      const key=`${tk}mm · ${_decorDisp}${isLam?' · LAMINATED (wide tape)':''}`;
-      ebMap[key]=(ebMap[key]||0)+len;ebGT+=len;
-      const dk=tk+'|'+_decorRaw+(isLam?'|LAM':'');
-      if(!ebDet[dk]) ebDet[dk]={decor:_decorRaw+(isLam?' (laminated)':''),tk,lenMm:0,count:0};
-      ebDet[dk].lenMm+=len; ebDet[dk].count++;
-    });
-  }));
+  const {ebMap, ebGT, ebDet} = _ebTotalsFor(sheets);
   _lastEbMap=ebMap; _lastEbGT=ebGT; _lastEbDetail=Object.values(ebDet);
 
   const _uo=window._lastUsedOffcuts||[];

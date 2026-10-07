@@ -457,7 +457,7 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
 // says so. A device can run week-old code while you are told a fix is live. So the app asks
 // the server what the current build is and says plainly when it is behind. It never reloads
 // by itself — that is your call, not the app's.
-const TCE_BUILD='2026-10-07-d';
+const TCE_BUILD='2026-10-07-e';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -1403,7 +1403,14 @@ function _matDataFor(jobData){
   });
   // A board can carry edging in several tape thicknesses (e.g. 1mm AND 2mm oak veneer).
   // Split by thickness so each gets its own priced line/rate — none gets lumped or dropped.
-  Object.entries(jobData.lastResult.ebMap||{}).forEach(([key,mm])=>{
+  // ebMapFull is the whole job's edging, saved by the optimiser whenever the plan it drew was
+  // only part of the job — already-cut panels left out, or offcuts standing in for board. The
+  // plan's own ebMap is then the tape still to run, which is a cutting figure, not a charging
+  // one. Rev 5 priced 3.2m of oak where the job needs 135m, and lost both Mdf Card lines, for
+  // exactly this reason. Fall back to ebMap when there's no full figure (every older job).
+  const _ebSrc = (jobData.lastResult.ebMapFull && Object.keys(jobData.lastResult.ebMapFull).length)
+               ? jobData.lastResult.ebMapFull : (jobData.lastResult.ebMap||{});
+  Object.entries(_ebSrc).forEach(([key,mm])=>{
     const isLam=/LAMINATED/i.test(key);
     let mat=key.split(' · ').slice(1).join(' · ');
     if(isLam) mat=mat.replace(/\s*·\s*LAMINATED.*$/i,'').trim();
@@ -1809,6 +1816,22 @@ async function buildQuote() {
     // Parts that wouldn't fit any board. They're in the cutlist but not in this quote.
     const unp = (jobData.lastResult && jobData.lastResult.unplaced) || [];
     if(unp.length) gBlock(`<b>${unp.length} part${unp.length!==1?'s':''} couldn't be nested</b> — they're in the cutlist but not priced here.`);
+    // ── gate: the plan is only part of the job ──
+    // The catch-all behind the two specific ones above. Everything the quote charges for
+    // except glue-up is read off the nest, so a plan that holds only the remaining work
+    // quietly under-quotes everything at once — boards, cutting and tape together. The
+    // optimiser now saves whole-job figures when it holds panels back; a job saved before
+    // it did, or re-nested on an older build, has no such figures and must not go out.
+    try{
+      const _lr=jobData.lastResult||{};
+      const _placed=(_lr.sheets||[]).reduce((n,s)=>n+((s.placements||[]).length),0);
+      const _wanted=(jobData.parts||[]).reduce((n,p)=>n+Math.max(1,parseInt(p.qty)||1),0);
+      const _hasFull=!!(_lr.ebMapFull&&Object.keys(_lr.ebMapFull).length)||!!jobData.sheetEquiv;
+      if(_wanted>0 && _placed>0 && _placed < _wanted*0.9 && !_hasFull)
+        gBlock(`The saved plan lays out <b>${_placed} of ${_wanted} panels</b> — it's the work still to cut, not the whole job,`
+          +` and the quote reads its boards, cutting and edging off it. Open the job in the optimiser,`
+          +` press Calculate and save, so the whole-job figures are worked out.`);
+    }catch(e){}
     // TBC anywhere in the part labels or the job's own notes.
     const tbc = (jobData.parts||[]).filter(p=>/\bTBC\b|to be confirmed/i.test(p.label||''));
     if(tbc.length) gBlock(`<b>${tbc.length} part${tbc.length!==1?'s':''} marked TBC</b> — e.g. "${_attr((tbc[0].label||'').slice(0,60))}".`);
