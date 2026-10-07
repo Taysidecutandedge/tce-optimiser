@@ -457,7 +457,7 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
 // says so. A device can run week-old code while you are told a fix is live. So the app asks
 // the server what the current build is and says plainly when it is behind. It never reloads
 // by itself — that is your call, not the app's.
-const TCE_BUILD='2026-10-06-d';
+const TCE_BUILD='2026-10-07-a';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -2041,9 +2041,9 @@ Tayside Cut & Edge
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.66);z-index:9000;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:36px 16px';
   ov.innerHTML=`
     <div style="background:#0f2620;border:1px solid #2b4a40;border-radius:12px;max-width:680px;width:100%;padding:20px 22px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div style="position:sticky;top:0;z-index:2;background:#0f2620;display:flex;justify-content:space-between;align-items:center;margin:-20px -22px 14px;padding:16px 22px 12px;border-bottom:1px solid #1e3530">
         <div style="font-size:16px;font-weight:600;color:#f0a500">Send pack — ${_attr(jobName)}</div>
-        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('sendPackOv').remove()">✕ Close</button>
+        <button class="btn btn-secondary btn-sm" onclick="_spClose()">✕ Close</button>
       </div>
       ${gateHtml}
       ${step(1,'Print the quote','🖨 Quote','printQuote()','Save as PDF from the print dialog.')}
@@ -2084,9 +2084,18 @@ Tayside Cut & Edge
       </div>
     </div>`;
   document.body.appendChild(ov);
-  ov.addEventListener('click',e=>{ if(e.target===ov) ov.remove(); });
+  ov.addEventListener('click',e=>{ if(e.target===ov) _spClose(); });
+  document.addEventListener('keydown',_spEsc);
   _spWireDrop();
 }
+// Closing it must never depend on finding a button. The Close button used to scroll off the
+// top of a tall panel, leaving the whole admin unusable behind an overlay with no visible way
+// out — which looked like "I can't edit customers any more".
+function _spClose(){
+  const ov=document.getElementById('sendPackOv'); if(ov) ov.remove();
+  document.removeEventListener('keydown',_spEsc);
+}
+function _spEsc(e){ if(e.key==='Escape') _spClose(); }
 
 // ── Attachments ─────────────────────────────────────────────────────────────
 // Held as base64 so they can be posted to the send function. Cleared when the panel closes.
@@ -2760,17 +2769,17 @@ function renderCustomers() {
             <input type="text" value="${c.email||''}" id="ce-email-${c.id}" style="width:100%;background:#0d1f1a;border:1px solid #2b4a40;border-radius:5px;color:#e8f0ec;padding:6px 8px;font-size:12px">
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:10px">
+        <!-- "Cut Rate Override" was removed. It wrote to a column that does not exist, so every
+             save failed with a 400 — and even if it had saved, nothing read it: cut rates come
+             from the rates table by sheet size and tier, and per-customer markup lives in the
+             Markup by material type panel below. A box that changes nothing is worse than no box. -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">
           <div>
             <label style="font-size:11px;color:#8ab;display:block;margin-bottom:3px">Tier</label>
             <select id="ce-tier-${c.id}" style="width:100%;background:#0d1f1a;border:1px solid #2b4a40;border-radius:5px;color:#e8f0ec;padding:6px 8px;font-size:12px">
               <option value="retail" ${(c.tier||'retail')==='retail'?'selected':''}>Retail</option>
               <option value="trade" ${c.tier==='trade'?'selected':''}>Trade (+7%)</option>
             </select>
-          </div>
-          <div>
-            <label style="font-size:11px;color:#8ab;display:block;margin-bottom:3px">Cut Rate Override (£/sheet)</label>
-            <input type="number" step="0.01" value="${c.default_cut_rate||''}" placeholder="Use default" id="ce-cut-${c.id}" style="width:100%;background:#0d1f1a;border:1px solid #2b4a40;border-radius:5px;color:#e8f0ec;padding:6px 8px;font-size:12px">
           </div>
           <div>
             <label style="font-size:11px;color:#8ab;display:block;margin-bottom:3px">Phone</label>
@@ -2809,8 +2818,7 @@ async function saveCustomerEdit(id) {
     phone: document.getElementById('ce-phone-'+id).value || null,
     tier: document.getElementById('ce-tier-'+id).value,
     markup_pct: document.getElementById('ce-tier-'+id).value==='trade' ? 7 : 0,
-    notes: document.getElementById('ce-notes-'+id).value || null,
-    default_cut_rate: parseFloat(document.getElementById('ce-cut-'+id).value) || null
+    notes: document.getElementById('ce-notes-'+id).value || null
   };
   try {
     await sbFetch(`tce_customers?id=eq.${id}`, {method:'PATCH', headers:{'Prefer':'return=minimal'}, body:payload});
