@@ -687,7 +687,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-10-07-a';
+const TCE_BUILD='2026-10-07-b';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -3120,15 +3120,33 @@ function _calculateInner(opts){
 // nest actually used offcuts — otherwise the nest on screen IS the fresh-board answer.
 function _computeSheetEquiv(){
   try{
+    // The plan on screen is only the work that is LEFT. Copying its sheet count straight into
+    // the quote basis is safe ONLY when nothing was held back from it -- no offcut standing in
+    // for fresh board, and nothing left out for being cut already.
+    //
+    // Miss the second case and a whole material drops off the quote. Linsey V4 Rev 4: the three
+    // MDF worktops were cut on the Monday, so Tuesday's re-nest correctly left them out -- and
+    // with them went the only MDF in the plan. Sheet equivalent came back {oak: 7}, the admin
+    // found no MDF figure, fell back to the nest count of nil, and the customer was about to be
+    // charged for no MDF board at all on worktops that were already cut and stacked.
+    const keepExcluded=(window._lastExcludedCut||[]).slice();
     const usedOffcuts=(_lastSheets||[]).some(s=>s._isOffcut);
-    if(!usedOffcuts){
+    if(!usedOffcuts && !keepExcluded.length){
       const t={}; (_lastSheets||[]).forEach(s=>{ t[s.name]=(t[s.name]||0)+1; });
       _sheetEquiv=Object.keys(t).length?t:null;
     } else {
+      // Whole job, offcuts ignored, nothing excluded -- what the customer is charged for.
       const res=_calculateInner({dry:true});
       _sheetEquiv=(res&&res.tally&&Object.keys(res.tally).length)?res.tally:null;
     }
-    if(_sheetEquiv){ _quoteBasis=_quoteBasis||_sheetEquiv; try{ _saveNest(); }catch(e){} }
+    // The dry run above overwrote the excluded list with its own (empty) one. The green
+    // "already cut" box reads that list and is rendered after us, so put it back.
+    window._lastExcludedCut=keepExcluded;
+    // Never let a stale basis win over a fresh one. The old "first one wins" rule was there to
+    // protect a good figure from being overwritten by a nest run with offcuts on -- but the dry
+    // run already handles that, and keeping the first answer meant a basis worked out before
+    // parts were added or changed stayed on the quote for good.
+    if(_sheetEquiv){ _quoteBasis=_sheetEquiv; try{ _saveNest(); }catch(e){} }
     renderSheetEquiv();
   }catch(e){}
 }

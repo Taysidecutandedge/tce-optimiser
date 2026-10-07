@@ -457,7 +457,7 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
 // says so. A device can run week-old code while you are told a fix is live. So the app asks
 // the server what the current build is and says plainly when it is behind. It never reloads
 // by itself — that is your call, not the app's.
-const TCE_BUILD='2026-10-07-a';
+const TCE_BUILD='2026-10-07-b';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -1557,6 +1557,17 @@ async function buildQuote() {
     // This is the one that cost £669 on Linsey Rev 3: offcuts counted as fresh boards.
     if(offN && !(se && se[mat]!=null) && !(qb && qb[mat]!=null))
       gBlock(`<b>${mat}</b> used ${offN} offcut${offN!==1?'s':''} but has no sheet equivalent — the ${shts} sheet${shts!==1?'s':''} being charged is the nest count, not the fresh-board requirement. Re-calculate in the optimiser.`);
+    // ── gate: a board in the job with no boards to charge for ──
+    // Parts on this material but nil sheets means the quote is giving the material away. It
+    // happens when every panel on that board was already cut, so the latest nest left them
+    // out and the board vanished from the plan — Linsey V4 Rev 4 and its MDF worktops.
+    if(!(shts>0) && ov.boardSheets==null){
+      const _np=(jobData.parts||[]).filter(p=>(p.matName||'')===mat)
+                                   .reduce((n,p)=>n+Math.max(1,parseInt(p.qty)||1),0);
+      if(_np>0) gBlock(`<b>${mat}</b> has ${_np} part${_np!==1?'s':''} in the job but <b>no boards counted</b>, so it's being charged at nil material.`
+        +` Usually this means those panels are already cut, so the latest nest left them out.`
+        +` Re-calculate in the optimiser, or type the sheet count in.`);
+    }
     const boardBase = bShts * boardPrice;
     const boardTotal = surcharge ? boardBase * 1.08 : boardBase;
     const cutTotal = cShts * cutRate;
