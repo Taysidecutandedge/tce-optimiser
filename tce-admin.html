@@ -457,7 +457,7 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
 // says so. A device can run week-old code while you are told a fix is live. So the app asks
 // the server what the current build is and says plainly when it is behind. It never reloads
 // by itself — that is your call, not the app's.
-const TCE_BUILD='2026-10-07-b';
+const TCE_BUILD='2026-10-07-d';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -1955,6 +1955,7 @@ async function loadSavedQuotes(jobId) {
           <td style="text-align:right">£${parseFloat(q.total_inc_vat).toFixed(2)}</td>
           <td style="text-align:right;white-space:nowrap">${lines&&lines.length
             ? `<button class="btn btn-secondary btn-sm" onclick="viewSavedQuote('${q.id}')" title="See it exactly as you sent it">👁 ${lines.length} lines</button>`
+              +`<button class="btn btn-secondary btn-sm" onclick="compareSavedQuote('${q.id}')" title="Line by line: what you saved against what the job would price today">⇄ Compare</button>`
             : '<span style="font-size:11px;color:#6b8f7e" title="Saved before line detail was recorded">totals only</span>'}
             <button class="btn btn-secondary btn-sm" onclick="restoreSavedQuote('${q.id}')" title="Load this quote back in so you can amend it and save a new version">↩ Reopen</button></td>
         </tr>`;}).join('')}
@@ -1976,7 +1977,8 @@ function restoreSavedQuote(id){
   const stored=parseFloat(q.total_ex_vat)||0;
   if(!confirm(`Reopen the quote saved ${new Date(q.created_at).toLocaleDateString('en-GB')} (£${stored.toFixed(2)} ex-VAT)?\n\n`
     +`Its customer, tier and all your overrides come back.\n`
-    +`Lines re-price at today's rates, so the total may differ — the saved copy isn't changed.`)) return;
+    +`Lines re-price at today's rates, so the total may differ — the saved copy isn't changed.\n\n`
+    +`Only checking what you sent? Cancel and use 👁 (as sent) or ⇄ Compare instead.`)) return;
   _quoteOverrides = JSON.parse(JSON.stringify(qd.overrides||{}));
   // Put the sheet counts back as they were when this quote was priced. They live on the job,
   // not the quote, so a re-nest since then has already changed them — and a quote you've sent
@@ -2013,6 +2015,92 @@ function restoreSavedQuote(id){
     else showToast('Quote reopened ✓');
   },50);
 }
+// ── Compare a saved quote with what the job would price today ──
+// Reopening re-prices, which is right when you're revising and wrong when you're checking.
+// This is the checking tool: nothing is changed, nothing is loaded, it just lays the quote you
+// saved beside today's and says what moved and by how much. Every line is accounted for —
+// gone, new, or changed — so a difference can't hide in a line that doesn't appear.
+function compareSavedQuote(id){
+  const q=_savedQuotes.find(x=>String(x.id)===String(id)); if(!q) return;
+  const was=((q.quote_data||{}).lines)||[];
+  const now=Array.isArray(_quoteLines)?_quoteLines:[];
+  if(!now.length){ alert('Build the quote on screen first — there\'s nothing to compare against yet.'); return; }
+  const key=l=>String(l.group||'')+' ‖ '+String(l.item||'');
+  const A={}, B={};
+  was.forEach(l=>{ const k=key(l); A[k]=A[k]||{group:l.group,item:l.item,detail:l.detail,total:0}; A[k].total+=(+l.total||0); });
+  now.forEach(l=>{ const k=key(l); B[k]=B[k]||{group:l.group,item:l.item,detail:l.detail,total:0}; B[k].total+=(+l.total||0); });
+  const keys=[...new Set([...Object.keys(A),...Object.keys(B)])]
+    .sort((a,b)=>a.localeCompare(b));
+  let body='', lastG='', nCh=0;
+  keys.forEach(k=>{
+    const a=A[k], b=B[k];
+    const wasT=a?a.total:null, nowT=b?b.total:null;
+    const diff=(nowT||0)-(wasT||0);
+    const same=(a&&b&&Math.abs(diff)<0.005);
+    if(!same) nCh++;
+    const g=(a||b).group||'', it=(a||b).item||'';
+    if(g!==lastG){ body+=`<tr class="g"><td colspan="5">${_attr(g)}</td></tr>`; lastG=g; }
+    const tag = !a ? '<span class="n">NEW</span>' : !b ? '<span class="x">GONE</span>' : same ? '' : '<span class="c">CHANGED</span>';
+    body+=`<tr class="${same?'':'hi'}">
+      <td>${_attr(it)} ${tag}</td>
+      <td class="d">${_attr((a&&a.detail)||'')}</td>
+      <td class="r">${wasT==null?'—':'£'+wasT.toFixed(2)}</td>
+      <td class="r">${nowT==null?'—':'£'+nowT.toFixed(2)}</td>
+      <td class="r ${diff>0.005?'up':diff<-0.005?'dn':''}">${same?'':(diff>=0?'+':'−')+'£'+Math.abs(diff).toFixed(2)}</td></tr>`;
+  });
+  const wasTot=was.reduce((n,l)=>n+(+l.total||0),0);
+  const nowTot=now.reduce((n,l)=>n+(+l.total||0),0);
+  // The sheet counts are the usual reason a total moves, and they live on the job rather than
+  // on the quote, so they get their own section instead of being inferred from the money.
+  const sb=(q.quote_data||{}).basis||null;
+  let basisHtml='';
+  if(sb && Object.keys(sb).length){
+    const mats=[...new Set([...Object.keys(sb),...Object.keys(_gateBasis||{})])].sort();
+    const rows=mats.map(m=>{
+      const a=sb[m]?sb[m].shts:null, b=(_gateBasis||{})[m]?_gateBasis[m].shts:null;
+      const ch=(a!==b);
+      return `<tr class="${ch?'hi':''}"><td>${_attr(m)}</td><td class="r">${a==null?'—':a}</td>
+              <td class="r">${b==null?'not in the plan now':b}</td></tr>`;
+    }).join('');
+    basisHtml=`<h3>Sheet counts it was priced on</h3>
+      <table><thead><tr><th>Board</th><th class="r">Saved</th><th class="r">Today</th></tr></thead><tbody>${rows}</tbody></table>`;
+  } else {
+    basisHtml=`<p class="note">This quote was saved before sheet counts were recorded, so only the money can be compared.</p>`;
+  }
+  const w=window.open('','_blank','width=900,height=820');
+  w.document.write(`<html><head><meta charset="utf-8"><title>Compare — ${_attr(q.job_name)}</title><style>
+    body{font-family:Arial;background:#0d1f1a;color:#e8f0ec;padding:22px;font-size:13px}
+    h2{margin:0 0 2px;font-size:17px} h3{margin:20px 0 6px;font-size:14px;color:#9fc}
+    .sub{color:#6b8f7e;font-size:12px;margin-bottom:14px}
+    table{width:100%;border-collapse:collapse;margin-top:4px}
+    th{text-align:left;font-size:11px;color:#6b8f7e;border-bottom:1px solid #2b4a40;padding:5px 6px}
+    td{padding:5px 6px;border-bottom:1px solid #16342c;vertical-align:top}
+    .r{text-align:right;white-space:nowrap} .d{color:#6b8f7e;font-size:11.5px}
+    tr.g td{background:#12302a;color:#9fc;font-weight:700;font-size:12px}
+    tr.hi td{background:rgba(240,165,0,.09)}
+    .up{color:#e8a33c} .dn{color:#5fc08a}
+    .n,.c,.x{font-size:10px;border-radius:3px;padding:0 4px;white-space:nowrap}
+    .n{color:#5fc08a;border:1px solid #2f6b43}
+    .c{color:#e8a33c;border:1px solid #6b5420}
+    .x{color:#e06a6a;border:1px solid #6b2f2f}
+    .tot{margin-top:18px;padding:12px 14px;background:#12302a;border-radius:8px;font-size:14px}
+    .note{color:#6b8f7e;font-size:12px}
+  </style></head><body>
+    <h2>${_attr(q.job_name||'')}</h2>
+    <div class="sub">Quote saved ${new Date(q.created_at).toLocaleString('en-GB')} · ${_attr(q.customer_name||'no customer')} · ${_attr(q.customer_tier||'')}
+      <br>Compared against the quote on screen now. Nothing here changes either one.</div>
+    ${basisHtml}
+    <h3>Lines — ${nCh?nCh+' changed':'nothing changed'}</h3>
+    <table><thead><tr><th>Item</th><th>Detail (as saved)</th><th class="r">Saved</th><th class="r">Today</th><th class="r">Difference</th></tr></thead>
+    <tbody>${body}</tbody></table>
+    <div class="tot">Saved total <b>£${wasTot.toFixed(2)}</b> &nbsp;→&nbsp; today <b>£${nowTot.toFixed(2)}</b>
+      &nbsp;&nbsp;<span class="${nowTot-wasTot>0.005?'up':nowTot-wasTot<-0.005?'dn':''}">
+      ${Math.abs(nowTot-wasTot)<0.005?'no change':(nowTot-wasTot>=0?'+':'−')+'£'+Math.abs(nowTot-wasTot).toFixed(2)}</span>
+      <div class="note" style="margin-top:5px">Ex-VAT, from the line detail. The figure stored on the saved quote was £${(parseFloat(q.total_ex_vat)||0).toFixed(2)}.</div>
+    </div>
+  </body></html>`);
+  w.document.close();
+}
 // Show a saved quote exactly as it was priced, not as today's rates would redraw it.
 function viewSavedQuote(id){
   const q=_savedQuotes.find(x=>String(x.id)===String(id)); if(!q) return;
@@ -2024,7 +2112,7 @@ function viewSavedQuote(id){
       <td></td><td class="r">£${(l.total||0).toFixed(2)}</td></tr>`;
   });
   const w=window.open('','_blank','width=760,height=760');
-  w.document.write(`<html><head><title>Quote ${_attr(q.job_name)} — ${new Date(q.created_at).toLocaleDateString('en-GB')}</title>
+  w.document.write(`<html><head><meta charset="utf-8"><title>Quote ${_attr(q.job_name)} — ${new Date(q.created_at).toLocaleDateString('en-GB')}</title>
   <style>body{font-family:Arial;background:#0d1f1a;color:#e8f0ec;padding:22px}
   table{width:100%;border-collapse:collapse;font-size:13px}
   td{padding:5px 8px;border-bottom:1px solid #1a2a24}

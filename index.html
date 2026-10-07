@@ -687,7 +687,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-10-07-b';
+const TCE_BUILD='2026-10-07-d';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -2280,11 +2280,24 @@ async function _cutTallyFromCloud(){
     // SECOND re-nest looked only for cuts made since the first, found none, and put every
     // already-cut panel back into the job. One variable, two jobs; now they're separate.
     const winStart=new Date(Math.max(_cutResetAt||0, Date.now()-180*24*3600*1000)).toISOString();
-    const url=SB_URL+'/rest/v1/tce_cut_events?select=panel,session_id&action=eq.confirm&created_at=gte.'+encodeURIComponent(winStart)+'&order=id.desc&limit=5000';
-    let r=await fetch(url,{headers:sbAuthH()});
-    if(r.status===401 && typeof sbDoRefresh==='function' && await sbDoRefresh()) r=await fetch(url,{headers:sbAuthH()});
-    if(!r.ok) return tally;
-    const rows=await r.json();
+    // Supabase caps a response at 1000 rows whatever limit you ask for. "limit=5000" quietly
+    // returned the newest 1000 and threw the rest away, so on a busy week the oldest confirms
+    // of a long job stopped counting and those panels walked back into the plan. Page through
+    // on the id instead, so "everything since the last reset" means everything.
+    const rows=[]; let cursor=null;
+    for(let page=0; page<12; page++){
+      let url=SB_URL+'/rest/v1/tce_cut_events?select=id,panel,session_id&action=eq.confirm'
+             +'&created_at=gte.'+encodeURIComponent(winStart)+'&order=id.desc&limit=1000';
+      if(cursor!=null) url+='&id=lt.'+cursor;
+      let r=await fetch(url,{headers:sbAuthH()});
+      if(r.status===401 && typeof sbDoRefresh==='function' && await sbDoRefresh()) r=await fetch(url,{headers:sbAuthH()});
+      if(!r.ok) break;
+      const batch=await r.json();
+      if(!Array.isArray(batch)||!batch.length) break;
+      rows.push(...batch);
+      if(batch.length<1000) break;
+      cursor=batch[batch.length-1].id;
+    }
     const seen=new Set();
     rows.forEach(row=>{
       const p=row.panel||{};
@@ -2295,10 +2308,20 @@ async function _cutTallyFromCloud(){
       // Position alone was wrong: a re-nest reuses sheet 1 at 0,0 for a completely different
       // panel, so two genuine cuts collapsed into one, the tally undercounted, and a panel
       // you had already cut went straight back into the plan.
+      //
+      // Scoping it to the session wasn't enough either, because you re-nest DURING a session:
+      // on Linsey Rev 4, sheet 0 at (0,0) was "right hand glass unit Shelf 4" before a re-nest
+      // and "Underside above door SCIBE" after it, inside the one session. Ten cuts were lost
+      // that way and ten cut panels came back asking to be cut again.
+      //
+      // So the panel's own identity goes in the key. A double-tap on one panel still matches
+      // itself exactly; two of a qty-2 differ by position; and two different panels can no
+      // longer cancel each other out just for sharing a corner of a sheet.
       const sess=String(row.session_id||'');
+      const who = (p.label||'')+'|'+Math.round(p.origL||0)+'x'+Math.round(p.origW||0)+'|'+(p._lamRole||'');
       const uniq = (p.x!=null&&p.y!=null&&p.sheetIdx!=null)
-        ? sess+'|P|'+p.sheetIdx+'|'+Math.round(p.x)+'|'+Math.round(p.y)
-        : sess+'|L|'+(p.label||'')+'|'+(p.panelNum||'')+'|'+(p.origL||'')+'|'+(p.origW||'');
+        ? sess+'|P|'+who+'|'+p.sheetIdx+'|'+Math.round(p.x)+'|'+Math.round(p.y)
+        : sess+'|L|'+who+'|'+(p.panelNum||'');
       if(seen.has(uniq)) return; seen.add(uniq);
       const k=String(p.label||'')+'|'+Math.round(p.origL||0)+'x'+Math.round(p.origW||0);
       tally[k]=(tally[k]||0)+1;
