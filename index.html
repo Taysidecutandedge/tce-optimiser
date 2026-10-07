@@ -687,7 +687,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-10-07-f';
+const TCE_BUILD='2026-10-07-g';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -3221,17 +3221,34 @@ function _computeSheetEquiv(){
     renderSheetEquiv();
   }catch(e){}
 }
+// The whole job, in one line — as opposed to the figures in the stats bar, which describe the
+// plan below them and therefore only the work still to cut. Once you're part way through a job
+// the two diverge completely: "1 sheet, 3.2m of tape" is true of this afternoon's cutting and
+// says nothing about what the job took. Both are worth knowing, so both are on screen, labelled.
 function renderSheetEquiv(){
   const el=document.getElementById('sheetEquivBar'); if(!el) return;
-  if(!_sheetEquiv||!(_lastSheets||[]).some(s=>s._isOffcut)){ el.style.display='none'; return; }
+  const cut=(window._lastExcludedCut||[]).length;
+  const usedOffcuts=(_lastSheets||[]).some(s=>s._isOffcut);
+  if(!_sheetEquiv || (!usedOffcuts && !cut)){ el.style.display='none'; return; }
   const used={}; (_lastSheets||[]).forEach(s=>{ if(!s._isOffcut) used[s.name]=(used[s.name]||0)+1; });
+  const chip=(html)=>'<span style="display:inline-block;background:rgba(0,0,0,.25);border-radius:5px;'
+    +'padding:2px 8px;margin:3px 5px 0 0;font-family:var(--mono);font-size:12px">'+html+'</span>';
+  // Whole-job tape, when the plan held panels back. Falls back to this plan's own total.
+  const ebSrc=(typeof _ebMapFull!=='undefined' && _ebMapFull && Object.keys(_ebMapFull).length)
+            ? _ebMapFull : (_lastEbMap||{});
+  const ebM=Object.values(ebSrc).reduce((a,b)=>a+(+b||0),0)/1000;
+  const offN=(_lastSheets||[]).filter(s=>s._isOffcut).length;
+  const totalQty=(parts||[]).reduce((n,p)=>n+Math.max(1,parseInt(p.qty)||1),0);
   el.style.display='block';
-  el.innerHTML='<span style="font-weight:700">📄 Sheet equivalent</span> '
-    +'<span style="opacity:.8">— what this job needs off fresh board, whatever it was cut from. The quote prices from this.</span><br>'
-    + Object.keys(_sheetEquiv).map(m=>'<span style="display:inline-block;background:rgba(0,0,0,.25);border-radius:5px;padding:2px 8px;margin:3px 5px 0 0;font-family:var(--mono);font-size:12px">'
-        +esc(m)+': <b>'+_sheetEquiv[m]+'</b> fresh'
-        +(used[m]!=null&&used[m]!==_sheetEquiv[m]?' <span style="opacity:.65">(this nest opened '+used[m]+')</span>':'')
-        +'</span>').join('');
+  el.innerHTML='<span style="font-weight:700">📄 Whole job</span> '
+    +'<span style="opacity:.8">— what the job needs off fresh board and how much tape, whatever it was cut from'
+    +' and however much of it is done. The customer quote prices from this.</span><br>'
+    + Object.keys(_sheetEquiv).map(m=>chip(esc(m)+': <b>'+_sheetEquiv[m]+'</b> fresh'
+        +(used[m]!=null&&used[m]!==_sheetEquiv[m]?' <span style="opacity:.65">(this plan opens '+used[m]+')</span>':'')
+      )).join('')
+    + (ebM>0?chip('edging: <b>'+ebM.toFixed(1)+'m</b>'):'')
+    + (offN?chip('♻ <b>'+offN+'</b> offcut'+(offN!==1?'s':'')+' used in this plan'):'')
+    + (cut?chip('panels: <b>'+cut+'</b> cut, <b>'+Math.max(0,totalQty-cut)+'</b> to go'):'');
 }
 
 // Last line of defence. A nest that puts panels off the board or on top of each other is
@@ -3499,13 +3516,16 @@ function renderResults(sheets,unplaced){
   main.innerHTML=`
     ${_offcutBanner}
     ${_qbBanner}
+    ${(window._lastExcludedCut||[]).length?`<div style="margin:0 0 7px;font-size:11.5px;color:var(--txt3)">
+      The figures below describe <b>this plan only — the work still to cut</b>. What the whole job
+      takes is on the blue line above, and that is what the quote is priced from.</div>`:''}
     <div class="stats-bar">
-      <div class="stat"><div class="stat-lbl">${_offcutsN?'Fresh Boards':'Sheets Used'}</div><div class="stat-val cv-acc">${_offcutsN?_freshBoards:sheets.length}</div>${_boardBreakdown?`<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--brd)">${_boardBreakdown}</div>`:''}</div>
+      <div class="stat"><div class="stat-lbl">${(window._lastExcludedCut||[]).length?'Boards — still to cut':(_offcutsN?'Fresh Boards':'Sheets Used')}</div><div class="stat-val cv-acc">${_offcutsN?_freshBoards:sheets.length}</div>${_boardBreakdown?`<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--brd)">${_boardBreakdown}</div>`:''}</div>
       ${_offcutsN?`<div class="stat"><div class="stat-lbl">Offcuts Used</div><div class="stat-val cv-ok">♻ ${_offcutsN}</div></div>`:''}
       <div class="stat"><div class="stat-lbl">Parts Placed</div><div class="stat-val cv-ok">${placed}</div></div>
       <div class="stat"><div class="stat-lbl">Efficiency</div><div class="stat-val ${eP>=80?'cv-ok':eP>=60?'cv-acc':'cv-err'}">${eP}%</div></div>
       <div class="stat"><div class="stat-lbl">Waste</div><div class="stat-val ${wP<=20?'cv-ok':wP<=40?'cv-acc':'cv-err'}">${wP}%</div></div>
-      ${ebGT>0?`<div class="stat"><div class="stat-lbl">EB Total</div><div class="stat-val cv-eb">${(ebGT/1000).toFixed(1)}m</div></div>`:''}
+      ${ebGT>0?`<div class="stat"><div class="stat-lbl">${(window._lastExcludedCut||[]).length?'EB — still to run':'EB Total'}</div><div class="stat-val cv-eb">${(ebGT/1000).toFixed(1)}m</div></div>`:''}
       ${unplaced.length?`<div class="stat" style="border-color:var(--err);cursor:pointer" onclick="document.getElementById('upSec').scrollIntoView({behavior:'smooth'})"><div class="stat-lbl" style="color:var(--err)">⚠ Unplaced — tap</div><div class="stat-val cv-err">${unplaced.length}</div></div>`:''}
     </div>
     <div id="ebSec"></div>
