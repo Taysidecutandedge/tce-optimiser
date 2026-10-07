@@ -637,7 +637,9 @@ select option{background:var(--surf2)}
       </div>
       <div class="frow">
         <div><label class="lbl">Thickness (mm)</label><input type="number" id="le_thick" value="18" min="1" step="0.5"></div>
-        <div><label class="lbl">Cost per sheet (£)</label><input type="number" id="le_cost" value="0" min="0" step="0.01"></div>
+        <!-- Hidden, not deleted — see the note on the job sheet's cost box. Saving the library
+             entry still reads this field, so the price already on a board survives an edit. -->
+        <div style="display:none"><label class="lbl">Cost per sheet (£)</label><input type="number" id="le_cost" value="0" min="0" step="0.01"></div>
       </div>
       <div><label class="lbl">Supplier / Notes</label><input type="text" id="le_notes" placeholder="e.g. Egger, MFC, moisture resistant"></div>
       <div style="display:flex;gap:8px;align-items:center">
@@ -687,7 +689,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-10-07-g';
+const TCE_BUILD='2026-10-07-h';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -1839,7 +1841,7 @@ function renderLibList(){
     <div class="lib-card" onclick="addJobSheetFromRef('${esc(s.ref)}')">
       <div>
         <div class="lib-card-name"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${s.color||'#8aa'};margin-right:6px;vertical-align:middle"></span>${esc(s.name)}${tag(s)}</div>
-        <div class="lib-card-meta">${s.l}×${s.w}mm · ${s.thick}mm${s.cost>0?' · £'+Number(s.cost).toFixed(2):''}${s.notes?' · '+esc(s.notes):''} · Grain: ${s.grainLen?'along length':'no default'}</div>
+        <div class="lib-card-meta">${s.l}×${s.w}mm · ${s.thick}mm${s.notes?' · '+esc(s.notes):''} · Grain: ${s.grainLen?'along length':'no default'}</div>
       </div>
       ${s.src==='lib'?`<button class="btn-ico" title="Edit" onclick="event.stopPropagation();openLibEdit(${s.id})">✎</button>
       <button class="btn-ico" title="Delete" onclick="event.stopPropagation();delLib(${s.id})">✕</button>`:''}
@@ -1946,7 +1948,13 @@ function renderJobSheets(){
       <div class="jsc-rows">
         <div><label class="lbl">Qty on job</label>
           <input type="number" value="${s.qty}" min="1" step="1" onchange="jss(${s.id},'qty',+this.value)"></div>
-        <div><label class="lbl">Cost / sheet (£)</label>
+        <!-- Cost per sheet is not shown on the cutting screen. This is the saw's screen, and it
+             gets used with customers and helpers standing at it; board prices are nobody's
+             business but yours, and they are not needed to cut. The value is still carried on
+             the board and still saved — the input is just kept out of sight, so every bit of
+             code that reads or writes it goes on working. Prices are set and read in the admin,
+             which is where the quote gets them from anyway. -->
+        <div style="display:none"><label class="lbl">Cost / sheet (£)</label>
           <input type="number" value="${s.cost}" min="0" step="0.01" onchange="jss(${s.id},'cost',+this.value)"></div>
         <div class="jsc-usable">Full: ${s.l}×${s.w}mm &nbsp;|&nbsp; Usable: <strong style="color:var(--acc)">${uw}×${uh}mm</strong>
           &nbsp;|&nbsp; <button onclick="toggleSheetGrain(${s.id})" title="Grained boards keep parts one way up. No-grain (MDF, plain colours) lets the nester rotate parts to fit more per sheet. Press Calculate again after changing." style="background:none;border:1px solid var(--brd);color:${s.grainLen===false?'var(--ok)':'var(--txt2)'};border-radius:5px;padding:1px 7px;font-size:11px;cursor:pointer;font-family:var(--mono)">${s.grainLen===false?'✥ no grain — rotates':'↕ grained'}</button>
@@ -2013,7 +2021,7 @@ function sheetBoardFilter(){
   list=list.slice(0,50);
   if(!list.length){ res.innerHTML='<div style="padding:8px 9px;color:#8fae9f;font-size:12px">No match</div>'; res.style.display='block'; return; }
   res.innerHTML=list.map(b=>{ const gi=_matMapData.indexOf(b);
-    return `<div onmousedown="applySheetBoard(${gi})" style="padding:8px 10px;font-size:12px;color:#e8f0ec;cursor:pointer;border-bottom:1px solid #17332b" onmouseover="this.style.background='#17332b'" onmouseout="this.style.background='transparent'">${esc(b.name)} · ${b.thick||'?'}mm · ${b.l}×${b.w} · ${(b.cost||0)>0?('£'+(b.cost||0).toFixed(2)):'<span style="color:#e6a23c">no price set</span>'}</div>`;
+    return `<div onmousedown="applySheetBoard(${gi})" style="padding:8px 10px;font-size:12px;color:#e8f0ec;cursor:pointer;border-bottom:1px solid #17332b" onmouseover="this.style.background='#17332b'" onmouseout="this.style.background='transparent'">${esc(b.name)} · ${b.thick||'?'}mm · ${b.l}×${b.w}</div>`;
   }).join('');
   res.style.display='block';
 }
@@ -3542,7 +3550,7 @@ function renderResults(sheets,unplaced){
       <div class="sc-hdr">
         <div>
           <div class="sc-title">${esc(s.name)} <span style="color:var(--txt3)">#${idx+1}</span>${s._isOffcut?` <span style="background:#27ae60;color:#fff;font-size:10px;padding:1px 6px;border-radius:4px;font-family:var(--mono)">♻ ${esc(s._offcutCode||'OFFCUT')}</span>${(function(){const oc=_ocFor(s._offcutId);const loc=oc&&oc.location&&String(oc.location).trim();return (loc?` <span style="background:#1f3a34;color:#cfe7dd;font-size:10px;padding:1px 6px;border-radius:4px;font-family:var(--mono)">📍 ${esc(loc)}</span>`:'')+(_ocIsStale(oc)?` <span title="In stock ${_ocAgeDays(oc)} days — check the rack" style="background:#5a3a12;color:#ffc46b;font-size:10px;padding:1px 6px;border-radius:4px;font-family:var(--mono)">⚠ ${_ocAgeDays(oc)}d</span>`:'');})()}`:''}</div>
-          <div class="sc-meta">${s._isOffcut?'Offcut ':'Full '}${s.fullL}×${s.fullW}mm · Usable ${s.uw}×${s.uh}mm${s.cost>0?' · £'+s.cost.toFixed(2):''}</div>
+          <div class="sc-meta">${s._isOffcut?'Offcut ':'Full '}${s.fullL}×${s.fullW}mm · Usable ${s.uw}×${s.uh}mm</div>
         </div>
         <span class="wb ${wc}">${wp}% waste</span>
       </div>
