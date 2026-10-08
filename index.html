@@ -689,7 +689,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-10-07-h';
+const TCE_BUILD='2026-10-08-a';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -744,6 +744,17 @@ function _coreOf(name){
   if(/\bply(wood)?\b/.test(s)) return 'ply';
   if(/\bmfc\b|melamine|eurodekor/.test(s)) return 'mfc';
   return null;   // unknown core — don't block a match on it
+}
+// The finish is as much a part of the board as the colour. U702 ST9 and U702 PM are the same
+// grey and two different products: one textured, one perfect matt. Put them in the same door
+// and it shows under the light. The offcut matcher gave up on the finish too easily — a U702
+// PM offcut was being handed to a U702 ST9 job on the Burnton MFC, because the fallback rule
+// was "only one board with this colour code, close enough". It isn't close enough.
+// Returns null when a name carries no finish at all, which must never block a match.
+function _finishOf(name){
+  const s=String(name||'').toLowerCase();
+  const m=s.match(/\b[a-z]\d{3,4}\s*[\/\- ]?\s*(st\s?\d{1,2}|pm|pg|pe|tm\s?\d{1,2}|sm|mt|zn)\b/);
+  return m ? m[1].replace(/\s+/g,'') : null;
 }
 // How long an offcut can sit in stock before it's worth checking the rack rather than
 // trusting the list — most of the pile is older than this, and an offcut nobody has
@@ -2480,8 +2491,16 @@ function _calculateInner(opts){
     // stop-word list, so both reduced to "oak veneer" and matched each other. An offcut on a
     // birch core was being offered for an MDF job.
     const mCore=_coreOf(mn);
+    // Same treatment for the finish. Filtered out here rather than inside the passes below,
+    // because there are four of them and each one would have to remember; a board ruled out
+    // on its finish can then never be reached by a looser pass further down.
+    const mFin=_finishOf(mn);
     const jobSheetsAll=jobSheets;
-    jobSheets=jobSheets.filter(js=>{ const c=_coreOf(js.name); return !mCore||!c||c===mCore; });
+    jobSheets=jobSheets.filter(js=>{
+      const c=_coreOf(js.name); if(mCore&&c&&c!==mCore) return false;
+      const f=_finishOf(js.name); if(mFin&&f&&f!==mFin) return false;
+      return true;
+    });
     try{ return _matchSheetInner(mn); } finally { jobSheets=jobSheetsAll; }
   };
   const _matchSheetInner=mn=>{
