@@ -690,7 +690,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-10-27-b';
+const TCE_BUILD='2026-10-27-c';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -2306,11 +2306,54 @@ function renderParts(){
 // panel really was cut, and the history of a job should record what happened, not what we
 // wish had happened.
 let _scrapRows=[];
+// Which scraps are still outstanding, per panel, and which offcut each one produced.
+// Needed so a scrap can be taken back: the customer accepts the 2mm, the panel goes back to
+// being cut, and the offcut it created has to stop sitting in the rack as a separate piece —
+// because it is not a separate piece, it is the panel.
+async function _scrapLedger(){
+  const out={};   // key -> { open:[{scrapId, offcutCode}] }
+  try{
+    if(!_sbToken) return out;
+    const proj=String(projectName||'').trim().toLowerCase();
+    const myId=(_loadedCloudJobId!=null)?String(_loadedCloudJobId):null;
+    const winStart=new Date(Math.max(_cutResetAt||0, Date.now()-180*24*3600*1000)).toISOString();
+    const rows=[]; let cursor=null;
+    for(let page=0;page<8;page++){
+      let url=SB_URL+'/rest/v1/tce_cut_events?select=id,action,panel&action=in.(scrap,unscrap)'
+             +'&created_at=gte.'+encodeURIComponent(winStart)+'&order=id.desc&limit=1000';
+      if(cursor!=null) url+='&id=lt.'+cursor;
+      let r=await fetch(url,{headers:sbAuthH()});
+      if(r.status===401 && typeof sbDoRefresh==='function' && await sbDoRefresh()) r=await fetch(url,{headers:sbAuthH()});
+      if(!r.ok) break;
+      const batch=await r.json();
+      if(!Array.isArray(batch)||!batch.length) break;
+      rows.push(...batch);
+      if(batch.length<1000) break;
+      cursor=batch[batch.length-1].id;
+    }
+    const undone=new Set();
+    rows.forEach(row=>{ if(row.action==='unscrap'){ const p=row.panel||{}; if(p.undoes) undone.add(String(p.undoes)); } });
+    rows.forEach(row=>{
+      if(row.action!=='scrap') return;
+      const p=row.panel||{};
+      const mine = myId ? (p.jobId!=null ? String(p.jobId)===myId : String(p.company||'').trim().toLowerCase()===proj)
+                        : String(p.company||'').trim().toLowerCase()===proj;
+      if(!mine) return;
+      const sid=String(p.scrapId||row.id);
+      if(undone.has(sid)) return;
+      const k=String(p.label||'')+'|'+Math.round(p.origL||0)+'x'+Math.round(p.origW||0);
+      (out[k]=out[k]||{open:[]}).open.push({scrapId:sid, offcutCode:p.offcutCode||null,
+        label:p.label||'', l:p.origL, w:p.origW, mat:p.matName||''});
+    });
+  }catch(e){}
+  return out;
+}
 async function openScrapPicker(){
   if(!_sbToken){ alert('Sign in first — the cut log lives in the cloud.'); return; }
   if(!String(projectName||'').trim()){ alert('Open a job first.'); return; }
-  let tally={};
+  let tally={}, ledger={};
   try{ tally=await _cutTallyFromCloud(); }catch(e){}
+  try{ ledger=await _scrapLedger(); }catch(e){}
   // Only offer panels this job actually wants, so a stray log entry can't put a phantom
   // panel into the cutlist. Matched the same way the nest excludes them: label + size.
   const want={};
@@ -2323,8 +2366,14 @@ async function openScrapPicker(){
   // and leaves a piece of finished board that is the wrong size for THIS panel and the right
   // size for a smaller one. Default the offcut size to the panel size; the real measurement
   // goes in by hand, because how much came off varies panel to panel.
-  _scrapRows=Object.keys(tally).filter(k=>want[k]&&tally[k]>0)
-    .map(k=>({key:k, ...want[k], cut:tally[k], scrap:0, keep:true, kl:want[k].l, kw:want[k].w}))
+  // Every panel the job wants that is either still counted as cut, or has an outstanding
+  // scrap against it. The second case is what makes this reversible: a panel already marked
+  // for re-cut has a tally of nil, so it would otherwise vanish from this list and there
+  // would be no way back.
+  const keys=new Set([...Object.keys(tally).filter(k=>tally[k]>0), ...Object.keys(ledger)]);
+  _scrapRows=[...keys].filter(k=>want[k])
+    .map(k=>({key:k, ...want[k], cut:tally[k]||0, scrap:0, keep:true, kl:want[k].l, kw:want[k].w,
+              open:(ledger[k]&&ledger[k].open)||[], unscrap:0}))
     .sort((a,b)=>a.label.localeCompare(b.label));
   const host=document.getElementById('scrapModal')||(()=>{
     const d=document.createElement('div'); d.id='scrapModal'; document.body.appendChild(d); return d;
@@ -2362,6 +2411,11 @@ function scrapSet(i,v){
   renderScrapPicker();
 }
 function scrapKeep(i,on){ const r=_scrapRows[i]; if(r){ r.keep=!!on; renderScrapPicker(); } }
+function scrapUndo(i,v){
+  const r=_scrapRows[i]; if(!r) return;
+  r.unscrap=Math.max(0, Math.min(r.open.length, (parseInt(v)||0)));
+  renderScrapPicker();
+}
 function scrapSize(i,which,v){
   const r=_scrapRows[i]; if(!r) return;
   r[which]=Math.max(0, parseInt(v)||0);
@@ -2421,20 +2475,37 @@ function renderScrapPicker(){
               +' <span id="scrapWarn'+i+'" style="font-size:11px;color:#e6a23c;margin-left:6px">'+esc(note)+'</span>'
             : ' <span style="font-size:11px;color:var(--txt3,#6b8f7e)">binned</span>')
           +'</td></tr>'
+        : '')
+      // Panels already waiting to be re-cut, with a way back. This is the "spoke to the
+      // customer and 2mm is fine" row — accept them as they are and they stop needing board.
+      +(r.open.length
+        ? '<tr style="background:rgba(60,120,90,.10)"><td colspan="5" style="padding:0 6px 7px 18px;font-size:11.5px;color:var(--txt2,#9ab)">'
+          +'<span style="color:#7fe3a8">↩</span> '+r.open.length+' waiting to be re-cut — accept as cut: '
+          +'<button onclick="scrapUndo('+i+','+(r.unscrap-1)+')" style="background:#2b4a40;border:none;color:#e8f0ec;border-radius:5px;width:24px;height:24px;cursor:pointer">−</button>'
+          +'<input value="'+r.unscrap+'" onchange="scrapUndo('+i+',this.value)" style="width:38px;text-align:center;margin:0 4px;background:#0d1f1a;border:1px solid #2b4a40;border-radius:5px;color:#e8f0ec;padding:3px">'
+          +'<button onclick="scrapUndo('+i+','+(r.unscrap+1)+')" style="background:#2b4a40;border:none;color:#e8f0ec;border-radius:5px;width:24px;height:24px;cursor:pointer">+</button>'
+          +(r.unscrap?' <span style="color:#7fe3a8;font-size:11px">back in use'
+              +(r.open.slice(0,r.unscrap).some(o=>o.offcutCode)?' — its offcut comes out of the rack':'')+'</span>':'')
+          +'</td></tr>'
         : '');
     }).join('')
     +'</tbody></table>';
   const n=_scrapRows.reduce((a,r)=>a+r.scrap,0);
   const kept=_scrapRows.reduce((a,r)=>a+(r.keep?r.scrap:0),0);
-  document.getElementById('scrapCount').textContent = n
-    ? n+' panel'+(n!==1?'s':'')+' back into the job'+(kept?', '+kept+' kept as offcuts':'')
-      +' — press Calculate afterwards to lay them out.'
+  const un=_scrapRows.reduce((a,r)=>a+r.unscrap,0);
+  const bits=[];
+  if(n) bits.push(n+' panel'+(n!==1?'s':'')+' back into the job'+(kept?' ('+kept+' kept as offcuts)':''));
+  if(un) bits.push(un+' accepted as cut');
+  document.getElementById('scrapCount').textContent = bits.length
+    ? bits.join(' · ')+' — press Calculate afterwards.'
     : 'Nothing marked yet.';
 }
 async function saveScrapPicker(){
   const picks=_scrapRows.filter(r=>r.scrap>0);
+  const undos=_scrapRows.filter(r=>r.unscrap>0);
   const n=picks.reduce((a,r)=>a+r.scrap,0);
-  if(!n){ alert('Nothing marked as scrap.'); return; }
+  const nUn=undos.reduce((a,r)=>a+r.unscrap,0);
+  if(!n && !nUn){ alert('Nothing marked.'); return; }
   // Refuse a kept piece with a size that cannot be true, rather than putting a bad offcut
   // into the rack where it will be trusted by every future job.
   const bad=picks.filter(r=>r.keep&&_scrapSizeNote(r)&&_scrapSizeNote(r)!=='same size as the panel — is that right?');
@@ -2450,22 +2521,41 @@ async function saveScrapPicker(){
     +'An offcut with no location is one nobody can find later.\n\nSave them anyway?')){
     const el=document.getElementById('scrapLoc'); if(el) el.focus(); return;
   }
-  if(!confirm('Put '+n+' panel'+(n!==1?'s':'')+' back into '+projectName+'?\n\n'
-    +(kept?kept+' of them go into offcut stock at their measured size.\n':'')
-    +'They stop counting as cut, so the next Calculate will lay them out again.\n'
-    +'The original cut stays in the job history.')) return;
+  const voidCodes=[];
+  undos.forEach(r=>r.open.slice(0,r.unscrap).forEach(o=>{ if(o.offcutCode) voidCodes.push(o.offcutCode); }));
+  if(!confirm(
+      (n?'Put '+n+' panel'+(n!==1?'s':'')+' back into '+projectName+'.\n'
+         +(kept?'  '+kept+' of them go into offcut stock at their measured size.\n':''):'')
+    + (nUn?'Accept '+nUn+' panel'+(nUn!==1?'s':'')+' as cut after all — they stop needing board.\n'
+         +(voidCodes.length?'  '+voidCodes.length+' offcut'+(voidCodes.length!==1?'s':'')+' come out of the rack ('+voidCodes.join(', ')+').\n':''):'')
+    + '\nThe job history keeps the lot either way.\n\nGo ahead?')) return;
   const btn=document.getElementById('scrapSave');
   if(btn){ btn.disabled=true; btn.textContent='Saving…'; }
-  // One row per scrapped panel, each with its own id, so a retry after a dropped connection
-  // can't quietly double up.
+  // One row per panel, each with its own id, so a retry after a dropped connection can't
+  // quietly double up. The offcut's code is written onto the scrap that produced it, which is
+  // what makes the undo able to find the right piece in the rack later.
   const stamp=Date.now(); let seq=0; const body=[];
+  const offcutPlan=[];
   picks.forEach(r=>{
+    const wantKeep = r.keep && r.kl>0 && r.kw>0;
     for(let k=0;k<r.scrap;k++){
+      const code = wantKeep ? _ocGenCode() : null;
+      if(code) offcutPlan.push({r, code});
       body.push({ session_id:(_cmSession||('scrap-'+stamp)), action:'scrap',
         panel:{ label:r.label, origL:r.l, origW:r.w, matName:r.mat,
                 company:projectName||'', jobId:(_loadedCloudJobId!=null?String(_loadedCloudJobId):null),
-                scrapId:'S'+stamp+'-'+(seq++), reason:'damaged' } });
+                scrapId:'S'+stamp+'-'+(seq++), reason:'damaged',
+                offcutCode:code, keptL:(code?r.kl:null), keptW:(code?r.kw:null) } });
     }
+  });
+  undos.forEach(r=>{
+    r.open.slice(0,r.unscrap).forEach(o=>{
+      body.push({ session_id:(_cmSession||('scrap-'+stamp)), action:'unscrap',
+        panel:{ label:r.label, origL:r.l, origW:r.w, matName:r.mat,
+                company:projectName||'', jobId:(_loadedCloudJobId!=null?String(_loadedCloudJobId):null),
+                scrapId:'U'+stamp+'-'+(seq++), undoes:o.scrapId,
+                offcutCode:o.offcutCode||null, reason:'accepted as cut' } });
+    });
   });
   try{
     let r=await fetch(SB_URL+'/rest/v1/tce_cut_events',{method:'POST',
@@ -2484,33 +2574,45 @@ async function saveScrapPicker(){
   // Offcuts second, and never allowed to fail the scrap. The panels being back in the job is
   // the thing that matters; a missing offcut row can be typed in on the Offcuts screen, but a
   // panel still counted as cut is one nobody notices until the kitchen is short.
-  let madeOffcuts=0, offcutErr='';
-  if(keepers.length){
-    const rows=[];
-    keepers.forEach(r=>{
+  let madeOffcuts=0, offcutErr='', pulled=0;
+  if(offcutPlan.length){
+    const rows=offcutPlan.map(({r,code})=>{
       // Thickness, colour and grain come off the board itself, so the piece behaves like the
       // board it was cut from when the nester considers it.
       const js=(jobSheets||[]).find(s=>String(s.name||'').toLowerCase()===String(r.mat||'').toLowerCase())||{};
-      for(let k=0;k<r.scrap;k++){
-        rows.push({ name:r.mat||js.name||'', l:r.kl, w:r.kw, thick:js.thick||0, cost:0,
-          is_offcut:true, status:'in_stock', code:_ocGenCode(), location:loc||null,
-          color:js.color||null, grain_len:js.grainLen!==false, label_printed:false,
-          user_id:(_sbUser&&_sbUser.id) });
-      }
+      return { name:r.mat||js.name||'', l:r.kl, w:r.kw, thick:js.thick||0, cost:0,
+        is_offcut:true, status:'in_stock', code, location:loc||null,
+        color:js.color||null, grain_len:js.grainLen!==false, label_printed:false,
+        user_id:(_sbUser&&_sbUser.id) };
     });
     try{
       const r2=await fetch(SB_URL+'/rest/v1/tce_library',{method:'POST',
         headers:{...sbAuthH(),'Content-Type':'application/json','Prefer':'return=minimal'},
         body:JSON.stringify(rows)});
-      if(r2.ok){ madeOffcuts=rows.length; await sbLoadOffcuts(); }
+      if(r2.ok) madeOffcuts=rows.length;
       else offcutErr='the offcut rows were refused ('+r2.status+')';
     }catch(e){ offcutErr=e.message; }
   }
+  // Taking a scrap back means the panel is being used after all, so the remnant it created
+  // is not a separate piece of board — it IS that panel. Pull it out of stock. Marked
+  // "voided" rather than deleted: the row stays, it just stops being offered.
+  for(const code of voidCodes){
+    try{
+      const r3=await fetch(SB_URL+'/rest/v1/tce_library?code=eq.'+encodeURIComponent(code)+'&status=eq.in_stock',
+        {method:'PATCH',headers:{...sbAuthH(),'Content-Type':'application/json','Prefer':'return=minimal'},
+         body:JSON.stringify({status:'voided'})});
+      if(r3.ok) pulled++;
+    }catch(e){}
+  }
+  try{ await sbLoadOffcuts(); }catch(e){}
   closeScrapPicker();
-  alert(n+' panel'+(n!==1?'s':'')+' put back into the job.'
-    +(madeOffcuts?'\n'+madeOffcuts+' offcut'+(madeOffcuts!==1?'s':'')+' added to stock'+(loc?' at '+loc:'')+'.':'')
-    +(offcutErr?'\n\nThe panels are back, but '+offcutErr+' — add those offcuts by hand on the Offcuts screen.':'')
-    +'\n\nPress Calculate to lay them out, then Save Job.');
+  alert(
+     (n?n+' panel'+(n!==1?'s':'')+' put back into the job.\n':'')
+    +(madeOffcuts?madeOffcuts+' offcut'+(madeOffcuts!==1?'s':'')+' added to stock'+(loc?' at '+loc:'')+'.\n':'')
+    +(nUn?nUn+' panel'+(nUn!==1?'s':'')+' accepted as cut.\n':'')
+    +(pulled?pulled+' offcut'+(pulled!==1?'s':'')+' taken back out of the rack.\n':'')
+    +(offcutErr?'\nThe panels are right, but '+offcutErr+' — add those offcuts by hand on the Offcuts screen.\n':'')
+    +'\nPress Calculate, then Save Job.');
 }
 
 async function _cutTallyFromCloud(){
@@ -2532,7 +2634,7 @@ async function _cutTallyFromCloud(){
     // edgebander ate it" — it cancels one confirm so the panel comes back into the plan.
     const rows=[]; let cursor=null;
     for(let page=0; page<12; page++){
-      let url=SB_URL+'/rest/v1/tce_cut_events?select=id,action,panel,session_id&action=in.(confirm,scrap)'
+      let url=SB_URL+'/rest/v1/tce_cut_events?select=id,action,panel,session_id&action=in.(confirm,scrap,unscrap)'
              +'&created_at=gte.'+encodeURIComponent(winStart)+'&order=id.desc&limit=1000';
       if(cursor!=null) url+='&id=lt.'+cursor;
       let r=await fetch(url,{headers:sbAuthH()});
@@ -2551,13 +2653,14 @@ async function _cutTallyFromCloud(){
       const mine = myId ? (p.jobId!=null ? String(p.jobId)===myId : String(p.company||'').trim().toLowerCase()===proj)
                         : String(p.company||'').trim().toLowerCase()===proj;
       if(!mine) return;
-      // A scrap cancels one confirm of the same panel. Counted separately and keyed on its own
-      // id, so pressing Save twice on the picker can't take a panel off the list twice.
-      if(row.action==='scrap'){
-        const sid=String(p.scrapId||row.id);
+      // A scrap cancels one confirm of the same panel; an unscrap cancels one scrap, for when
+      // the customer looks at the 2mm and says don't bother. Each keyed on its own id, so
+      // pressing Save twice on the picker can't take a panel off the list twice.
+      if(row.action==='scrap'||row.action==='unscrap'){
+        const sid=row.action+'|'+String(p.scrapId||row.id);
         if(scrapSeen.has(sid)) return; scrapSeen.add(sid);
         const ks=String(p.label||'')+'|'+Math.round(p.origL||0)+'x'+Math.round(p.origW||0);
-        tally[ks]=(tally[ks]||0)-1;
+        tally[ks]=(tally[ks]||0)+(row.action==='scrap'?-1:1);
         return;
       }
       // De-duplicate a double-tap or a reprint — but ONLY within the same cutting session.
