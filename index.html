@@ -690,7 +690,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-10-27-c';
+const TCE_BUILD='2026-10-27-d';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -4300,7 +4300,8 @@ function drawSheet(cid,sheet){
       ctx.fillText(p.label,x+w/2,y+h/2-(h>26?fs*.6:0));
       if(h>28&&fs>=7){
         ctx.font=`${fs*.8}px sans-serif`; ctx.fillStyle='rgba(0,0,0,.55)';
-        ctx.fillText(`${p.origL}×${p.origW}`,x+w/2,y+h/2+fs*.85);
+        // As it lies on the board, not as it was typed — same reason as cutting mode.
+        ctx.fillText(_placedTxt(p),x+w/2,y+h/2+fs*.85);
       }
     }
   });
@@ -6287,6 +6288,21 @@ function drawSheetCanvas(cid, sheet){
 // CUTTING MODE
 // ═══════════════════════════════════════════════
 let _cmPanels=[];   // flat ordered list of all panels across all sheets
+// How the panel actually lies on the board, as against how it was typed into the cutlist.
+// On a no-grain board the nester turns parts to fit, so the piece in front of you can be
+// 600×384 while the cutlist calls it 384×600. Cutting mode drew the rectangle the right way
+// round and then printed the cutlist's figures inside it, so the number and the shape
+// disagreed — and the fence reading beside them was taken from the placement, so it agreed
+// with the shape and not the number. On Caldwell 3, 15 of 16 panels were like this.
+// origL/origW stay untouched: they are the panel's identity, used by the cut log, the
+// exclusion matching and the labels. This is about what gets shown.
+function _asPlaced(p){
+  const L=Math.round(p.origL||0), W=Math.round(p.origW||0);
+  const w=Math.round(p.w||0), h=Math.round(p.h||0);
+  const rotated = L!==W && w===W && h===L;
+  return { w:(w||L), h:(h||W), rotated };
+}
+function _placedTxt(p){ const a=_asPlaced(p); return a.w+'×'+a.h; }
 let _cmSession='';   // current cutting session id (used by the offload screen)
 let _cmIdx=0;       // current panel index
 let _cmDone=new Set(); // indices of confirmed panels
@@ -6987,7 +7003,10 @@ function cmRender(){
     '<div class="cm-info-bar">'+
       '<div class="cm-panel-info">'+
         '<div class="cm-panel-name">'+esc(p.label)+'</div>'+
-        '<div class="cm-panel-dims">'+p.origL+' × '+p.origW+' mm</div>'+
+        '<div class="cm-panel-dims">'+(function(){ const a=_asPlaced(p);
+            return a.w+' × '+a.h+' mm'
+              +(a.rotated?'<span style="font-size:11px;color:var(--acc);font-weight:400;margin-left:7px">'
+                 +'↻ turned — cutlist says '+p.origL+' × '+p.origW+'</span>':''); })()+'</div>'+
         '<div class="cm-panel-eb">'+ebHTML+'</div>'+
         '<div class="'+grainCls+'">'+grainTxt+'</div>'+
       '</div>'+
@@ -7059,7 +7078,7 @@ function cmDrawCanvas(currentPanel){
       const dfs=Math.max(7,Math.min(10,w/7,h/4));
       if(h>40&&dfs>=7){
         ctx.font='bold '+dfs+'px Arial';ctx.fillText(p.label,x+w/2,y+h/2-dfs*1.2);
-        ctx.font=(dfs*.85)+'px Arial';ctx.fillText(p.origL+'×'+p.origW,x+w/2,y+h/2+dfs*.1);
+        ctx.font=(dfs*.85)+'px Arial';ctx.fillText(_placedTxt(p),x+w/2,y+h/2+dfs*.1);
         ctx.font='bold '+(dfs*1.2)+'px Arial';ctx.fillText('✓',x+w/2,y+h/2+dfs*1.4);
       } else {
         ctx.font='bold '+Math.max(10,Math.min(h*.6,w*.5,22))+'px Arial';
@@ -7086,7 +7105,7 @@ function cmDrawCanvas(currentPanel){
       ctx.font='bold '+lfs+'px Arial';
       ctx.fillText(p.label,x+w/2,y+h/2-(h>32?lfs*.55:0));
       if(h>32){ctx.font=(lfs*.8)+'px Arial';ctx.fillStyle='rgba(255,255,220,.9)';
-        ctx.fillText(p.origL+'×'+p.origW,x+w/2,y+h/2+lfs*.65);}
+        ctx.fillText(_placedTxt(p),x+w/2,y+h/2+lfs*.65);}
       // Dimension labels on edges — INSIDE the panel near each edge, black text
       if(w>60&&h>40){
         const dfs=Math.max(8,Math.min(11,w/8,h/6));
@@ -7117,7 +7136,7 @@ function cmDrawCanvas(currentPanel){
         ctx.font='bold '+lfs2+'px Arial';
         ctx.fillText(p.label,x+w/2,y+h/2-(h>28?lfs2*.5:0));
         if(h>28&&lfs2>=7){ctx.font=(lfs2*.8)+'px Arial';ctx.fillStyle='#444';
-          ctx.fillText(p.origL+'×'+p.origW,x+w/2,y+h/2+lfs2*.7);}
+          ctx.fillText(_placedTxt(p),x+w/2,y+h/2+lfs2*.7);}
       }
     }
   });
