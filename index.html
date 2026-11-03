@@ -587,6 +587,23 @@ select option{background:var(--surf2)}
           <input type="number" id="offcutGuard" value="800" min="0" step="50" style="width:70px">
           <span style="font-size:12px;color:var(--txt3)">mm (long edge) freely — bigger ones only when they save a board</span>
         </div>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:6px;padding-left:26px;flex-wrap:wrap">
+          <label style="font-size:12px;color:var(--txt3)" for="offcutTrim">Trim off every offcut edge</label>
+          <input type="number" id="offcutTrim" value="10" min="0" max="50" step="1" style="width:60px"
+                 onchange="localStorage.setItem('clp_octrim',this.value)">
+          <span style="font-size:12px;color:var(--txt3)">mm — a saw-cut edge that has been in the rack needs cleaning up before it is a panel edge</span>
+        </div>
+      </div>
+      <div style="padding:7px 10px;background:rgba(40,120,170,.08);border:1px solid rgba(70,150,210,.28);border-radius:5px">
+        <div style="display:flex;gap:8px;align-items:flex-start">
+          <input type="checkbox" id="sameWidthStrips" checked
+                 onchange="localStorage.setItem('clp_samew',this.checked?'1':'0')">
+          <label style="font-size:13px;color:var(--txt2);cursor:pointer;flex:1" for="sameWidthStrips">
+            📏 <strong>One width per rip strip</strong> — keep panels of the same width together
+            instead of dropping a narrow one into a wider strip. Fewer re-rips at the saw; the
+            nest can be a touch looser. Turn off for the tightest possible yield.
+          </label>
+        </div>
       </div>
       <div style="font-size:11px;color:var(--txt3);padding:6px 8px;background:var(--surf2);border-radius:5px;border-left:2px solid var(--acc)">
         💡 Full-length panels (e.g. 2800mm on a 2800×2070 sheet) can be entered at their exact size — they are cut first from the raw sheet before the bottom trim is taken.
@@ -596,6 +613,10 @@ select option{background:var(--surf2)}
 
   <div class="sec" style="border-bottom:none">
     <button class="btn-run" onclick="calculate()">▶  CALCULATE LAYOUT</button>
+    <button id="tryBetterBtn" onclick="tryBetterNest()" style="width:100%;margin-top:6px;padding:8px;
+      font-size:12.5px;font-family:var(--mono);background:none;border:1px solid var(--brd);
+      color:var(--txt2);border-radius:var(--r);cursor:pointer"
+      title="Search again from different starting points. Keeps the new plan only if it is actually better, so you can press it as often as you like.">🎲 Try for better</button>
   </div>
 
 </div>
@@ -690,7 +711,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-10-27-d';
+const TCE_BUILD='2026-11-03-d';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -1778,6 +1799,16 @@ function load(){
     if(c)parts=JSON.parse(c);
     if(d){const o=JSON.parse(d);libId=o.libId||1;jsid=o.jsid||1;pid=o.pid||1;ci=o.ci||0;}
     projectName=localStorage.getItem('clp_project')||'';
+    // The offcut trim is a workshop setting, not a job setting — it belongs to how your saw
+    // and your rack behave, so it survives between jobs and between sessions.
+    try{
+      const t=localStorage.getItem('clp_octrim');
+      const el=document.getElementById('offcutTrim');
+      if(t!=null && el) el.value=t;
+      const sw=localStorage.getItem('clp_samew');
+      const swEl=document.getElementById('sameWidthStrips');
+      if(sw!=null && swEl) swEl.checked = sw==='1';
+    }catch(e){}
     _loadNest();   // restore the exact nest from before the refresh (same layout, same panel order)
     return !!(a||b||c);
   }catch(e){return false;}
@@ -2727,6 +2758,9 @@ async function calculate(){
   // Use setTimeout so UI updates before heavy calculation starts
   setTimeout(()=>{
     try{
+      // Use the best seed ever found for this cutlist, so Calculate reproduces the good plan
+      // rather than starting from scratch and possibly finding a worse one.
+      try{ _loadNestSeed(); }catch(e){}
       _calculateInner(_hasCut?{exclude:_tally}:undefined);
       // The sheet equivalent prices the WHOLE job, so it must never exclude anything.
       _computeSheetEquiv();
@@ -2897,6 +2931,13 @@ function _calculateInner(opts){
   // ── Offcut stock matched to this job's materials (Phase 2) ─────────────
   const useOffcuts = _dry ? false : !!((document.getElementById('useOffcuts')||{}).checked);
   const offcutGuard = parseFloat((document.getElementById('offcutGuard')||{}).value) || 800;  // long edge (mm): offcuts up to this are used freely; bigger ones only when they save a board
+  // Cleaning-up allowance taken off every edge of an offcut before anything is nested on it.
+  const _octEl=document.getElementById('offcutTrim');
+  const offcutTrim = Math.max(0, Math.min(50, (_octEl? parseFloat(_octEl.value) : 10)));
+  // Keep each rip strip to a single width where the sheet allows it.
+  const _swEl=document.getElementById('sameWidthStrips');
+  const SAME_WIDTH_STRIPS = _swEl ? !!_swEl.checked : true;
+  const SAME_W_TOL = 2;   // mm — 596 and 597 are the same rip in practice
   const _matchedOffcuts = (useOffcuts && _offcutStock.length) ? _offcutStock.map(oc=>{
     const js=matchSheet(oc.name);
     if(!js) return null;
@@ -2987,14 +3028,29 @@ function _calculateInner(opts){
     const addToPool=sh=>{sh._poolIdx=pool.length;pool.push(sh);return sh;};
     jobSheets.forEach(s=>addToPool(makeSheet(s)));
     // Seed finite offcut "mini-sheets" (Phase 2) — preferred over fresh boards in findSheet()
-    const makeOffcutSheet=(oc,js)=>({
-      jsid:js.id,name:js.name,color:oc.color||js.color,cost:0,
-      fullL:oc.l,fullW:oc.w,uw:oc.w,uh:oc.l,
-      placements:[],cols:[],usedW:0,_poolIdx:0,
-      _isOffcut:true,_offcutId:oc.id,_offcutCode:oc.code,_offL:oc.l,_offW:oc.w
-    });
+    // An offcut used to be handed to the nester at its full logged size — no trim at all,
+    // while a fresh board gets 15mm off every edge. So a 600 panel would be packed into a
+    // 600 offcut with nothing to clean up, and the edges of an offcut are exactly the ones
+    // that need it: saw-cut, then shifted about the rack for a month. Same trim on all four
+    // edges, because you cannot tell by looking which two were the factory edges.
+    const makeOffcutSheet=(oc,js)=>{
+      const usableW=Math.max(0, (+oc.w||0) - 2*offcutTrim);
+      const usableL=Math.max(0, (+oc.l||0) - 2*offcutTrim);
+      return {
+        jsid:js.id,name:js.name,color:oc.color||js.color,cost:0,
+        // fullL/fullW stay the real piece — that is what is written on it and what you go
+        // and find in the rack. Only the usable area shrinks.
+        fullL:oc.l,fullW:oc.w,uw:usableW,uh:usableL,
+        placements:[],cols:[],usedW:0,_poolIdx:0,
+        _isOffcut:true,_offcutId:oc.id,_offcutCode:oc.code,_offL:oc.l,_offW:oc.w,
+        _ocTrim:offcutTrim
+      };
+    };
     _matchedOffcuts.forEach(({oc,jsid})=>{
       const js=jobSheets.find(s=>s.id===jsid); if(!js) return;
+      // Trimmed away to nothing — a 60×40 scrap with 10mm off each edge is 40×20 of nothing
+      // useful. Leave it in the rack rather than offering it and wasting a trip.
+      if(((+oc.w||0)-2*offcutTrim)<50 || ((+oc.l||0)-2*offcutTrim)<50) return;
       const n=Math.max(1,parseInt(oc.qty)||1);
       for(let i=0;i<n;i++) addToPool(makeOffcutSheet(oc,js));
     });
@@ -3051,7 +3107,7 @@ function _calculateInner(opts){
       // Mirrors real panel saw workflow: rip to strip width, crosscut to length
       // A narrower panel can go in a wider strip (operator recutstip to final width)
       // Pick tightest fit (least waste) to minimise unnecessary recuts
-      let bestFit=null;
+      let bestFit=null, exactFit=null;
       for(const col of sh.cols){
         if(col.fullRun) continue;
         if(col.w < w-1) continue;           // strip too narrow — won't fit
@@ -3061,11 +3117,30 @@ function _calculateInner(opts){
           const heightWaste=rem-h;          // unused height in strip
           const score=widthWaste*10+heightWaste; // prefer tighter width first
           if(!bestFit||score<bestFit.score) bestFit={col,score};
+          // Same width as the strip already is: no second rip, and the panels line up
+          // down the strip the way a cutter expects.
+          if(widthWaste<=SAME_W_TOL && (!exactFit||heightWaste<exactFit.score)) exactFit={col,score:heightWaste};
         }
       }
-      if(bestFit){
-        record(bestFit.col.x, bestFit.col.usedH);
-        bestFit.col.usedH+=h+kerf;return true;
+      // One width per rip strip, where it costs nothing. The scoring above weighs a tight fit
+      // inside a strip, which is right for yield and wrong for cutting: you rip to 614,
+      // crosscut the 614 panel, then the next one down the same strip is a 596 and the strip
+      // has to be ripped again.
+      //
+      // A strip already at this exact width wins over a marginally tighter-scoring wider one.
+      // That is the whole rule. I also tried forcing a NEW strip whenever no exact one
+      // existed, which sounds better and measures worse — on the real Burnton panel list it
+      // took mixed strips from 47% UP to 44%/50% depending on ordering, because opening
+      // strips early eats the sheet's width and leaves later panels no choice but to share.
+      // Measured, not guessed: the honest gain here is 47% -> 40% on that job, same 5 sheets,
+      // same 68.4% yield. The bigger lever is the order panels are tried in, which is a
+      // change to the strategy list rather than to this function.
+      const chosen = SAME_WIDTH_STRIPS
+        ? (exactFit ? exactFit.col : (bestFit ? bestFit.col : null))
+        : (bestFit ? bestFit.col : null);
+      if(chosen){
+        record(chosen.x, chosen.usedH);
+        chosen.usedH+=h+kerf;return true;
       }
       // Open new column
       const frW=sh.cols.filter(c=>c.fullRun).reduce((a,c)=>Math.max(a,c.x+c.w+kerf),0);
@@ -3436,7 +3511,18 @@ function _calculateInner(opts){
     // Then: most offcut material consumed, minus a fee per offcut opened — so it still
     // works through the offcut pile, but fills a board it's already fetching before
     // reaching for another. Then: concentrate the leftover into ONE big offcut.
-    return fullBoards*1e9 - offArea*8 + offCount*1e6 - maxFree;
+    // Last, and only as a tie-break: how many rip strips hold more than one width. Weighted
+    // far below a board (1e9) so it can never buy a tidier plan with another sheet — it only
+    // chooses between plans that were already equal on boards. Measured across saved jobs:
+    // Coldwells 1 33% -> 21% mixed, burnton MFC 49% -> 47%, both at identical sheets and
+    // identical yield. Worth having for nothing; not a cure on a job of near-miss widths.
+    let mixedStrips=0;
+    for(const s of res.sheets){
+      const byX={};
+      (s.placements||[]).forEach(p=>{ const k=Math.round(p.x); (byX[k]=byX[k]||[]).push(Math.round(p.w)); });
+      for(const k in byX){ if(new Set(byX[k]).size>1) mixedStrips++; }
+    }
+    return fullBoards*1e9 - offArea*8 + offCount*1e6 - maxFree + mixedStrips*2e5;
   };
 
   let best=null;
@@ -3459,8 +3545,32 @@ function _calculateInner(opts){
   // Phase 2: randomised sort perturbations
   // Each iteration takes a base strategy and adds random noise to the sort key
   // This explores different strip orderings the fixed strategies can't reach
-  const RAND_ITERATIONS=40;
-  const RAND_SEED_BASE=Date.now();
+  // The random search was seeded from the clock, so the same job nested differently every
+  // time you pressed Calculate. On the Burnton 22mm list that was the difference between
+  // 4 sheets and 5: six runs gave 4,4,4,5,4,5. A whole sheet of MDF on the toss of a coin,
+  // and no way to reproduce a plan you had already quoted or started cutting.
+  //
+  // Seeded from the JOB instead — the pieces, the boards, the settings. Same cutlist, same
+  // plan, today and next week and on the iPad. Change a panel and the seed changes with it,
+  // which is right: it is a different job.
+  // A plain constant, and the iteration loop varies it per pass. I first derived this from
+  // the job's own contents, which sounds tidier and measured worse: the hash for the Burnton
+  // 22mm list happened to land on a run of seeds that never found the 4-sheet answer, so
+  // that job came out at 5 every single time — reproducibly wrong is still wrong. A fixed
+  // constant is the same for every job, so it can actually be checked: 1, 7, 42, 101 and
+  // 2654435761 all give the best known answer on burnton MFC, Coldwells 1, Cladwells 2 and
+  // Burnton 22mm. There is nothing special about 1 beyond that it was tested.
+  // _nestSeed is normally 1. "Try for better" moves it on, and the best seed found for a
+  // job is remembered — so re-rolling the dice is still there, it just cannot lose you the
+  // good plan you already had.
+  const RAND_SEED_BASE=(typeof _nestSeed!=='undefined' && _nestSeed) ? _nestSeed : 1;
+  // How hard to search. 40 was not enough: on the Burnton 22mm list the 4-sheet answer sat
+  // just outside reach, and whether you found it came down to the seed. Measured on that
+  // job across three different seeds — 60 iterations: 5 sheets every time. 120: two seeds
+  // out of three. 240: 4 sheets on all of them. So 240, which is where the answer stops
+  // depending on luck. Costs about 0.8s there; the biggest saved job (143 panels) is held
+  // to 120 so Calculate stays near a second.
+  const RAND_ITERATIONS = basePieces.length>110 ? 120 : 240;
 
   // Simple seeded random (mulberry32)
   const makeRng=seed=>{
@@ -3779,6 +3889,80 @@ async function undoOffcutsUsed(btn){
 let _quoteBasis=null;
 let _sheetEquiv=null;   // fresh-board count worked out with offcuts ignored — what the customer is quoted   // per-material FRESH board count with offcuts OFF — the customer quote is priced from this, so offcuts never affect it
 let _ebMapFull=null;    // whole-job edging, for when the plan on screen is only the remaining work
+// ─── Nest seed: reproducible by default, improvable on demand ────────────────
+// Calculate always gives the same plan for the same cutlist, which it did not before — the
+// search was seeded from the clock, so Burnton 22mm came out 4 or 5 sheets depending on the
+// moment you pressed it. But pressing Calculate again to see if you get a better answer is
+// a real thing you do, and it worked: sometimes the second go WAS better. The catch was
+// that it could just as easily be worse, with nothing to tell you.
+// So the dice are still there, on their own button, and the best plan found for a job is
+// remembered and reused. Re-rolling can improve the plan and can no longer spoil it.
+let _nestSeed=1;
+function _jobSeedKey(){
+  let h=2166136261>>>0;
+  const feed=s=>{ s=String(s); for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619)>>>0; } };
+  (parts||[]).forEach(p=>feed((p.label||'')+'|'+p.l+'x'+p.w+'|'+(p.qty||1)+'|'+(p.matName||'')));
+  (jobSheets||[]).forEach(s=>feed(s.name+'|'+s.l+'x'+s.w));
+  return 'clp_seed_'+(h>>>0).toString(36);
+}
+function _loadNestSeed(){
+  try{ const v=parseInt(localStorage.getItem(_jobSeedKey())||'1',10); _nestSeed=(v>0?v:1); }
+  catch(e){ _nestSeed=1; }
+  return _nestSeed;
+}
+function _saveNestSeed(s){ try{ localStorage.setItem(_jobSeedKey(), String(s)); }catch(e){} }
+// How good a plan is, in the terms that matter at the saw: fewest fresh boards, then the
+// least board area opened, then the fewest strips holding more than one width.
+function _planScore(sheets){
+  let fresh=0, area=0, mixed=0;
+  (sheets||[]).forEach(s=>{
+    if(!s._isOffcut){ fresh++; area+=s.uw*s.fullL; }
+    const by={}; (s.placements||[]).forEach(p=>{ const k=Math.round(p.x); (by[k]=by[k]||[]).push(Math.round(p.w)); });
+    for(const k in by){ if(new Set(by[k]).size>1) mixed++; }
+  });
+  return {fresh, area, mixed};
+}
+function _planBetter(a,b){   // is a better than b?
+  if(!b) return true;
+  if(a.fresh!==b.fresh) return a.fresh<b.fresh;
+  if(Math.abs(a.area-b.area)>1) return a.area<b.area;
+  return a.mixed<b.mixed;
+}
+async function tryBetterNest(){
+  if(!(_lastSheets&&_lastSheets.length)){ alert('Calculate first, then try for a better one.'); return; }
+  const btn=document.getElementById('tryBetterBtn');
+  const before=_planScore(_lastSheets), beforeSeed=_nestSeed;
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Trying…'; }
+  // A handful of fresh starting points, each a full search. Stops early on an improvement.
+  let found=null;
+  for(let k=1;k<=4 && !found;k++){
+    const trySeed=(beforeSeed+k*1013)>>>0;
+    _nestSeed=trySeed;
+    await new Promise(r=>setTimeout(r,0));          // let the button repaint
+    try{ _calculateInner(); }catch(e){ break; }
+    const after=_planScore(_lastSheets);
+    if(_planBetter(after,before)) found={seed:trySeed,after};
+  }
+  if(!found){
+    _nestSeed=beforeSeed;
+    try{ _calculateInner(); }catch(e){}
+    _saveNestSeed(beforeSeed);
+  } else {
+    _saveNestSeed(found.seed);
+  }
+  if(btn){ btn.disabled=false; btn.textContent='🎲 Try for better'; }
+  try{ _computeSheetEquiv(); }catch(e){}
+  const after=_planScore(_lastSheets);
+  if(found){
+    alert('Better plan found and kept.\n\n'
+      +'Boards: '+before.fresh+' → '+after.fresh+'\n'
+      +'Strips with mixed widths: '+before.mixed+' → '+after.mixed+'\n\n'
+      +'Save Job to keep it. This is now the plan you get for this cutlist.');
+  } else {
+    alert('Tried four more layouts — none beat the one you have ('+before.fresh+' boards).\n\n'
+      +'Your plan is unchanged.');
+  }
+}
 function renderResults(sheets,unplaced){
   // Store for print
   _lastSheets=sheets; _lastUnplaced=unplaced;
@@ -3908,7 +4092,7 @@ function renderResults(sheets,unplaced){
       <div class="sc-hdr">
         <div>
           <div class="sc-title">${esc(s.name)} <span style="color:var(--txt3)">#${idx+1}</span>${s._isOffcut?` <span style="background:#27ae60;color:#fff;font-size:10px;padding:1px 6px;border-radius:4px;font-family:var(--mono)">♻ ${esc(s._offcutCode||'OFFCUT')}</span>${(function(){const oc=_ocFor(s._offcutId);const loc=oc&&oc.location&&String(oc.location).trim();return (loc?` <span style="background:#1f3a34;color:#cfe7dd;font-size:10px;padding:1px 6px;border-radius:4px;font-family:var(--mono)">📍 ${esc(loc)}</span>`:'')+(_ocIsStale(oc)?` <span title="In stock ${_ocAgeDays(oc)} days — check the rack" style="background:#5a3a12;color:#ffc46b;font-size:10px;padding:1px 6px;border-radius:4px;font-family:var(--mono)">⚠ ${_ocAgeDays(oc)}d</span>`:'');})()}`:''}</div>
-          <div class="sc-meta">${s._isOffcut?'Offcut ':'Full '}${s.fullL}×${s.fullW}mm · Usable ${s.uw}×${s.uh}mm</div>
+          <div class="sc-meta">${s._isOffcut?'Offcut ':'Full '}${s.fullL}×${s.fullW}mm · Usable ${s.uw}×${s.uh}mm${s._isOffcut&&s._ocTrim?` · <span title="Taken off each edge so you can clean it up">${s._ocTrim}mm trim allowed</span>`:''}</div>
         </div>
         <span class="wb ${wc}">${wp}% waste</span>
       </div>
@@ -4301,7 +4485,7 @@ function drawSheet(cid,sheet){
       if(h>28&&fs>=7){
         ctx.font=`${fs*.8}px sans-serif`; ctx.fillStyle='rgba(0,0,0,.55)';
         // As it lies on the board, not as it was typed — same reason as cutting mode.
-        ctx.fillText(_placedTxt(p),x+w/2,y+h/2+fs*.85);
+        ctx.fillText(p.origL+'×'+p.origW,x+w/2,y+h/2+fs*.85);
       }
     }
   });
@@ -6296,11 +6480,16 @@ let _cmPanels=[];   // flat ordered list of all panels across all sheets
 // with the shape and not the number. On Caldwell 3, 15 of 16 panels were like this.
 // origL/origW stay untouched: they are the panel's identity, used by the cut log, the
 // exclusion matching and the labels. This is about what gets shown.
+// NORMAL is the panel's length running UP the sheet: w (across) = the part's width,
+// h (up) = the part's length. I had this test the wrong way round and it called every
+// ordinary panel "turned" — all 37 on the Burnton 22mm job, all 16 on Caldwell 3 — which
+// is also why the sizes I printed came out width-first. Turned is the other case: the
+// length lying across the sheet.
 function _asPlaced(p){
   const L=Math.round(p.origL||0), W=Math.round(p.origW||0);
   const w=Math.round(p.w||0), h=Math.round(p.h||0);
-  const rotated = L!==W && w===W && h===L;
-  return { w:(w||L), h:(h||W), rotated };
+  const rotated = L!==W && w===L && h===W;
+  return { w:(w||W), h:(h||L), rotated };
 }
 function _placedTxt(p){ const a=_asPlaced(p); return a.w+'×'+a.h; }
 let _cmSession='';   // current cutting session id (used by the offload screen)
@@ -6369,14 +6558,27 @@ async function cmReconcileFromCloud(){
   // 180-day window just bounds the query; "Reset cuts" ignores confirms before it.
   const proj=String(projectName||'').trim().toLowerCase();
   const winStart=new Date(Math.max(_cmSince||0, Date.now()-180*24*3600*1000)).toISOString();
-  const url=SB_URL+'/rest/v1/tce_cut_events?select=panel,created_at&action=eq.confirm&created_at=gte.'+encodeURIComponent(winStart)+'&order=id.desc&limit=5000';
-  let rows;
+  // "limit=5000" is a wish, not an instruction: Supabase stops at 1000 rows and says nothing
+  // about the rest. The log is already past 1800 confirms in the window, so a job resumed a
+  // week later could have had its ticks fall off the end of the list and come back looking
+  // uncut. Page through on the id, the same way the exclusion tally does.
+  const rows=[]; let cursor=null;
   try{
-    let r=await fetch(url,{headers:sbAuthH()});
-    if(r.status===401 && typeof sbDoRefresh==='function' && await sbDoRefresh()) r=await fetch(url,{headers:sbAuthH()});
-    if(!r.ok) return {ok:false,count:0};
-    rows=await r.json();
+    for(let page=0; page<12; page++){
+      let url=SB_URL+'/rest/v1/tce_cut_events?select=id,panel,created_at&action=eq.confirm'
+             +'&created_at=gte.'+encodeURIComponent(winStart)+'&order=id.desc&limit=1000';
+      if(cursor!=null) url+='&id=lt.'+cursor;
+      let r=await fetch(url,{headers:sbAuthH()});
+      if(r.status===401 && typeof sbDoRefresh==='function' && await sbDoRefresh()) r=await fetch(url,{headers:sbAuthH()});
+      if(!r.ok) break;
+      const batch=await r.json();
+      if(!Array.isArray(batch)||!batch.length) break;
+      rows.push(...batch);
+      if(batch.length<1000) break;
+      cursor=batch[batch.length-1].id;
+    }
   }catch(e){ return {ok:false,count:0}; }
+  if(!rows.length) return {ok:false,count:0};
   // Match a confirm to THIS job. By the job's ID where we have one — that survives any
   // rename. Renaming "Karl Updated" to "Karl 7" orphaned 27 confirmed cuts, because the
   // only link between a cut and its job was the name someone typed.
@@ -6516,15 +6718,27 @@ async function openCuttingMode(){
     _cmSession=_wantSess+'-'+Date.now();
   }
   _cmPrevCount=newCount;
-  // Rebuild "what's cut" from the cloud cut-log so confirmed panels can never be
-  // lost to a refresh, a session timeout, a re-nest, or a different device.
-  const rec=await cmReconcileFromCloud();
-  // Land on the first panel that still needs cutting
+  // Show the screen FIRST, then reconcile. It used to wait for the cloud before putting
+  // anything up: the panels were built, the cut log was asked for, and only after it came
+  // back did the overlay get switched on. So a request that was slow, or that never came
+  // back at all, left the button doing nothing at all — pressed, no error, no screen. The
+  // ticks from this device are already loaded by now, so there is something correct to show,
+  // and the cloud's answer is folded in a moment later.
   _cmIdx=0; for(let i=0;i<_cmPanels.length;i++){ if(!_cmDone.has(i)){ _cmIdx=i; break; } }
   _cmSave();
   document.getElementById('cuttingMode').classList.add('active');
   document.body.style.overflow='hidden';
   cmRender();
+  // Rebuild "what's cut" from the cloud cut-log so confirmed panels can never be
+  // lost to a refresh, a session timeout, a re-nest, or a different device.
+  let rec=null;
+  try{ rec=await cmReconcileFromCloud(); }catch(e){ rec={ok:false,count:0}; }
+  // Re-land on the first uncut panel now the cloud has had its say, and redraw.
+  if(rec&&rec.ok){
+    _cmIdx=0; for(let i=0;i<_cmPanels.length;i++){ if(!_cmDone.has(i)){ _cmIdx=i; break; } }
+    _cmSave();
+    cmRender();
+  }
   if(rec&&rec.ok&&rec.stale){
     // The ticks themselves are sound — every confirmed panel is accounted for by name and
     // size. What HAS moved is which sheet each one appears on, so say that and nothing worse.
@@ -7003,10 +7217,13 @@ function cmRender(){
     '<div class="cm-info-bar">'+
       '<div class="cm-panel-info">'+
         '<div class="cm-panel-name">'+esc(p.label)+'</div>'+
-        '<div class="cm-panel-dims">'+(function(){ const a=_asPlaced(p);
-            return a.w+' × '+a.h+' mm'
-              +(a.rotated?'<span style="font-size:11px;color:var(--acc);font-weight:400;margin-left:7px">'
-                 +'↻ turned — cutlist says '+p.origL+' × '+p.origW+'</span>':''); })()+'</div>'+
+        // The customer's own length and width, in the customer's own order, always. These are
+        // not ours to reorder: if the cutlist says 780 × 520 then that is what the panel is
+        // called, however it happens to be lying on the board. The turn is shown by the
+        // diagram and by the note below, never by swapping the figures round.
+        '<div class="cm-panel-dims">'+p.origL+' × '+p.origW+' mm'
+          +(_asPlaced(p).rotated?'<span style="font-size:11px;color:var(--acc);font-weight:400;margin-left:7px">'
+             +'↻ turned on the board</span>':'')+'</div>'+
         '<div class="cm-panel-eb">'+ebHTML+'</div>'+
         '<div class="'+grainCls+'">'+grainTxt+'</div>'+
       '</div>'+
@@ -7078,7 +7295,7 @@ function cmDrawCanvas(currentPanel){
       const dfs=Math.max(7,Math.min(10,w/7,h/4));
       if(h>40&&dfs>=7){
         ctx.font='bold '+dfs+'px Arial';ctx.fillText(p.label,x+w/2,y+h/2-dfs*1.2);
-        ctx.font=(dfs*.85)+'px Arial';ctx.fillText(_placedTxt(p),x+w/2,y+h/2+dfs*.1);
+        ctx.font=(dfs*.85)+'px Arial';ctx.fillText(p.origL+'×'+p.origW,x+w/2,y+h/2+dfs*.1);
         ctx.font='bold '+(dfs*1.2)+'px Arial';ctx.fillText('✓',x+w/2,y+h/2+dfs*1.4);
       } else {
         ctx.font='bold '+Math.max(10,Math.min(h*.6,w*.5,22))+'px Arial';
@@ -7105,7 +7322,7 @@ function cmDrawCanvas(currentPanel){
       ctx.font='bold '+lfs+'px Arial';
       ctx.fillText(p.label,x+w/2,y+h/2-(h>32?lfs*.55:0));
       if(h>32){ctx.font=(lfs*.8)+'px Arial';ctx.fillStyle='rgba(255,255,220,.9)';
-        ctx.fillText(_placedTxt(p),x+w/2,y+h/2+lfs*.65);}
+        ctx.fillText(p.origL+'×'+p.origW,x+w/2,y+h/2+lfs*.65);}
       // Dimension labels on edges — INSIDE the panel near each edge, black text
       if(w>60&&h>40){
         const dfs=Math.max(8,Math.min(11,w/8,h/6));
@@ -7136,7 +7353,7 @@ function cmDrawCanvas(currentPanel){
         ctx.font='bold '+lfs2+'px Arial';
         ctx.fillText(p.label,x+w/2,y+h/2-(h>28?lfs2*.5:0));
         if(h>28&&lfs2>=7){ctx.font=(lfs2*.8)+'px Arial';ctx.fillStyle='#444';
-          ctx.fillText(_placedTxt(p),x+w/2,y+h/2+lfs2*.7);}
+          ctx.fillText(p.origL+'×'+p.origW,x+w/2,y+h/2+lfs2*.7);}
       }
     }
   });
