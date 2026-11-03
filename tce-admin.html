@@ -331,15 +331,23 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
           <div><label>Length (mm)</label><input type="number" id="lamL" value="2500" oninput="lamCalc()"></div>
           <div><label>Width (mm)</label><input type="number" id="lamW" value="1220" oninput="lamCalc()"></div>
           <div><label>Thickness</label><input type="number" id="lamThick" value="18" oninput="lamCalc()"></div>
-          <div><label>Board £/sheet</label><input type="number" step="0.01" id="lamBoard" value="60.89" oninput="lamCalc()"></div>
-          <div><label>Laminate £/sheet</label><input type="number" step="0.01" id="lamFace" placeholder="awaiting price" oninput="lamCalc()"></div>
+          <div><label>Core £/sheet</label><input type="number" step="0.01" id="lamBoard" value="60.89" oninput="lamCalc()"></div>
+          <div><label>Front face £/sheet</label><input type="number" step="0.01" id="lamFace" placeholder="awaiting price" oninput="lamCalc()"></div>
         </div>
-        <div style="display:flex;gap:10px;align-items:end;margin-top:8px">
+        <!-- The two faces are priced separately. A make-up is rarely the same both sides: the
+             one on the bench now is a PM on the front and an ST9 on the back over a birch core,
+             and those are different sheets at different money. One price × 2 faces could only
+             ever be right by accident. -->
+        <div style="display:grid;grid-template-columns:1.6fr .8fr .8fr .8fr .8fr .8fr;gap:8px;align-items:end;margin-top:8px">
+          <div><label>Front decor / finish</label><input type="text" id="lamFaceName" placeholder="e.g. U767 PM" oninput="lamCalc()"></div>
+          <div><label>Back decor / finish</label><input type="text" id="lamBackName" placeholder="e.g. U767 ST9" oninput="lamCalc()"></div>
+          <div><label>Back face £/sheet</label><input type="number" step="0.01" id="lamBack" placeholder="same as front" oninput="lamCalc()"></div>
           <div><label>Faces laminated</label>
             <select id="lamFaces" onchange="lamCalc()">
               <option value="2" selected>2 — both faces (balanced)</option>
               <option value="1">1 — show face only</option>
             </select></div>
+          <div></div>
           <button class="btn btn-secondary btn-sm" onclick="lamSaveBoard()">+ Save as board</button>
         </div>
         <div id="lamOut" style="margin-top:12px;font-size:13px"></div>
@@ -457,7 +465,7 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
 // says so. A device can run week-old code while you are told a fix is live. So the app asks
 // the server what the current build is and says plainly when it is behind. It never reloads
 // by itself — that is your call, not the app's.
-const TCE_BUILD='2026-11-03-d';
+const TCE_BUILD='2026-11-03-e';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -3421,21 +3429,29 @@ function lamRatesSave(){
   lamCalc();
   showToast('Press laminating rates saved ✓');
 }
-function lamCost(L,W,faces,boardCost,faceCost){
+// backCost is the SECOND face. Left empty it matches the front, which is the old behaviour
+// and the common case; given a figure, each face is costed on its own.
+function lamCost(L,W,faces,boardCost,faceCost,backCost){
   const r=lamRates();
   const area=(L/1000)*(W/1000);
   const glue=area*r.glue*faces;
   const press=r.mins*r.perMin;
   const process=glue+press+r.labour;
-  const materials=boardCost+faceCost*faces;
-  return {area,glue,press,labour:r.labour,process,materials,total:process+materials};
+  const back=(backCost==null||backCost==='')?faceCost:Number(backCost)||0;
+  const facesCost = faces>=2 ? (faceCost+back) : faceCost;
+  const materials=boardCost+facesCost;
+  return {area,glue,press,labour:r.labour,process,materials,total:process+materials,
+          front:faceCost, back:(faces>=2?back:0), facesCost};
 }
 function lamCalc(){
   const out=document.getElementById('lamOut'); if(!out) return;
   const L=_lamNum('lamL',0), W=_lamNum('lamW',0), faces=parseInt((document.getElementById('lamFaces')||{}).value)||2;
   const board=_lamNum('lamBoard',0), face=_lamNum('lamFace',0);
+  const backRaw=(document.getElementById('lamBack')||{}).value;
+  const fName=((document.getElementById('lamFaceName')||{}).value||'').trim();
+  const bName=((document.getElementById('lamBackName')||{}).value||'').trim();
   if(!L||!W){ out.innerHTML='<span style="color:#6b8f7e">Enter a sheet size.</span>'; return; }
-  const c=lamCost(L,W,faces,board,face);
+  const c=lamCost(L,W,faces,board,face,backRaw);
   const row=(a,b,muted)=>`<tr><td style="padding:2px 10px 2px 0;color:${muted?'#6b8f7e':'#cfe7dd'}">${a}</td><td style="padding:2px 0;text-align:right;color:${muted?'#6b8f7e':'#e8f0ec'}">${b}</td></tr>`;
   const faceNote=face>0?'':' <span style="color:#e6a23c">(laminate price not entered yet)</span>';
   out.innerHTML=
@@ -3446,8 +3462,9 @@ function lamCalc(){
       ${row('Labour','£'+c.labour.toFixed(2))}
       ${row('<b>Process per sheet</b>','<b>£'+c.process.toFixed(2)+'</b>')}
       ${row('&nbsp;','&nbsp;',true)}
-      ${row('Board','£'+board.toFixed(2))}
-      ${row('Laminate × '+faces,'£'+(face*faces).toFixed(2))}
+      ${row('Core','£'+board.toFixed(2))}
+      ${row('Front face'+(fName?' — '+_attr(fName):''),'£'+c.front.toFixed(2))}
+      ${faces>=2?row('Back face'+(bName?' — '+_attr(bName):'')+(String(backRaw||'').trim()===''?' <span style="color:#6b8f7e">(same as front)</span>':''),'£'+c.back.toFixed(2)):''}
       ${row('<b>Total cost / sheet</b>','<b style="color:#f0a500">£'+c.total.toFixed(2)+'</b>')}
       ${row('Cost per m²','£'+(c.total/c.area).toFixed(2)+'/m²',true)}
     </table><div style="font-size:11px;color:#6b8f7e;margin-top:6px">This is your <b>cost</b> — surcharge and customer markup are applied on the quote as usual.${faceNote}</div>`;
@@ -3457,10 +3474,29 @@ async function lamSaveBoard(){
   const L=_lamNum('lamL',0), W=_lamNum('lamW',0), thick=_lamNum('lamThick',18);
   const faces=parseInt(document.getElementById('lamFaces').value)||2;
   const board=_lamNum('lamBoard',0), face=_lamNum('lamFace',0);
+  const backRaw=(document.getElementById('lamBack')||{}).value;
+  const fName=((document.getElementById('lamFaceName')||{}).value||'').trim();
+  const bName=((document.getElementById('lamBackName')||{}).value||'').trim();
   if(!name){ alert('Give the laminated board a name, e.g. "Poplar Ply + Egger laminate".'); return; }
   if(!L||!W){ alert('Enter the sheet size.'); return; }
   if(!face){ if(!confirm('No laminate price entered — save with laminate at £0?\n\nYou can edit the board price later when the quote comes in.')) return; }
-  const c=lamCost(L,W,faces,board,face);
+  const c=lamCost(L,W,faces,board,face,backRaw);
+  // Two different faces is worth saying out loud on the board itself. In six months the
+  // price is just a number unless the make-up is written beside it, and "which way round
+  // was the PM?" is not a question you want to answer by taking a panel off the stack.
+  const makeup = faces>=2 && fName && bName && fName.toLowerCase()!==bName.toLowerCase()
+    ? fName+' front / '+bName+' back' : (fName||'');
+  // Written into the NAME rather than a new column, because the name is what shows on the
+  // board list, in the optimiser's picker and on the quote — and it is what the offcut
+  // matcher reads. A make-up recorded somewhere you have to go and look for is a make-up
+  // nobody looks at. Offered, not forced: it is your naming.
+  let finalName=name;
+  if(makeup && name.toLowerCase().indexOf(fName.toLowerCase())<0){
+    const suggested=name+' ('+makeup+')';
+    if(confirm('Two different faces on this board:\n  '+makeup+'\n\n'
+      +'The name does not say so. Save it as:\n  '+suggested+'\n\n'
+      +'OK to use that name, Cancel to keep "'+name+'".')) finalName=suggested;
+  }
   try{
     // The laminate faces are part of this board, not a ⧉ LAM glue-up, so nothing on the job
     // will ever flag them. Bake them into the board's density instead — otherwise the weight
@@ -3472,12 +3508,12 @@ async function lamSaveBoard(){
       eff=Math.round(boardDensity(name) + (faces*HPL_T*HPL_DENSITY)/t);
     }catch(e){}
     await sbFetch('tce_custom_boards',{method:'POST',headers:{'Prefer':'return=minimal'},body:{
-      board_name:name, thickness_mm:Math.round(thick), sheet_size:Math.round(L)+'x'+Math.round(W),
+      board_name:finalName, thickness_mm:Math.round(thick), sheet_size:Math.round(L)+'x'+Math.round(W),
       base_cost:Number(c.total.toFixed(2)), supplier:'Lathams',
       density_kgm3: eff>0 ? eff : null
     }});
     await loadCustomBoards();
-    showToast(name+' saved at £'+c.total.toFixed(2)+'/sheet ✓');
+    showToast(finalName+' saved at £'+c.total.toFixed(2)+'/sheet ✓');
   }catch(e){ alert('Error saving board: '+e.message); }
 }
 async function addCustomBoard() {
