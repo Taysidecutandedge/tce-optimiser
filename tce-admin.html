@@ -465,7 +465,7 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
 // says so. A device can run week-old code while you are told a fix is live. So the app asks
 // the server what the current build is and says plainly when it is behind. It never reloads
 // by itself — that is your call, not the app's.
-const TCE_BUILD='2026-11-04-c';
+const TCE_BUILD='2026-11-04-f';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -1519,7 +1519,13 @@ async function buildQuote() {
     const _qbV = _lookupMat((jobData&&jobData.quoteBasis)||null, mat);
     const _shtsAuto = (_seV!=null) ? _seV : (_qbV!=null) ? _qbV : data.sheets;
     const _hasLam = (data.lamN>0) || (data.lamM2>0);
-    if (!_shtsAuto && !_hasEb && !data.ebMmLam && !_hasLam) return;
+    // How many panels the cutlist actually asks for on this board. A material with parts is
+    // never skipped, however empty it looks — skipping it is how a board drops off a quote
+    // without a word, and the gate below never gets the chance to object.
+    const _partsOnMat = (jobData.parts||[])
+      .filter(p=>_matKey({[mat]:1}, p.matName||'')===mat)
+      .reduce((n,p)=>n+Math.max(1,parseInt(p.qty)||1),0);
+    if (!_shtsAuto && !_hasEb && !data.ebMmLam && !_hasLam && !_partsOnMat) return;
     const ov = _quoteOverrides[mat] || {};
     const autoPrice = lookupBoardPrice(mat, tier);
     const boardPrice = ov.boardPrice !== undefined ? ov.boardPrice : (autoPrice ?? 0);
@@ -1610,12 +1616,24 @@ async function buildQuote() {
     // Parts on this material but nil sheets means the quote is giving the material away. It
     // happens when every panel on that board was already cut, so the latest nest left them
     // out and the board vanished from the plan — Linsey V4 Rev 4 and its MDF worktops.
-    if(!(shts>0) && ov.boardSheets==null){
-      const _np=(jobData.parts||[]).filter(p=>(p.matName||'')===mat)
-                                   .reduce((n,p)=>n+Math.max(1,parseInt(p.qty)||1),0);
-      if(_np>0) gBlock(`<b>${mat}</b> has ${_np} part${_np!==1?'s':''} in the job but <b>no boards counted</b>, so it's being charged at nil material.`
+    if(!(shts>0) && ov.boardSheets==null && _partsOnMat>0){
+      gBlock(`<b>${mat}</b> has ${_partsOnMat} part${_partsOnMat!==1?'s':''} in the job but <b>no boards counted</b>, so it's being charged at nil material.`
         +` Usually this means those panels are already cut, so the latest nest left them out.`
         +` Re-calculate in the optimiser, or type the sheet count in.`);
+    }
+    // ── gate: charging for a board the cutlist no longer has ──
+    // The mirror image, and the more expensive one. Rename a board — or swap it for a new
+    // one — and the parts carry the new name while the SAVED LAYOUT and sheet equivalent
+    // still carry the old. The quote then prices the old name, at whatever the old name
+    // matches today, and nothing on screen looks wrong. On Cladwells 2 Rev 3 that was 4
+    // sheets billed at £176.55 against a board that actually costs £281.52, while the real
+    // board sat at nil sheets: £420 of material adrift on one job.
+    if(shts>0 && !_partsOnMat){
+      const _near=[...new Set((jobData.parts||[]).map(p=>p.matName).filter(Boolean))];
+      gBlock(`<b>${mat}</b> is being charged for ${shts} sheet${shts!==1?'s':''}, but <b>no part in the cutlist is on it</b>.`
+        +` The saved layout was nested on this board before it was renamed or swapped.`
+        +(_near.length?` The cutlist uses: ${_near.map(n=>'<b>'+_attr(n)+'</b>').join(', ')}.`:'')
+        +` Open the job in the optimiser, press Calculate and save, so the layout and the quote agree.`);
     }
     const boardBase = bShts * boardPrice;
     const boardTotal = surcharge ? boardBase * 1.08 : boardBase;
