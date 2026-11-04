@@ -465,7 +465,7 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
 // says so. A device can run week-old code while you are told a fix is live. So the app asks
 // the server what the current build is and says plainly when it is behind. It never reloads
 // by itself — that is your call, not the app's.
-const TCE_BUILD='2026-11-03-e';
+const TCE_BUILD='2026-11-04-c';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -3160,7 +3160,15 @@ function renderCustomBoards() {
       <div style="font-size:13px;font-weight:bold;color:#f0a500;margin-bottom:8px">${label}</div>`;
     Object.entries(sizes).forEach(([size, boards]) => {
       html += `<div style="margin-bottom:8px">
-        <div style="font-size:11px;color:#6b8f7e;margin-bottom:4px">${size}</div>
+        <!-- Editable. A sheet size typed wrong once was unfixable without deleting the board
+             and starting again: thickness, price, name and density could all be corrected,
+             the size could not. 2400 instead of 2440 on a new make-up is a 40mm lie that only
+             shows up as panels silently failing to fit. -->
+        <div style="font-size:11px;color:#6b8f7e;margin-bottom:4px">
+          <span onclick="editSheetSize('${_attr(size)}', ${JSON.stringify(boards.map(x=>x.id))})"
+            title="Sheet size — click to correct it for all ${boards.length} thickness${boards.length===1?'':'es'} at this size"
+            style="cursor:pointer;border-bottom:1px dotted #6b8f7e">${size} ✎</span>
+        </div>
         <div style="display:flex;flex-wrap:wrap;gap:8px">`;
       boards.sort((a,b)=>a.thickness_mm-b.thickness_mm).forEach(b => {
         html += `<div style="background:#0d1f1a;border:1px solid #2b4a40;border-radius:6px;padding:8px 10px;min-width:110px">
@@ -3195,6 +3203,32 @@ function renderCustomBoards() {
 }
 
 // Fix a thickness mistake — saves immediately and re-groups the boards.
+// Correct a sheet size. Applies to every thickness saved at that size, because they are the
+// same physical sheet — if the 20mm is really 2440 long then so is the 18mm beside it.
+// The board price is NOT touched: the sheet was always that size, it was only typed wrong,
+// so what you paid for it has not changed.
+async function editSheetSize(oldSize, ids){
+  const v=prompt('Sheet size for these '+ids.length+' board'+(ids.length===1?'':'s')+'.\n\n'
+    +'Length × width in mm, e.g. 2440x1220.\n\n'
+    +'The price is left alone — correcting a typo does not change what the sheet cost.', oldSize);
+  if(v===null) return;
+  const m=String(v).toLowerCase().replace(/\s/g,'').match(/^(\d{3,5})[x×*](\d{3,5})$/);
+  if(!m){ alert('Write it as length x width, e.g. 2440x1220.'); return; }
+  const L=parseInt(m[1],10), W=parseInt(m[2],10);
+  if(L<100||W<100||L>6000||W>3000){ alert('That size does not look like a sheet — check the figures.'); return; }
+  const size=L+'x'+W;
+  if(size===oldSize) return;
+  if(!confirm('Change '+oldSize+' to '+size+' for '+ids.length+' board'+(ids.length===1?'':'s')+'?\n\n'
+    +'Jobs already saved keep the size they were nested on — reopen a job and re-pick the board to pull the new size in.')) return;
+  try{
+    for(const id of ids){
+      await sbFetch('tce_custom_boards?id=eq.'+id, {method:'PATCH', headers:{'Prefer':'return=minimal'},
+        body:{sheet_size:size}});
+    }
+    showToast('Sheet size updated → '+size+' ✓');
+    await loadCustomBoards();
+  }catch(e){ alert('Error: '+e.message); }
+}
 async function patchBoardThickness(id, val){
   const thick=parseInt(val)||0;
   if(!thick){ alert('Enter a valid thickness (mm)'); return; }

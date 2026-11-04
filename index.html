@@ -528,6 +528,7 @@ select option{background:var(--surf2)}
       <button class="btn btn-ghost btn-sm" onclick="addPart()">+ Add Part</button>
     </div>
     <div id="matCheckBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(240,165,0,.14);border:1px solid rgba(240,165,0,.5);border-radius:8px;color:#ffcf8a;font-size:12.5px;line-height:1.7"></div>
+    <div id="staleNestBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(200,80,80,.14);border:1px solid rgba(220,110,110,.55);border-radius:8px;color:#ffc9c9;font-size:12.5px;line-height:1.7"></div>
     <div id="doorBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(212,130,10,.12);border:1px solid rgba(212,130,10,.45);border-radius:8px;color:#e8c99a;font-size:12.5px;line-height:1.7"></div>
     <div id="sheetEquivBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(40,120,170,.16);border:1px solid rgba(70,150,210,.5);border-radius:8px;color:#9cc;font-size:12.5px;line-height:1.7"></div>
     <div style="overflow-x:auto">
@@ -711,7 +712,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-11-03-e';
+const TCE_BUILD='2026-11-04-c';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -2162,6 +2163,43 @@ function renderMatCheck(){
     + '<button onclick="manageMatAliases()" style="background:none;border:1px solid rgba(255,255,255,.35);color:inherit;border-radius:5px;font-size:11px;padding:2px 8px;cursor:pointer;margin-left:4px">Wrong? Fix the memory</button>';
 }
 
+// Does the plan on screen still cover the job? On Caldwells 2 it did not: the board had been
+// swapped from 18mm birch to the new faced sheet and more parts added, but the layout showing
+// was from before — 25 of 40 panels, with the other 15 neither laid out nor listed as
+// unplaced. Nothing said a word, and a plan that is quietly 15 panels short is the worst kind
+// of wrong, because everything on screen looks finished.
+// Counts what the plan accounts for against what the job asks for, and says so plainly.
+function renderStaleNest(){
+  const el=document.getElementById('staleNestBar'); if(!el) return;
+  const hide=()=>{ el.style.display='none'; el.innerHTML=''; };
+  if(!(_lastSheets&&_lastSheets.length)) return hide();
+  const want={}; let wantN=0;
+  (parts||[]).forEach(p=>{
+    const q=Math.max(1,parseInt(p.qty)||1)*(p.laminate?2:1);
+    const k=String(p.label||'')+'|'+Math.round(p.l)+'x'+Math.round(p.w);
+    want[k]=(want[k]||0)+q; wantN+=q;
+  });
+  const seen={};
+  const bump=(label,l,w,n)=>{ const k=String(label||'').replace(/\s*·LAM×2$/,'')+'|'+Math.round(l)+'x'+Math.round(w);
+    seen[k]=(seen[k]||0)+(n||1); };
+  (_lastSheets||[]).forEach(s=>(s.placements||[]).forEach(p=>bump(p.label,p.origL,p.origW)));
+  (_lastUnplaced||[]).forEach(p=>bump(p.label,p.origL||p.l,p.origW||p.w));
+  (window._lastExcludedCut||[]).forEach(p=>bump(p.label,p.l,p.w));
+  let missing=0; const names=[];
+  Object.keys(want).forEach(k=>{
+    const gap=want[k]-(seen[k]||0);
+    if(gap>0){ missing+=gap; names.push(k.split('|')[0]+' ×'+gap); }
+  });
+  if(missing<=0) return hide();
+  el.style.display='block';
+  el.innerHTML='<span style="font-weight:700">⚠ This layout is out of date — '+missing+' of '+wantN
+    +' panels are not in it</span>, and they are not listed as unplaced either. '
+    +'It was worked out before the cutlist or the boards were last changed.<br>'
+    +'<span style="opacity:.9">Do not cut from it. Press Calculate.</span><br>'
+    + names.slice(0,10).map(n=>'<span style="display:inline-block;background:rgba(0,0,0,.25);border-radius:5px;padding:2px 8px;margin:3px 4px 0 0;font-family:var(--mono);font-size:12px">'+esc(n)+'</span>').join('')
+    + (names.length>10?'<span style="opacity:.7;font-size:11px"> +'+(names.length-10)+' more</span>':'');
+}
+
 function removePart(id){parts=parts.filter(p=>p.id!==id);save();renderParts();}
 function ps(id,k,v){const p=parts.find(x=>x.id===id);if(p){p[k]=v;save();}}
 
@@ -2226,6 +2264,7 @@ function effGrain(p){
 
 function renderParts(){
   try{ renderMatCheck(); }catch(e){}
+  try{ renderStaleNest(); }catch(e){}
   try{ renderDoorBar(); }catch(e){}
   const tb=document.getElementById('partsTbody');
   tb.innerHTML='';
