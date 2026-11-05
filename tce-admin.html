@@ -465,7 +465,7 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
 // says so. A device can run week-old code while you are told a fix is live. So the app asks
 // the server what the current build is and says plainly when it is behind. It never reloads
 // by itself — that is your call, not the app's.
-const TCE_BUILD='2026-11-05-b';
+const TCE_BUILD='2026-11-05-c';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -564,7 +564,40 @@ let _ebRates = [];
 let _customers = [];
 let _jobs = [];
 let _currentJob = null;
-let _quoteOverrides = {}; // matName → {boardPrice, cutRate, surcharge, ebTapeKey}
+let _quoteOverrides = {}; // matName → {boardPrice, cutRate, surcharge, surchargeOn, ebTapeKey}
+// ── Supplier surcharge, per line ────────────────────────────────────────────
+// One tick used to put the 8% on the boards AND the edging AND the laminated edging, all or
+// nothing, and never on the cutting. That is right when a whole delivery carries a surcharge
+// and wrong the rest of the time — the board came in on a surcharged order and the tape did
+// not, or the other way round. So it is now a tick per line.
+// ov.surchargeOn is {board,cutting,eb,lam}. Quotes saved before this carry a plain
+// ov.surcharge boolean, and those must price EXACTLY as they did when you sent them: true
+// meant boards, edging and laminated edging, and never cutting.
+const SUR_RATE=1.08;
+function _sur(ov, which){
+  if(!ov) return false;
+  if(ov.surchargeOn && typeof ov.surchargeOn==='object') return !!ov.surchargeOn[which];
+  return !!ov.surcharge && which!=='cutting';
+}
+function _surMul(ov, which){ return _sur(ov,which) ? SUR_RATE : 1; }
+// Writing one flag has to pin the others down too, otherwise an old quote with the plain
+// boolean would lose its other surcharges the moment you touched one of them.
+function _surSet(mat, which, on){
+  const ov=_quoteOverrides[mat]||{};
+  const cur=(ov.surchargeOn && typeof ov.surchargeOn==='object')
+    ? {...ov.surchargeOn}
+    : {board:!!ov.surcharge, cutting:false, eb:!!ov.surcharge, lam:!!ov.surcharge};
+  cur[which]=!!on;
+  _quoteOverrides[mat]={...ov, surchargeOn:cur, surcharge:undefined};
+  buildQuote();
+}
+// The little tick that goes on a line.
+function _surChip(mat, which, label){
+  const on=_sur(_quoteOverrides[mat]||{}, which);
+  return `<label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;`
+    +`color:${on?'#f0a500':'#6b8f7e'};margin-left:8px;cursor:pointer" title="Add the 8% supplier surcharge to ${label}">`
+    +`<input type="checkbox" ${on?'checked':''} onchange="_surSet('${mat.replace(/'/g,"\\'")}','${which}',this.checked)"> +8%</label>`;
+}
 // Every priced line of the quote currently on screen. Saved with the quote so the record is
 // the numbers you actually sent, not whatever today's rates would produce.
 let _quoteLines = [];
@@ -1605,7 +1638,7 @@ async function buildQuote() {
     const ov = _quoteOverrides[mat] || {};
     const autoPrice = lookupBoardPrice(mat, tier);
     const boardPrice = ov.boardPrice !== undefined ? ov.boardPrice : (autoPrice ?? 0);
-    const surcharge = ov.surcharge || false;
+    const surB=_sur(ov,'board'), surC=_sur(ov,'cutting'), surE=_sur(ov,'eb'), surL=_sur(ov,'lam');
     const cutRate = ov.cutRate !== undefined ? ov.cutRate : cutRateForMat(mat, jobData, tier);
     // ── gate: material pricing ──
     if(autoPrice === null && ov.boardPrice === undefined)
@@ -1640,7 +1673,7 @@ async function buildQuote() {
       const tk=((ov.ebTapeByThk||{})[thk]) || _defTape(thk);
       const rt=_ebRates.find(r=>r.tape_key===tk);
       const mr=rt?parseFloat(rt.mat_rate):0.60, br=rt?parseFloat(rt.base_rate):2.90;
-      const rate=br+mr*(surcharge?1.08:1);
+      const rate=br+mr*_surMul(ov,'eb');
       const tot=_r2(_r2(m)*_r2(rate)); ebTotal=_r2(ebTotal+tot);
       ebRowsHtml+=`
     <tr>
@@ -1649,10 +1682,10 @@ async function buildQuote() {
         <select style="width:auto;display:inline;padding:2px 4px;font-size:11px;margin:0 4px"
           onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},ebTapeByThk:{...((_quoteOverrides['${mat}']||{}).ebTapeByThk||{}),'${thk}':this.value}};buildQuote()">
           ${_ebRates.map(r=>`<option value="${r.tape_key}" ${r.tape_key===tk?'selected':''}>${r.tape_label}</option>`).join('')}
-        </select>
+        </select>${_surChip(mat,'eb','the edging — all tapes on this board')}
       </td>
       <td></td><td></td>
-      <td class="r" style="font-size:11px;color:#6b8f7e">@ £${rate.toFixed(2)}/lm${surcharge?" <span style=\"color:#f0a500\">(+8% mat)</span>":""}</td>
+      <td class="r" style="font-size:11px;color:#6b8f7e">@ £${rate.toFixed(2)}/lm${surE?" <span style=\"color:#f0a500\">(+8% mat)</span>":""}</td>
       <td class="r">£${tot.toFixed(2)}</td>
     </tr>`;
     });
@@ -1714,16 +1747,17 @@ async function buildQuote() {
     // Rounded the same way the lines are, so a material's subtotal equals the lines printed
     // under it. The surcharge lives in the RATE now, not in a separate multiply at the end —
     // that separation is what let it fall out of the saved lines in the first place.
-    const boardRate = _r2(boardPrice*(surcharge?1.08:1));
+    const boardRate = _r2(boardPrice*_surMul(ov,'board'));
     const boardTotal = _r2(_r2(bShts) * boardRate);
-    const cutTotal = _r2(_r2(cShts) * _r2(cutRate));
+    const cutRateChg = _r2(cutRate*_surMul(ov,'cutting'));
+    const cutTotal = _r2(_r2(cShts) * cutRateChg);
     // Laminated edges = a thick glued-up edge → WIDER tape, priced separately.
     const ebMLam = (data.ebMmLam||0)/1000;
     const lamTapeKey = ov.lamTapeKey || '43x1 ABS';
     const lamRate = _ebRates.find(r=>r.tape_key===lamTapeKey);
     const lamMatRate = lamRate ? parseFloat(lamRate.mat_rate) : 1.2;
     const lamBaseRate = lamRate ? parseFloat(lamRate.base_rate) : 2.9;
-    const lamRateTotal = lamBaseRate + lamMatRate * (surcharge ? 1.08 : 1);
+    const lamRateTotal = lamBaseRate + lamMatRate * _surMul(ov,'eb');
     const lamTotal = _r2(_r2(ebMLam) * _r2(lamRateTotal));
     // ⧉ LAM ×2 panel glue-up: area from the optimiser × your £/m² rate (Tensor L22 + press/labour)
     const lamM2 = data.lamM2 || 0;
@@ -1742,13 +1776,15 @@ async function buildQuote() {
     // quietly disappeared from the saved line while the screen still showed it. An invoice
     // built from those lines would have been 8% light on every board.
     if(bShts) _qLine(mat,'Boards',
-      `${bShts} sheet${bShts!==1?'s':''} × £${boardRate.toFixed(2)}${surcharge?` (£${boardPrice.toFixed(2)} +8%)`:''}`,
+      `${bShts} sheet${bShts!==1?'s':''} × £${boardRate.toFixed(2)}${surB?` (£${boardPrice.toFixed(2)} +8%)`:''}`,
       bShts,boardRate,null,{kind:'board',unit:'sheet'});
-    if(cShts) _qLine(mat,'Cutting',`${cShts} sheet${cShts!==1?'s':''} × £${cutRate.toFixed(2)}`,cShts,cutRate,cutTotal,{kind:'cutting',unit:'sheet'});
+    if(cShts) _qLine(mat,'Cutting',
+      `${cShts} sheet${cShts!==1?'s':''} × £${cutRateChg.toFixed(2)}${surC?` (£${cutRate.toFixed(2)} +8%)`:''}`,
+      cShts,cutRateChg,null,{kind:'cutting',unit:'sheet'});
     Object.keys(data.ebByThk||{}).forEach(thk=>{ const m=(data.ebByThk[thk]||0)/1000; if(m<=0) return;
       const tk=((ov.ebTapeByThk||{})[thk])||_defTape(thk); const rt=_ebRates.find(r=>r.tape_key===tk);
       const mr=rt?parseFloat(rt.mat_rate):0.60, br=rt?parseFloat(rt.base_rate):2.90;
-      const rate=br+mr*(surcharge?1.08:1);
+      const rate=br+mr*_surMul(ov,'eb');
       _qLine(mat,`Edgebanding ${thk}mm`,`${m.toFixed(2)}m × ${tk} @ £${rate.toFixed(2)}/lm`,m,rate,m*rate,{kind:'edgebanding',unit:'lm'}); });
     if(lamTotal>0) _qLine(mat,'Edgebanding — laminated',`${ebMLam.toFixed(2)}m × £${lamRateTotal.toFixed(2)}/lm`,ebMLam,lamRateTotal,lamTotal,{kind:'edgebanding',unit:'lm'});
     // Two charges, so two lines: glue by the square metre, press and trim by the panel.
@@ -1762,7 +1798,7 @@ async function buildQuote() {
         lamN,panelLamPer,null,{kind:'laminating',unit:'each'});
 
     const priceNote = autoPrice !== null
-      ? `£${boardPrice.toFixed(2)}/sheet${surcharge?` <span style="color:#f0a500">&rarr; £${(boardPrice*1.08).toFixed(2)} incl. +8%</span>`:''}${tier==='trade'?' (incl. 7%)':''}`
+      ? `£${boardPrice.toFixed(2)}/sheet${surB?` <span style="color:#f0a500">&rarr; £${boardRate.toFixed(2)} incl. +8%</span>`:''}${tier==='trade'?' (incl. 7%)':''}`
       : '<span style="color:#f87171">Not in price list</span>';
 
     rows += `
@@ -1774,9 +1810,7 @@ async function buildQuote() {
         title="Sheets charged for material${ov.boardSheets!=null?' — edited, nested count is '+shts:''}"
         onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},boardSheets:parseFloat(this.value)||0};buildQuote()"> sheets × <input type="number" class="override-input" value="${boardPrice.toFixed(2)}"
         onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},boardPrice:parseFloat(this.value)||0};buildQuote()" step="0.01">
-        <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#6b8f7e;margin-left:8px">
-          <input type="checkbox" ${surcharge?'checked':''} onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},surcharge:this.checked};buildQuote()"> +8% surcharge
-        </label>
+        ${_surChip(mat,'board','the boards')}
       </td>
       <td></td><td></td>
       <td class="r" style="font-size:11px;color:#6b8f7e">${priceNote}</td>
@@ -1787,9 +1821,9 @@ async function buildQuote() {
       <td class="override-label"><input type="number" class="override-input" style="width:52px" value="${cShts}" step="1" min="0"
         title="Sheets charged for cutting${ov.cutSheets!=null?' — edited, nested count is '+shts:''}"
         onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},cutSheets:parseFloat(this.value)||0};buildQuote()"> sheets × <input type="number" class="override-input" value="${cutRate.toFixed(2)}"
-        onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},cutRate:parseFloat(this.value)||0};buildQuote()" step="0.01">/sheet</td>
+        onchange="_quoteOverrides['${mat}']={..._quoteOverrides['${mat}']||{},cutRate:parseFloat(this.value)||0};buildQuote()" step="0.01">/sheet${_surChip(mat,'cutting','the cutting')}</td>
       <td></td><td></td>
-      <td class="r" style="font-size:11px;color:#6b8f7e">${(ov.boardSheets!=null||ov.cutSheets!=null)?`<a href="#" onclick="delete _quoteOverrides['${mat}'].boardSheets;delete _quoteOverrides['${mat}'].cutSheets;buildQuote();return false" style="color:#e6a23c">reset to ${shts}</a>`:`nested: ${shts}`}</td>
+      <td class="r" style="font-size:11px;color:#6b8f7e">${surC?`@ £${cutRateChg.toFixed(2)} <span style="color:#f0a500">(+8%)</span><br>`:''}${(ov.boardSheets!=null||ov.cutSheets!=null)?`<a href="#" onclick="delete _quoteOverrides['${mat}'].boardSheets;delete _quoteOverrides['${mat}'].cutSheets;buildQuote();return false" style="color:#e6a23c">reset to ${shts}</a>`:`nested: ${shts}`}</td>
       <td class="r">£${cutTotal.toFixed(2)}</td>
     </tr>
     ${lamM2 > 0 ? `<tr>
@@ -2619,7 +2653,7 @@ function printQuote(opts) {
     const ov=_quoteOverrides[mat]||{};
     const autoPrice=lookupBoardPrice(mat,tier);
     const boardPrice=ov.boardPrice!==undefined?ov.boardPrice:(autoPrice??0);
-    const surcharge=ov.surcharge||false;
+    const surB=_sur(ov,'board'), surC=_sur(ov,'cutting'), surE=_sur(ov,'eb');
     const cutRate=ov.cutRate!==undefined?ov.cutRate:cutRateForMat(mat,jobData,tier);
     // Edgebanding split by tape thickness — each its own priced line (matches the on-screen quote).
     const _wood=/walnut/i.test(mat)?'Walnut':(/oak|veneer/i.test(mat)?'Oak':'ABS');
@@ -2638,7 +2672,7 @@ function printQuote(opts) {
       const tk=((ov.ebTapeByThk||{})[thk])||_defTape(thk);
       const rt=_ebRates.find(r=>r.tape_key===tk);
       const mr=rt?parseFloat(rt.mat_rate):0.60, br=rt?parseFloat(rt.base_rate):2.90;
-      const rate=_r2(br+mr*(surcharge?1.08:1)); const tot=_r2(_r2(m)*rate); ebTotal=_r2(ebTotal+tot);
+      const rate=_r2(br+mr*_surMul(ov,'eb')); const tot=_r2(_r2(m)*rate); ebTotal=_r2(ebTotal+tot);
       ebPdfRows+=`<tr><td>Edgebanding ${thk}mm (${m.toFixed(2)}m × £${rate.toFixed(2)}/lm)</td><td></td><td class="amt">£${tot.toFixed(2)}</td></tr>`;
     });
     // Laminated (wide-tape) edging on this material — separate rate
@@ -2647,7 +2681,7 @@ function printQuote(opts) {
     const lamRate=_ebRates.find(r=>r.tape_key===lamTapeKey);
     const lamMatRate=lamRate?parseFloat(lamRate.mat_rate):1.20;
     const lamBaseRate=lamRate?parseFloat(lamRate.base_rate):2.90;
-    const lamRateTotal=lamBaseRate+lamMatRate*(surcharge?1.08:1);
+    const lamRateTotal=lamBaseRate+lamMatRate*_surMul(ov,'eb');
     const lamTotal=_r2(_r2(ebMLam)*_r2(lamRateTotal));
     const qb=(jobData&&jobData.quoteBasis)||null;
     // Sheet equivalent first, same as the on-screen quote — the two must never disagree.
@@ -2658,9 +2692,9 @@ function printQuote(opts) {
     // Rounded exactly as the on-screen quote rounds them, so the printed copy the customer
     // holds, the figure on screen and the saved record are the same to the penny. These were
     // three separate sums before, each rounding at a different moment.
-    const boardRate=_r2(boardPrice*(surcharge?1.08:1));
+    const boardRate=_r2(boardPrice*_surMul(ov,'board'));
     const boardTotal=_r2(_r2(bShts)*boardRate);
-    const cutTotal=_r2(_r2(cShts)*_r2(cutRate));
+    const cutTotal=_r2(_r2(cShts)*_r2(cutRate*_surMul(ov,'cutting')));
     // ⧉ LAM ×2 panel glue-up. This was priced on the admin screen but MISSING from the PDF
     // entirely, so any job with glued panels quoted low on the printed copy — the one the
     // customer actually gets. Same figures as the screen.
@@ -2675,7 +2709,7 @@ function printQuote(opts) {
     rows+=`
       <tr class="mat-row"><td colspan="3"><strong>${mat}</strong></td></tr>
       ${boardTotal!==0||bShts?`<tr><td>Boards (${bShts} sheet${bShts!==1?'s':''} × £${(bShts?boardTotal/bShts:0).toFixed(2)})</td><td></td><td class="amt">£${boardTotal.toFixed(2)}</td></tr>`:''}
-      ${cutTotal!==0||cShts?`<tr><td>Cutting (${cShts} sheet${cShts!==1?'s':''} × £${cutRate.toFixed(2)})</td><td></td><td class="amt">£${cutTotal.toFixed(2)}</td></tr>`:''}
+      ${cutTotal!==0||cShts?`<tr><td>Cutting (${cShts} sheet${cShts!==1?'s':''} × £${(cShts?cutTotal/cShts:0).toFixed(2)})</td><td></td><td class="amt">£${cutTotal.toFixed(2)}</td></tr>`:''}
       ${ebPdfRows}
       ${ebMLam>0?`<tr><td>Edgebanding — laminated (${ebMLam.toFixed(2)}m × £${lamRateTotal.toFixed(2)}/lm)</td><td></td><td class="amt">£${lamTotal.toFixed(2)}</td></tr>`:''}
       ${panelLamTotal>0?`<tr><td>Laminating (${lamM2.toFixed(2)}m² glue + ${lamN} glued panel${lamN!==1?'s':''} × £${panelLamPer.toFixed(2)})</td><td></td><td class="amt">£${panelLamTotal.toFixed(2)}</td></tr>`:''}
