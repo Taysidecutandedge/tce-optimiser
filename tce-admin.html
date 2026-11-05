@@ -465,7 +465,7 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
 // says so. A device can run week-old code while you are told a fix is live. So the app asks
 // the server what the current build is and says plainly when it is behind. It never reloads
 // by itself — that is your call, not the app's.
-const TCE_BUILD='2026-11-05-c';
+const TCE_BUILD='2026-11-05-d';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -856,6 +856,11 @@ const _openCust={}, _openRev={};
 // Job pipeline: Quote → In progress → Complete → Invoiced → Paid
 const JOB_STATUSES=[
   {k:'quote', label:'Quote', color:'#6b8f7e'},
+  // Between quoting and starting work: a quote has been picked to send as an estimate, and
+  // then it has gone. Until now both of those sat under "Quote", so a job waiting on the
+  // customer looked exactly like one nobody had touched.
+  {k:'ready_for_estimate', label:'Ready for estimate', color:'#5aa9c9'},
+  {k:'estimated', label:'Estimate sent', color:'#7fb8d6'},
   {k:'progress', label:'In progress', color:'#f0a500'},
   {k:'complete', label:'Complete', color:'#3fa7d6'},
   // Cut, checked, and one quote picked as the one to bill from. The gap between "we've
@@ -871,11 +876,19 @@ function jobStatus(j){ return (j&&j.status)||'quote'; }
 // customer rings. Shown on the row so it can be read without opening anything.
 function _invoiceBadge(j){
   if(!j) return '';
+  // An estimate out with the customer is a different kind of waiting from an invoice
+  // raised, so it reads differently on the row.
+  if(j.qbo_estimate_number && !j.qbo_invoice_number)
+    return ' <span style="font-size:10px;background:#1d4454;color:#bfe4f2;border-radius:4px;'
+      +'padding:1px 6px;font-family:var(--mono)" title="QuickBooks estimate'
+      +(j.estimated_at?' · '+new Date(j.estimated_at).toLocaleDateString('en-GB'):'')+'">EST '+_attr(j.qbo_estimate_number)+'</span>';
   if(j.qbo_invoice_number) return ' <span style="font-size:10px;background:#1f3a34;color:#9fe3b8;'
     +'border-radius:4px;padding:1px 6px;font-family:var(--mono)" title="QuickBooks invoice'
     +(j.invoiced_at?' · '+new Date(j.invoiced_at).toLocaleDateString('en-GB'):'')+'">INV '+_attr(j.qbo_invoice_number)+'</span>';
   if(j.invoice_quote_id) return ' <span style="font-size:10px;background:#5a3a12;color:#ffc46b;'
     +'border-radius:4px;padding:1px 6px" title="A quote has been picked to bill from">£ ready</span>';
+  if(j.estimate_quote_id) return ' <span style="font-size:10px;background:#15323d;color:#8fc9dd;'
+    +'border-radius:4px;padding:1px 6px" title="A quote has been picked to send as an estimate">📄 estimate</span>';
   return '';
 }
 // Customers linked to a QuickBooks customer record. Claude fills the table in; the admin
@@ -939,6 +952,7 @@ async function loadJobs() {
     // Invoice fields first. If the migration has not been run these columns do not exist and
     // the request 400s, so the list below steps back a column group at a time — the same way
     // status and invoice_note were added. Nothing breaks on a database that is behind.
+    '?select=id,job_name,client_name,saved_at,archived,status,invoice_note,invoice_quote_id,completed_at,qbo_invoice_id,qbo_invoice_number,invoiced_at,estimate_quote_id,qbo_estimate_id,qbo_estimate_number,estimated_at&order=saved_at.desc',
     '?select=id,job_name,client_name,saved_at,archived,status,invoice_note,invoice_quote_id,completed_at,qbo_invoice_id,qbo_invoice_number,invoiced_at&order=saved_at.desc',
     '?select=id,job_name,client_name,saved_at,archived,status,invoice_note&order=saved_at.desc',
     '?select=id,job_name,client_name,saved_at,archived,status&order=saved_at.desc',
@@ -2160,6 +2174,9 @@ async function loadSavedQuotes(jobId) {
               +`<button class="btn btn-secondary btn-sm" onclick="compareSavedQuote('${q.id}')" title="Line by line: what you saved against what the job would price today">⇄ Compare</button>`
             : '<span style="font-size:11px;color:#6b8f7e" title="Saved before line detail was recorded">totals only</span>'}
             <button class="btn btn-secondary btn-sm" onclick="restoreSavedQuote('${q.id}')" title="Load this quote back in so you can amend it and save a new version">↩ Reopen</button>
+            ${_isEstimateQuote(q.id)
+              ? `<span class="badge" style="background:#1d4454;color:#bfe4f2" title="This is the quote sent as the estimate">✔ estimate</span>`
+              : `<button class="btn btn-sm" style="background:#1d4454;color:#bfe4f2;border:none" onclick="markReadyForEstimate('${q.id}')" title="Pick this quote as the one to send as an estimate">📄 Ready for estimate</button>`}
             ${_isInvoiceQuote(q.id)
               ? `<span class="badge" style="background:#2e5e3a;color:#cfe7dd" title="This is the quote the invoice will be built from">✔ to invoice</span>`
               : `<button class="btn btn-sm" style="background:#8a5a12;color:#ffe3b8;border:none" onclick="markReadyToInvoice('${q.id}')" title="Pick this quote as the one to bill from, and mark the job ready to invoice">£ Mark ready to invoice</button>`}</td>
@@ -2182,6 +2199,33 @@ let _savedQuotes=[];
 function _isInvoiceQuote(qid){
   return !!(_currentJob && _currentJob.invoice_quote_id!=null
             && String(_currentJob.invoice_quote_id)===String(qid));
+}
+function _isEstimateQuote(qid){
+  return !!(_currentJob && _currentJob.estimate_quote_id!=null
+            && String(_currentJob.estimate_quote_id)===String(qid));
+}
+// Pick the quote to send as an estimate. Same idea as marking one to invoice, at the other
+// end of the job: a job collects revisions, and which one actually went to the customer is
+// not something to work out later from dates. Deliberately does NOT archive the other
+// revisions — at estimate stage they are still live options, unlike at invoice stage.
+async function markReadyForEstimate(qid){
+  if(!_currentJob) return;
+  const q=_savedQuotes.find(x=>String(x.id)===String(qid)); if(!q) return;
+  const when=new Date(q.created_at).toLocaleDateString('en-GB');
+  const lines=((q.quote_data||{}).lines)||[];
+  if(!confirm('Send the quote saved '+when+' as the estimate for '+_currentJob.job_name+'?\n\n'
+    +'  £'+(parseFloat(q.total_ex_vat)||0).toFixed(2)+' ex-VAT · '+lines.length+' lines\n\n'
+    +'The job is marked Ready for estimate and this quote is stamped as the one to use.')) return;
+  try{
+    await sbFetch('tce_jobs?id=eq.'+_currentJob.id,{method:'PATCH',headers:{'Prefer':'return=minimal'},
+      body:{ estimate_quote_id:q.id, status:'ready_for_estimate' }});
+    _currentJob.estimate_quote_id=q.id; _currentJob.status='ready_for_estimate';
+    const j=(_jobs||[]).find(x=>x.id===_currentJob.id);
+    if(j){ j.estimate_quote_id=q.id; j.status='ready_for_estimate'; }
+    showToast('Marked ready for estimate ✓');
+  }catch(e){ alert('Could not mark it: '+e.message); return; }
+  try{ await loadSavedQuotes(_currentJob.id); }catch(e){}
+  try{ renderJobsList(); }catch(e){}
 }
 // Other saved jobs that look like revisions of this one: "Cladwells 2", "Cladwells 2 — Rev 2".
 function _siblingRevisions(){
