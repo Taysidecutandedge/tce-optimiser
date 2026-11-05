@@ -465,7 +465,7 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
 // says so. A device can run week-old code while you are told a fix is live. So the app asks
 // the server what the current build is and says plainly when it is behind. It never reloads
 // by itself — that is your call, not the app's.
-const TCE_BUILD='2026-11-05-a';
+const TCE_BUILD='2026-11-05-b';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -1641,7 +1641,7 @@ async function buildQuote() {
       const rt=_ebRates.find(r=>r.tape_key===tk);
       const mr=rt?parseFloat(rt.mat_rate):0.60, br=rt?parseFloat(rt.base_rate):2.90;
       const rate=br+mr*(surcharge?1.08:1);
-      const tot=m*rate; ebTotal+=tot;
+      const tot=_r2(_r2(m)*_r2(rate)); ebTotal=_r2(ebTotal+tot);
       ebRowsHtml+=`
     <tr>
       <td>Edgebanding <span style="color:#6b8f7e;font-size:11px">${thk}mm</span></td>
@@ -1711,9 +1711,12 @@ async function buildQuote() {
         +(_near.length?` The cutlist uses: ${_near.map(n=>'<b>'+_attr(n)+'</b>').join(', ')}.`:'')
         +` Open the job in the optimiser, press Calculate and save, so the layout and the quote agree.`);
     }
-    const boardBase = bShts * boardPrice;
-    const boardTotal = surcharge ? boardBase * 1.08 : boardBase;
-    const cutTotal = cShts * cutRate;
+    // Rounded the same way the lines are, so a material's subtotal equals the lines printed
+    // under it. The surcharge lives in the RATE now, not in a separate multiply at the end —
+    // that separation is what let it fall out of the saved lines in the first place.
+    const boardRate = _r2(boardPrice*(surcharge?1.08:1));
+    const boardTotal = _r2(_r2(bShts) * boardRate);
+    const cutTotal = _r2(_r2(cShts) * _r2(cutRate));
     // Laminated edges = a thick glued-up edge → WIDER tape, priced separately.
     const ebMLam = (data.ebMmLam||0)/1000;
     const lamTapeKey = ov.lamTapeKey || '43x1 ABS';
@@ -1721,19 +1724,26 @@ async function buildQuote() {
     const lamMatRate = lamRate ? parseFloat(lamRate.mat_rate) : 1.2;
     const lamBaseRate = lamRate ? parseFloat(lamRate.base_rate) : 2.9;
     const lamRateTotal = lamBaseRate + lamMatRate * (surcharge ? 1.08 : 1);
-    const lamTotal = ebMLam * lamRateTotal;
+    const lamTotal = _r2(_r2(ebMLam) * _r2(lamRateTotal));
     // ⧉ LAM ×2 panel glue-up: area from the optimiser × your £/m² rate (Tensor L22 + press/labour)
     const lamM2 = data.lamM2 || 0;
     const lamN  = data.lamN  || 0;
     const panelLamRate = (ov.panelLamRate!=null) ? ov.panelLamRate : panelLamGlueRate();
     const panelLamPer  = (ov.panelLamPer!=null)  ? ov.panelLamPer  : panelLamPerPanel();
-    const panelLamTotal = lamM2 * panelLamRate + lamN * panelLamPer;
-    const matTotal = boardTotal + cutTotal + ebTotal + lamTotal + panelLamTotal;
+    const panelLamTotal = _r2(_r2(lamM2)*_r2(panelLamRate)) + _r2(_r2(lamN)*_r2(panelLamPer));
+    const matTotal = _r2(boardTotal + cutTotal + ebTotal + lamTotal + panelLamTotal);
     grandEx += matTotal;
     // Record the lines as priced RIGHT NOW. A saved quote only kept its totals, so reopening
     // one after a rate change redrew the lines at the new rates while the stored total stayed
     // old — the two silently disagreed. These are saved with the quote as the actual record.
-    if(bShts) _qLine(mat,'Boards',`${bShts} sheet${bShts!==1?'s':''} × £${boardPrice.toFixed(2)}${surcharge?' +8%':''}`,bShts,boardPrice,boardTotal,{kind:'board',unit:'sheet'});
+    // The rate on the line must be the rate the customer is charged, surcharge included.
+    // It used to pass the pre-surcharge price and rely on the total being handed in
+    // separately — which worked until the total became qty × rate, at which point the 8%
+    // quietly disappeared from the saved line while the screen still showed it. An invoice
+    // built from those lines would have been 8% light on every board.
+    if(bShts) _qLine(mat,'Boards',
+      `${bShts} sheet${bShts!==1?'s':''} × £${boardRate.toFixed(2)}${surcharge?` (£${boardPrice.toFixed(2)} +8%)`:''}`,
+      bShts,boardRate,null,{kind:'board',unit:'sheet'});
     if(cShts) _qLine(mat,'Cutting',`${cShts} sheet${cShts!==1?'s':''} × £${cutRate.toFixed(2)}`,cShts,cutRate,cutTotal,{kind:'cutting',unit:'sheet'});
     Object.keys(data.ebByThk||{}).forEach(thk=>{ const m=(data.ebByThk[thk]||0)/1000; if(m<=0) return;
       const tk=((ov.ebTapeByThk||{})[thk])||_defTape(thk); const rt=_ebRates.find(r=>r.tape_key===tk);
@@ -2628,7 +2638,7 @@ function printQuote(opts) {
       const tk=((ov.ebTapeByThk||{})[thk])||_defTape(thk);
       const rt=_ebRates.find(r=>r.tape_key===tk);
       const mr=rt?parseFloat(rt.mat_rate):0.60, br=rt?parseFloat(rt.base_rate):2.90;
-      const rate=br+mr*(surcharge?1.08:1); const tot=m*rate; ebTotal+=tot;
+      const rate=_r2(br+mr*(surcharge?1.08:1)); const tot=_r2(_r2(m)*rate); ebTotal=_r2(ebTotal+tot);
       ebPdfRows+=`<tr><td>Edgebanding ${thk}mm (${m.toFixed(2)}m × £${rate.toFixed(2)}/lm)</td><td></td><td class="amt">£${tot.toFixed(2)}</td></tr>`;
     });
     // Laminated (wide-tape) edging on this material — separate rate
@@ -2638,16 +2648,19 @@ function printQuote(opts) {
     const lamMatRate=lamRate?parseFloat(lamRate.mat_rate):1.20;
     const lamBaseRate=lamRate?parseFloat(lamRate.base_rate):2.90;
     const lamRateTotal=lamBaseRate+lamMatRate*(surcharge?1.08:1);
-    const lamTotal=ebMLam*lamRateTotal;
+    const lamTotal=_r2(_r2(ebMLam)*_r2(lamRateTotal));
     const qb=(jobData&&jobData.quoteBasis)||null;
     // Sheet equivalent first, same as the on-screen quote — the two must never disagree.
     const se=(jobData&&jobData.sheetEquiv)||null;
     const shts=_shtsAuto;   // worked out at the top of the loop, where the skip test needs it
     const bShts = ov.boardSheets!=null ? ov.boardSheets : shts;
     const cShts = ov.cutSheets  !=null ? ov.cutSheets   : shts;
-    const boardBase=bShts*boardPrice;
-    const boardTotal=surcharge?boardBase*1.08:boardBase;
-    const cutTotal=cShts*cutRate;
+    // Rounded exactly as the on-screen quote rounds them, so the printed copy the customer
+    // holds, the figure on screen and the saved record are the same to the penny. These were
+    // three separate sums before, each rounding at a different moment.
+    const boardRate=_r2(boardPrice*(surcharge?1.08:1));
+    const boardTotal=_r2(_r2(bShts)*boardRate);
+    const cutTotal=_r2(_r2(cShts)*_r2(cutRate));
     // ⧉ LAM ×2 panel glue-up. This was priced on the admin screen but MISSING from the PDF
     // entirely, so any job with glued panels quoted low on the printed copy — the one the
     // customer actually gets. Same figures as the screen.
@@ -2655,8 +2668,8 @@ function printQuote(opts) {
     const lamN  = data.lamN  || 0;
     const panelLamRate = (ov.panelLamRate!=null) ? ov.panelLamRate : panelLamGlueRate();
     const panelLamPer  = (ov.panelLamPer!=null)  ? ov.panelLamPer  : panelLamPerPanel();
-    const panelLamTotal = lamM2 * panelLamRate + lamN * panelLamPer;
-    const matTotal=boardTotal+cutTotal+ebTotal+lamTotal+panelLamTotal;
+    const panelLamTotal = _r2(_r2(lamM2)*_r2(panelLamRate)) + _r2(_r2(lamN)*_r2(panelLamPer));
+    const matTotal=_r2(boardTotal+cutTotal+ebTotal+lamTotal+panelLamTotal);
     grandEx+=matTotal;
 
     rows+=`
