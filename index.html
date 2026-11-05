@@ -712,7 +712,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-11-04-c';
+const TCE_BUILD='2026-11-05-a';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -1307,6 +1307,25 @@ async function cloudSaveJob(quiet){
   // last nested, and it does not clear when you type a new cutlist — so saving a fresh job
   // before calculating stored the previous job's nest against it. "Karl door s" ended up
   // holding 15 sheets of Karl 7's carcass, and opening it showed Karl 7's cutlist.
+  // Saving without a layout is allowed — a cutlist being typed up is a perfectly good thing
+  // to save. Saving without a layout WHEN YOU THINK YOU HAVE ONE is not, and until now it
+  // happened in silence: the button said saved, the job went up with lastResult null, and
+  // the first you knew was the quote saying "this job doesn't have saved optimiser results".
+  // Caldwell 3 went up that way this morning — 47 panels, no plan.
+  if(!quiet){
+    const haveSheets = !!(_lastSheets && _lastSheets.length);
+    if(haveSheets && !_nestMatchesParts()){
+      if(!confirm('The layout in memory is not made of this job\'s parts, so it will NOT be saved.\n\n'
+        +'That usually means it belongs to a job you had open before. The cutlist, boards and '
+        +'customer all save as normal.\n\n'
+        +'Save without the layout?  (Cancel, press Calculate, then save again to keep one.)')) return;
+    } else if(!haveSheets && (parts||[]).length){
+      if(!confirm('No cut plan to save — just the cutlist.\n\n'
+        +(parts.length)+' part'+(parts.length!==1?'s':'')+', boards and customer will be saved, but the quote '
+        +'cannot be priced until there is a layout.\n\n'
+        +'Save anyway?  (Cancel, press Calculate, then save again.)')) return;
+    }
+  }
   const lastResult = (_lastSheets && _lastSheets.length && _nestMatchesParts()) ? {
     sheets: _lastSheets.map(s=>({
       name:s.name, fullL:s.fullL, fullW:s.fullW, uw:s.uw, uh:s.uh, thick:s.thick,
@@ -1360,6 +1379,44 @@ async function cloudSaveJob(quiet){
     if(clash.length && !confirm('There is already a job called "'+name+'".\n\n'
       +'This will create a SECOND job with that name, not update the existing one.\n\n'
       +'If you meant to update it, cancel and open it from the list first.\n\nCreate a new job anyway?')) return;
+  }
+  // ── Is this the same job's cutlist? ──────────────────────────────────────
+  // Saving over an existing job replaces its parts outright. If what is in memory belongs to
+  // a different job, that job's cutlist is gone — there is no history to go back to. It has
+  // happened: Newtonmill Utility is holding Caldwell 3's 31 parts, in both copies, and since
+  // Newtonmill was never cut there is no cut log to rebuild it from.
+  // So before overwriting, compare what we are about to write with what is already there.
+  // A few parts changing is ordinary editing. A wholly different list is not.
+  if(_loadedCloudJobId){
+    try{
+      const sig=ps=>{ const s=new Set(); (ps||[]).forEach(p=>s.add(String(p.label||'').toLowerCase().trim()
+        +'|'+Math.round(p.l||0)+'x'+Math.round(p.w||0))); return s; };
+      const now=sig(parts);
+      const r0=await fetch(SB_URL+'/rest/v1/tce_jobs?select=job_data&id=eq.'+_loadedCloudJobId,{headers:sbAuthH()});
+      if(r0.ok){
+        const prevRow=(await r0.json())[0];
+        let pd=prevRow&&prevRow.job_data;
+        if(typeof pd==='string'){ try{ pd=JSON.parse(pd); }catch(e){ pd=null; } }
+        const was=sig(pd&&pd.parts);
+        if(was.size && now.size){
+          let shared=0; now.forEach(k=>{ if(was.has(k)) shared++; });
+          const overlap=shared/Math.max(was.size, now.size);
+          if(overlap<0.25){
+            const msg='⚠ This does not look like the same cutlist.\n\n'
+              +'"'+(pd.projectName||name)+'" currently holds '+was.size+' different panels.\n'
+              +'What you are about to save has '+now.size+', and only '+shared+' of them match.\n\n'
+              +'Saving replaces the cutlist for good — there is no earlier copy to go back to.\n\n'
+              +'Save anyway?';
+            if(quiet){
+              // Background save: never clobber on a guess. Say so and leave the job alone.
+              _setNestSaved('⚠ auto-save held back — cutlist does not match this job');
+              return;
+            }
+            if(!confirm(msg)) return;
+          }
+        }
+      }
+    }catch(e){ /* cannot check — fall through and save as before */ }
   }
   // Did the job change while we were gathering all that up (or waiting on a confirm)? Then
   // this save belongs to a job that is no longer open — drop it rather than write it to
@@ -1719,10 +1776,29 @@ async function recoverNestFromCloud(){
     const proj=String(projectName||'').trim().toLowerCase();
     if(!proj){ alert('Open/name the job first, then recover.'); return; }
     const since=new Date(Date.now()-180*24*3600*1000).toISOString();
-    const url=SB_URL+'/rest/v1/tce_cut_events?select=id,action,session_id,panel&action=in.(sheet_layout,confirm)&created_at=gte.'+encodeURIComponent(since)+'&order=id.asc&limit=2000';
-    let r=await fetch(url,{headers:sbAuthH()});
-    if(r.status===401 && await sbDoRefresh()) r=await fetch(url,{headers:sbAuthH()});
-    const rows=r.ok?await r.json():[];
+    // This asked for 2000 rows in ASCENDING id order. Supabase caps a response at 1000, so it
+    // got ids 1–1274 — the oldest events in the log — and nothing since. Caldwell 3's layouts
+    // are ids 9491–9768, so Recover saw none of them and said "no saved cut plan found",
+    // which read like the job had nothing saved when it had twenty-four sheet layouts sitting
+    // there. It would have worked fine in month one and quietly stopped working as the log
+    // grew. Newest first, paged, like the cut tally.
+    const rows=[]; let cursor=null;
+    for(let page=0; page<15; page++){
+      let url=SB_URL+'/rest/v1/tce_cut_events?select=id,action,session_id,panel'
+             +'&action=in.(sheet_layout,confirm)&created_at=gte.'+encodeURIComponent(since)
+             +'&order=id.desc&limit=1000';
+      if(cursor!=null) url+='&id=lt.'+cursor;
+      let r=await fetch(url,{headers:sbAuthH()});
+      if(r.status===401 && await sbDoRefresh()) r=await fetch(url,{headers:sbAuthH()});
+      if(!r.ok) break;
+      const batch=await r.json();
+      if(!Array.isArray(batch)||!batch.length) break;
+      rows.push(...batch);
+      if(batch.length<1000) break;
+      cursor=batch[batch.length-1].id;
+    }
+    // The logic below picks the newest layout per sheet by comparing ids, so the order rows
+    // arrive in does not matter — only that they all arrive.
     const co=p=>String(p.company||'').trim().toLowerCase();
     const mineRows=rows.filter(x=>{ const c=co(x.panel||{}); return c===proj||c.indexOf(proj)===0||proj.indexOf(c)===0; });
     // Where a panel was actually confirmed — this is the truth we rebuild against.

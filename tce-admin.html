@@ -465,7 +465,7 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
 // says so. A device can run week-old code while you are told a fix is live. So the app asks
 // the server what the current build is and says plainly when it is behind. It never reloads
 // by itself — that is your call, not the app's.
-const TCE_BUILD='2026-11-04-c';
+const TCE_BUILD='2026-11-05-a';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -574,8 +574,49 @@ let _gate = [];
 // Per material, the figures BEFORE any hand edit — so the gate can report a change as
 // "cutting 0 instead of 4" rather than just "edited".
 let _gateBasis = {};
-function _qLine(group, item, detail, qty, rate, total){
-  _quoteLines.push({group, item, detail, qty:Number(qty)||0, rate:Number(rate)||0, total:Number(total)||0});
+// ── Quote lines, fit to put on an invoice ───────────────────────────────────
+// A line used to carry four things: group, item, a human sentence, and three loose numbers.
+// Good enough to read, not good enough to bill from — "274.9472" is not a figure you send a
+// customer, and "U767 ST9" had to be dug back out of the group name by whoever was typing the
+// invoice. Each line now says what KIND of charge it is, what material it is against, and in
+// what unit, and every money figure is rounded where it is created rather than on the way out.
+const _r2=n=>Math.round((Number(n)||0)*100)/100;
+// The Egger/Finsa code out of a board name: "18mm Oak Veneer Mdf" has none, "U767 ST9" does.
+function _matCode(name){
+  const s=String(name||'');
+  const m=s.match(/\b([A-Z]\d{3,4})\s*[\/\- ]?\s*(ST\s?\d{1,2}|PM|PG|PE|TM\s?\d{1,2}|SM|MT|ZN)?\b/i);
+  if(!m) return null;
+  return (m[1]+(m[2]?' '+m[2].replace(/\s+/g,''):'')).toUpperCase();
+}
+// The sheet size this material is bought in, taken from the job's own boards so it matches
+// what was actually nested rather than a guess from the price list.
+function _matSheetSize(jobData, mat){
+  const b=(jobData&&jobData.jobSheets||[]).find(s=>_matKey({[mat]:1}, s.name||'')===mat);
+  return b ? (Math.round(b.l)+'x'+Math.round(b.w)) : null;
+}
+let _qLineCtx={jobData:null};
+function _qLine(group, item, detail, qty, rate, total, extra){
+  const e=extra||{};
+  const mat=e.material_desc!==undefined ? e.material_desc : group;
+  const line={
+    group, item, detail,
+    qty:_r2(qty), rate:_r2(rate),
+    // The total is ALWAYS the rounded qty times the rounded rate. Not the caller's figure:
+    // the caller works in full precision, so 12.345m at £4.1533 came out as £51.27 while the
+    // line as printed reads 12.35 × £4.15 = £51.25. Two pence, and an invoice that does not
+    // add up in front of a customer who is checking it. Any caller whose total genuinely is
+    // not qty × rate — the glue-up, which was area plus a per-panel charge — is split into
+    // two lines instead of being fudged here.
+    total:_r2(_r2(qty)*_r2(rate)),
+    kind:e.kind||'extra',
+    unit:e.unit||'each',
+    material_code:e.material_code!==undefined ? e.material_code : _matCode(mat),
+    material_desc:(e.kind==='extra'||e.kind==='door') ? (e.material_desc||null) : (mat||null),
+    sheet_size:e.sheet_size!==undefined ? e.sheet_size
+              : ((e.kind==='board'||e.kind==='cutting') ? _matSheetSize(_qLineCtx.jobData, mat) : null)
+  };
+  _quoteLines.push(line);
+  return line;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -711,7 +752,7 @@ async function sbFetch(path, optsOrQuery={}) {
 // DATA LOADING
 // ═══════════════════════════════════════════════════════════
 async function loadAllData() {
-  await Promise.all([loadPricing(), loadCutRates(), loadEbRates(), loadCustomers(), loadJobs(), loadCustomBoards()]);
+  await Promise.all([loadPricing(), loadCutRates(), loadEbRates(), loadCustomers(), loadJobs(), loadCustomBoards(), loadCustomerMap()]);
 }
 
 async function loadPricing() {
@@ -784,12 +825,42 @@ const JOB_STATUSES=[
   {k:'quote', label:'Quote', color:'#6b8f7e'},
   {k:'progress', label:'In progress', color:'#f0a500'},
   {k:'complete', label:'Complete', color:'#3fa7d6'},
+  // Cut, checked, and one quote picked as the one to bill from. The gap between "we've
+  // finished" and "it's on an invoice" is where jobs used to go quiet for a fortnight.
+  {k:'ready_to_invoice', label:'Ready to invoice', color:'#e8a33c'},
   {k:'part_invoiced', label:'Part invoiced', color:'#b07fd6'},
   {k:'invoiced', label:'Invoiced', color:'#9b6bd6'},
   {k:'part_paid', label:'Part paid', color:'#6cae7f'},
   {k:'paid', label:'Paid', color:'#2e9e5b'}
 ];
 function jobStatus(j){ return (j&&j.status)||'quote'; }
+// Once a job is on an invoice, the invoice number is the thing you search for when the
+// customer rings. Shown on the row so it can be read without opening anything.
+function _invoiceBadge(j){
+  if(!j) return '';
+  if(j.qbo_invoice_number) return ' <span style="font-size:10px;background:#1f3a34;color:#9fe3b8;'
+    +'border-radius:4px;padding:1px 6px;font-family:var(--mono)" title="QuickBooks invoice'
+    +(j.invoiced_at?' · '+new Date(j.invoiced_at).toLocaleDateString('en-GB'):'')+'">INV '+_attr(j.qbo_invoice_number)+'</span>';
+  if(j.invoice_quote_id) return ' <span style="font-size:10px;background:#5a3a12;color:#ffc46b;'
+    +'border-radius:4px;padding:1px 6px" title="A quote has been picked to bill from">£ ready</span>';
+  return '';
+}
+// Customers linked to a QuickBooks customer record. Claude fills the table in; the admin
+// only needs to show whether a link exists, so a job cannot be invoiced to a name
+// QuickBooks has never heard of.
+let _custMap={};
+async function loadCustomerMap(){
+  try{
+    const r=await sbFetch('tce_customer_map?select=customer_name,qbo_customer_id,qbo_display_name');
+    _custMap={}; (r||[]).forEach(x=>{ _custMap[String(x.customer_name||'').toLowerCase().trim()]=x; });
+  }catch(e){ _custMap={}; }   // table not there yet — the badge simply never shows
+}
+function _qbBadge(name){
+  const m=_custMap[String(name||'').toLowerCase().trim()];
+  if(!m||!m.qbo_customer_id) return '';
+  return ' <span style="font-size:10px;background:#143a2a;color:#8fe3b0;border-radius:4px;padding:1px 5px"'
+    +' title="Linked to QuickBooks'+(m.qbo_display_name?' as '+_attr(m.qbo_display_name):'')+'">QB ✓</span>';
+}
 function statusMeta(k){ return JOB_STATUSES.find(s=>s.k===k)||JOB_STATUSES[0]; }
 async function setJobStatus(idsCSV, val){
   const ids=(idsCSV||'').split(',').map(x=>parseInt(x)).filter(Boolean);
@@ -832,6 +903,10 @@ async function assignAccount(idsCSV, value){
 }
 async function loadJobs() {
   const tries=[
+    // Invoice fields first. If the migration has not been run these columns do not exist and
+    // the request 400s, so the list below steps back a column group at a time — the same way
+    // status and invoice_note were added. Nothing breaks on a database that is behind.
+    '?select=id,job_name,client_name,saved_at,archived,status,invoice_note,invoice_quote_id,completed_at,qbo_invoice_id,qbo_invoice_number,invoiced_at&order=saved_at.desc',
     '?select=id,job_name,client_name,saved_at,archived,status,invoice_note&order=saved_at.desc',
     '?select=id,job_name,client_name,saved_at,archived,status&order=saved_at.desc',
     '?select=id,job_name,client_name,saved_at,archived&order=saved_at.desc',
@@ -931,7 +1006,7 @@ function renderJobsList(){
         const _noteInp=_showNote?`<input class="jl-note" data-ids="${_ids}" value="${_attr(L.invoice_note||'')}" placeholder="what's still to invoice/pay — e.g. shaker doors" style="flex-basis:100%;font-size:11px;background:#0d1f1a;border:1px solid ${_stM.color};border-radius:5px;padding:4px 7px;color:#e8f0ec">`:(_hasNote&&L.invoice_note?`<div style="flex-basis:100%;font-size:11px;color:#6b8f7e">📝 ${_attr(L.invoice_note)}</div>`:'');
         html+=`<div style="padding:8px 12px;border-top:1px solid #1a2a24;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <div class="jl-open" data-id="${L.id}" style="flex:1;min-width:140px;cursor:pointer">
-            <div style="font-size:13px;color:#e8f0ec">${_attr(jobDisplay(L.job_name))}${L.archived?' <span style="font-size:10px;color:#6b8f7e">(archived)</span>':''}${_draftBadge(L)}</div>
+            <div style="font-size:13px;color:#e8f0ec">${_attr(jobDisplay(L.job_name))}${L.archived?' <span style="font-size:10px;color:#6b8f7e">(archived)</span>':''}${_draftBadge(L)}${_invoiceBadge(L)}</div>
             <div style="font-size:11px;color:#6b8f7e">${L.saved_at?new Date(L.saved_at).toLocaleDateString('en-GB'):''}${revs.length>1?' · latest of '+revs.length:''}</div>
           </div>
           ${_statSel}
@@ -1503,6 +1578,7 @@ async function buildQuote() {
   // list an automatic quote would have to pass before going out without being read.
   _gate = [];
   _gateBasis = {};   // mat → what the figures would be with no hand edits, so a warn can say "instead of N"
+  _qLineCtx.jobData = jobData;   // lets a board/cutting line record the sheet size it was nested on
   const gBlock=(m)=>_gate.push({lvl:'block',msg:m});
   const gWarn =(m)=>_gate.push({lvl:'warn', msg:m});
 
@@ -1519,7 +1595,13 @@ async function buildQuote() {
     const _qbV = _lookupMat((jobData&&jobData.quoteBasis)||null, mat);
     const _shtsAuto = (_seV!=null) ? _seV : (_qbV!=null) ? _qbV : data.sheets;
     const _hasLam = (data.lamN>0) || (data.lamM2>0);
-    if (!_shtsAuto && !_hasEb && !data.ebMmLam && !_hasLam) return;
+    // How many panels the cutlist actually asks for on this board. A material with parts is
+    // never skipped, however empty it looks — skipping it is how a board drops off a quote
+    // without a word, and the gate below never gets the chance to object.
+    const _partsOnMat = (jobData.parts||[])
+      .filter(p=>_matKey({[mat]:1}, p.matName||'')===mat)
+      .reduce((n,p)=>n+Math.max(1,parseInt(p.qty)||1),0);
+    if (!_shtsAuto && !_hasEb && !data.ebMmLam && !_hasLam && !_partsOnMat) return;
     const ov = _quoteOverrides[mat] || {};
     const autoPrice = lookupBoardPrice(mat, tier);
     const boardPrice = ov.boardPrice !== undefined ? ov.boardPrice : (autoPrice ?? 0);
@@ -1610,12 +1692,24 @@ async function buildQuote() {
     // Parts on this material but nil sheets means the quote is giving the material away. It
     // happens when every panel on that board was already cut, so the latest nest left them
     // out and the board vanished from the plan — Linsey V4 Rev 4 and its MDF worktops.
-    if(!(shts>0) && ov.boardSheets==null){
-      const _np=(jobData.parts||[]).filter(p=>(p.matName||'')===mat)
-                                   .reduce((n,p)=>n+Math.max(1,parseInt(p.qty)||1),0);
-      if(_np>0) gBlock(`<b>${mat}</b> has ${_np} part${_np!==1?'s':''} in the job but <b>no boards counted</b>, so it's being charged at nil material.`
+    if(!(shts>0) && ov.boardSheets==null && _partsOnMat>0){
+      gBlock(`<b>${mat}</b> has ${_partsOnMat} part${_partsOnMat!==1?'s':''} in the job but <b>no boards counted</b>, so it's being charged at nil material.`
         +` Usually this means those panels are already cut, so the latest nest left them out.`
         +` Re-calculate in the optimiser, or type the sheet count in.`);
+    }
+    // ── gate: charging for a board the cutlist no longer has ──
+    // The mirror image, and the more expensive one. Rename a board — or swap it for a new
+    // one — and the parts carry the new name while the SAVED LAYOUT and sheet equivalent
+    // still carry the old. The quote then prices the old name, at whatever the old name
+    // matches today, and nothing on screen looks wrong. On Cladwells 2 Rev 3 that was 4
+    // sheets billed at £176.55 against a board that actually costs £281.52, while the real
+    // board sat at nil sheets: £420 of material adrift on one job.
+    if(shts>0 && !_partsOnMat){
+      const _near=[...new Set((jobData.parts||[]).map(p=>p.matName).filter(Boolean))];
+      gBlock(`<b>${mat}</b> is being charged for ${shts} sheet${shts!==1?'s':''}, but <b>no part in the cutlist is on it</b>.`
+        +` The saved layout was nested on this board before it was renamed or swapped.`
+        +(_near.length?` The cutlist uses: ${_near.map(n=>'<b>'+_attr(n)+'</b>').join(', ')}.`:'')
+        +` Open the job in the optimiser, press Calculate and save, so the layout and the quote agree.`);
     }
     const boardBase = bShts * boardPrice;
     const boardTotal = surcharge ? boardBase * 1.08 : boardBase;
@@ -1639,15 +1733,23 @@ async function buildQuote() {
     // Record the lines as priced RIGHT NOW. A saved quote only kept its totals, so reopening
     // one after a rate change redrew the lines at the new rates while the stored total stayed
     // old — the two silently disagreed. These are saved with the quote as the actual record.
-    if(bShts) _qLine(mat,'Boards',`${bShts} sheet${bShts!==1?'s':''} × £${boardPrice.toFixed(2)}${surcharge?' +8%':''}`,bShts,boardPrice,boardTotal);
-    if(cShts) _qLine(mat,'Cutting',`${cShts} sheet${cShts!==1?'s':''} × £${cutRate.toFixed(2)}`,cShts,cutRate,cutTotal);
+    if(bShts) _qLine(mat,'Boards',`${bShts} sheet${bShts!==1?'s':''} × £${boardPrice.toFixed(2)}${surcharge?' +8%':''}`,bShts,boardPrice,boardTotal,{kind:'board',unit:'sheet'});
+    if(cShts) _qLine(mat,'Cutting',`${cShts} sheet${cShts!==1?'s':''} × £${cutRate.toFixed(2)}`,cShts,cutRate,cutTotal,{kind:'cutting',unit:'sheet'});
     Object.keys(data.ebByThk||{}).forEach(thk=>{ const m=(data.ebByThk[thk]||0)/1000; if(m<=0) return;
       const tk=((ov.ebTapeByThk||{})[thk])||_defTape(thk); const rt=_ebRates.find(r=>r.tape_key===tk);
       const mr=rt?parseFloat(rt.mat_rate):0.60, br=rt?parseFloat(rt.base_rate):2.90;
       const rate=br+mr*(surcharge?1.08:1);
-      _qLine(mat,`Edgebanding ${thk}mm`,`${m.toFixed(2)}m × ${tk} @ £${rate.toFixed(2)}/lm`,m,rate,m*rate); });
-    if(lamTotal>0) _qLine(mat,'Edgebanding — laminated',`${ebMLam.toFixed(2)}m × £${lamRateTotal.toFixed(2)}/lm`,ebMLam,lamRateTotal,lamTotal);
-    if(panelLamTotal>0) _qLine(mat,'Laminating — glue-up',`${lamM2.toFixed(2)}m² × £${panelLamRate.toFixed(2)} + ${lamN} panel${lamN!==1?'s':''} × £${panelLamPer.toFixed(2)}`,lamN,panelLamPer,panelLamTotal);
+      _qLine(mat,`Edgebanding ${thk}mm`,`${m.toFixed(2)}m × ${tk} @ £${rate.toFixed(2)}/lm`,m,rate,m*rate,{kind:'edgebanding',unit:'lm'}); });
+    if(lamTotal>0) _qLine(mat,'Edgebanding — laminated',`${ebMLam.toFixed(2)}m × £${lamRateTotal.toFixed(2)}/lm`,ebMLam,lamRateTotal,lamTotal,{kind:'edgebanding',unit:'lm'});
+    // Two charges, so two lines: glue by the square metre, press and trim by the panel.
+    // As one line it could never multiply out — 2 panels × £12 is not £29.82 — and a line
+    // that does not multiply out is a line a customer queries.
+    if(lamM2>0 && panelLamRate>0)
+      _qLine(mat,'Laminating — glue',`${lamM2.toFixed(2)}m² × £${panelLamRate.toFixed(2)}/m²`,
+        lamM2,panelLamRate,null,{kind:'laminating',unit:'m2'});
+    if(lamN>0 && panelLamPer>0)
+      _qLine(mat,'Laminating — press & trim',`${lamN} panel${lamN!==1?'s':''} × £${panelLamPer.toFixed(2)}`,
+        lamN,panelLamPer,null,{kind:'laminating',unit:'each'});
 
     const priceNote = autoPrice !== null
       ? `£${boardPrice.toFixed(2)}/sheet${surcharge?` <span style="color:#f0a500">&rarr; £${(boardPrice*1.08).toFixed(2)} incl. +8%</span>`:''}${tier==='trade'?' (incl. 7%)':''}`
@@ -1746,7 +1848,7 @@ async function buildQuote() {
     const rt=_ebRates.find(r=>r.tape_key===tk);
     const mr=rt?parseFloat(rt.mat_rate):0.6, br=rt?parseFloat(rt.base_rate):2.9;
     const rate=br+mr; const tot=m*rate; grandEx+=tot;
-    _qLine(ex.label,'Edgebanding',`${m.toFixed(2)}m × ${tk} @ £${rate.toFixed(2)}/lm`,m,rate,tot);
+    _qLine(ex.label,'Edgebanding',`${m.toFixed(2)}m × ${tk} @ £${rate.toFixed(2)}/lm`,m,rate,tot,{kind:'edgebanding',unit:'lm'});
     rows += `<tr class="mat-head"><td colspan="6">${ex.label}${ex.isLam?' · laminated (wide)':''} — edgebanding</td></tr>
     <tr>
       <td>Edgebanding</td>
@@ -1772,7 +1874,7 @@ async function buildQuote() {
       grandEx+=line; doorTotal+=line;
       const fm=(d.frameMat||'').replace(/\s*MR MDF/i,'');
       const desc=`${d.h}×${d.w}mm${d.panels>1?', '+d.panels+'-panel':''}${fm?', '+fm+' frame':''}`;
-      _qLine('Shaker doors',`Door ${i+1}`,desc,qty,each,line);
+      _qLine('Shaker doors',`Door ${i+1}`,desc,qty,each,line,{kind:'door',unit:'each',material_desc:desc||null});
       rows += `<tr><td>Door ${i+1}</td><td>${desc}</td><td></td><td></td><td class="r" style="font-size:11px;color:#6b8f7e">${qty} × £${each.toFixed(2)}</td><td class="r">£${line.toFixed(2)}</td></tr>`;
     });
     rows += `<tr class="subtotal"><td colspan="5">Shaker doors subtotal</td><td class="r">£${doorTotal.toFixed(2)}</td></tr>`;
@@ -1787,7 +1889,9 @@ async function buildQuote() {
     ex.forEach((x,i)=>{
       const line=(Number(x.qty)||0)*(Number(x.rate)||0); grandEx+=line;
       if(line||(x.desc||'').trim()) _qLine('Additional charges', x.desc||'Additional charge',
-        `${x.qty} ${x.unit||'hrs'} × £${(Number(x.rate)||0).toFixed(2)}`, Number(x.qty)||0, Number(x.rate)||0, line);
+        `${x.qty} ${x.unit||'hrs'} × £${(Number(x.rate)||0).toFixed(2)}`, Number(x.qty)||0, Number(x.rate)||0, line,
+        {kind:'extra', unit:(/hr/i.test(x.unit||'')?'hr':(/m2|m²/i.test(x.unit||'')?'m2':(/lm/i.test(x.unit||'')?'lm':'each'))),
+         material_code:null, material_desc:null, sheet_size:null});
       rows += `<tr>
         <td><input class="override-input" style="width:100%" value="${_attr(x.desc||'')}" placeholder="e.g. Labour — cutting from customer's offcuts"
           onchange="extraSet(${i},'desc',this.value)"></td>
@@ -1810,8 +1914,13 @@ async function buildQuote() {
     if(ex.length) rows += `<tr class="subtotal"><td colspan="5">Additional charges subtotal</td><td class="r">£${ex.reduce((s,x)=>s+(Number(x.qty)||0)*(Number(x.rate)||0),0).toFixed(2)}</td></tr>`;
   }
 
-  const grandInc = grandEx * 1.20;
-  const vatAmt = grandEx * 0.20;
+  // The figure on screen is the sum of the lines, so what you read, what gets saved and what
+  // goes on the invoice are the same number. It used to be totted up separately in full
+  // precision and rounded once at the end, which is defensible arithmetic and the wrong
+  // answer: it disagreed with its own lines by a penny or two.
+  grandEx = _r2((_quoteLines||[]).reduce((a,l)=>a+(Number(l.total)||0),0));
+  const grandInc = _r2(grandEx * 1.20);
+  const vatAmt = _r2(grandEx * 0.20);
 
   // ── gate: whole-job checks ───────────────────────────────────────────────
   {
@@ -1942,10 +2051,21 @@ async function saveQuote() {
   const tier = document.getElementById('qTier').value;
   const custName = document.getElementById('qCustomer').value;
 
-  // Grab totals from DOM
+  // The total is the sum of the LINES, not the figure scraped off the screen. Those two used
+  // to be worked out separately — the screen added unrounded numbers and rounded once at the
+  // end, the lines rounded individually — so an invoice typed from the lines could land a few
+  // pence off the quote the customer was holding. Pennies are the sort of thing customers
+  // notice. Now the lines are the record and the total is their sum, by construction.
+  const linesEx = _r2((_quoteLines||[]).reduce((a,l)=>a+(Number(l.total)||0),0));
   const totalEls = document.querySelectorAll('.totals-row span:last-child');
-  const exVat = totalEls[0]?.textContent?.replace('£','') || '0';
-  const incVat = totalEls[2]?.textContent?.replace('£','') || '0';
+  const screenEx = parseFloat((totalEls[0]?.textContent||'').replace('£',''))||0;
+  if(Math.abs(screenEx-linesEx)>0.02){
+    if(!confirm('The quote on screen totals £'+screenEx.toFixed(2)+', but its lines add up to £'
+      +linesEx.toFixed(2)+'.\n\nSaving the line total (£'+linesEx.toFixed(2)+'), because that is what an '
+      +'invoice would be built from.\n\nCarry on?')) return;
+  }
+  const exVat = linesEx;
+  const incVat = _r2(linesEx*1.2);
 
   const payload = {
     job_id: _currentJob.id,
@@ -1959,8 +2079,8 @@ async function saveQuote() {
     quote_data: {overrides: _quoteOverrides, tier, lines: _quoteLines,
                  basis: JSON.parse(JSON.stringify(_gateBasis||{})),
                  savedAt: new Date().toISOString()},
-    total_ex_vat: parseFloat(exVat),
-    total_inc_vat: parseFloat(incVat)
+    total_ex_vat: exVat,
+    total_inc_vat: incVat
   };
 
   try {
@@ -1995,7 +2115,10 @@ async function loadSavedQuotes(jobId) {
             ? `<button class="btn btn-secondary btn-sm" onclick="viewSavedQuote('${q.id}')" title="See it exactly as you sent it">👁 ${lines.length} lines</button>`
               +`<button class="btn btn-secondary btn-sm" onclick="compareSavedQuote('${q.id}')" title="Line by line: what you saved against what the job would price today">⇄ Compare</button>`
             : '<span style="font-size:11px;color:#6b8f7e" title="Saved before line detail was recorded">totals only</span>'}
-            <button class="btn btn-secondary btn-sm" onclick="restoreSavedQuote('${q.id}')" title="Load this quote back in so you can amend it and save a new version">↩ Reopen</button></td>
+            <button class="btn btn-secondary btn-sm" onclick="restoreSavedQuote('${q.id}')" title="Load this quote back in so you can amend it and save a new version">↩ Reopen</button>
+            ${_isInvoiceQuote(q.id)
+              ? `<span class="badge" style="background:#2e5e3a;color:#cfe7dd" title="This is the quote the invoice will be built from">✔ to invoice</span>`
+              : `<button class="btn btn-sm" style="background:#8a5a12;color:#ffe3b8;border:none" onclick="markReadyToInvoice('${q.id}')" title="Pick this quote as the one to bill from, and mark the job ready to invoice">£ Mark ready to invoice</button>`}</td>
         </tr>`;}).join('')}
         </tbody>
       </table>
@@ -2005,6 +2128,62 @@ async function loadSavedQuotes(jobId) {
   } catch(e){}
 }
 let _savedQuotes=[];
+// ── Ready to invoice ────────────────────────────────────────────────────────
+// A job ends up with several saved quotes — the first one, the one after the customer
+// changed their mind, the one after the edgebander ate four panels. Only one of them is the
+// one you bill. Nothing recorded WHICH, so the answer lived in your head, and a fortnight
+// later "was it the 19th or the 27th?" is a real question with a few hundred pounds on it.
+// Marking one stamps it on the job, so the invoice is built from a quote you chose on
+// purpose rather than whichever happens to be newest.
+function _isInvoiceQuote(qid){
+  return !!(_currentJob && _currentJob.invoice_quote_id!=null
+            && String(_currentJob.invoice_quote_id)===String(qid));
+}
+// Other saved jobs that look like revisions of this one: "Cladwells 2", "Cladwells 2 — Rev 2".
+function _siblingRevisions(){
+  if(!_currentJob) return [];
+  const base=n=>String(n||'').replace(/\s*[—-]\s*rev(ision)?\s*\.?\s*\d+\s*$/i,'').trim().toLowerCase();
+  const me=base(_currentJob.job_name);
+  if(!me) return [];
+  return (_jobs||[]).filter(j=>j.id!==_currentJob.id && !j.archived && base(j.job_name)===me);
+}
+async function markReadyToInvoice(qid){
+  if(!_currentJob){ return; }
+  const q=_savedQuotes.find(x=>String(x.id)===String(qid)); if(!q) return;
+  const when=new Date(q.created_at).toLocaleDateString('en-GB');
+  const lines=((q.quote_data||{}).lines)||[];
+  if(!lines.length && !confirm('This quote was saved before line detail was recorded, so there is '
+    +'nothing to build invoice lines from — only a total.\n\nUse it anyway?')) return;
+  if(!confirm('Bill '+_currentJob.job_name+' from the quote saved '+when+'?\n\n'
+    +'  £'+(parseFloat(q.total_ex_vat)||0).toFixed(2)+' ex-VAT · '+lines.length+' lines\n\n'
+    +'The job is marked Ready to invoice and this quote is stamped as the one to use.')) return;
+  try{
+    await sbFetch('tce_jobs?id=eq.'+_currentJob.id,{method:'PATCH',headers:{'Prefer':'return=minimal'},
+      body:{ invoice_quote_id:q.id, status:'ready_to_invoice', completed_at:new Date().toISOString() }});
+    _currentJob.invoice_quote_id=q.id; _currentJob.status='ready_to_invoice';
+    const j=(_jobs||[]).find(x=>x.id===_currentJob.id);
+    if(j){ j.invoice_quote_id=q.id; j.status='ready_to_invoice'; }
+    showToast('Marked ready to invoice ✓');
+  }catch(e){ alert('Could not mark it: '+e.message); return; }
+  // Revisions of the same job are now superseded. Offered, never automatic: archiving the
+  // wrong one is worse than leaving a tidy-up undone, and only you know which are dead.
+  const sibs=_siblingRevisions();
+  if(sibs.length){
+    const list=sibs.map(j=>'  • '+j.job_name+(j.saved_at?'  ('+new Date(j.saved_at).toLocaleDateString('en-GB')+')':'')).join('\n');
+    if(confirm('There '+(sibs.length===1?'is 1 other revision':'are '+sibs.length+' other revisions')+' of this job:\n\n'
+      +list+'\n\nArchive '+(sibs.length===1?'it':'them')+' so only the one you are billing stays in the list?\n'
+      +'(Archived jobs are hidden, not deleted — you can bring them back.)')){
+      let done=0;
+      for(const j of sibs){
+        try{ await sbFetch('tce_jobs?id=eq.'+j.id,{method:'PATCH',headers:{'Prefer':'return=minimal'},
+              body:{archived:true}}); j.archived=true; done++; }catch(e){}
+      }
+      showToast(done+' revision'+(done!==1?'s':'')+' archived ✓');
+    }
+  }
+  try{ await loadSavedQuotes(_currentJob.id); }catch(e){}
+  try{ renderJobsList(); }catch(e){}
+}
 // Load a saved quote back into the working quote — its tier, customer and every override —
 // so you can amend it and save a new version. The lines redraw at TODAY'S rates, which is
 // what you want when revising, but it means the total can differ from the stored one, so
@@ -2945,7 +3124,7 @@ function renderCustomers() {
     <div class="cust-card" style="flex-direction:column;align-items:stretch;gap:12px">
       <div style="display:flex;align-items:center;gap:12px">
         <div style="flex:1">
-          <div class="cust-name">${c.name}</div>
+          <div class="cust-name">${c.name}${_qbBadge(c.name)}</div>
           <div class="cust-meta">${c.contact_name&&c.contact_name!==c.name?c.contact_name+' · ':''} ${c.email||''} ${c.notes?'· '+c.notes:''}</div>
         </div>
         <span class="badge badge-${c.tier||'retail'}">${(c.tier||'retail').toUpperCase()}</span>
