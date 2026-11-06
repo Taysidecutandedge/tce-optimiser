@@ -530,6 +530,8 @@ select option{background:var(--surf2)}
     <div id="matCheckBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(240,165,0,.14);border:1px solid rgba(240,165,0,.5);border-radius:8px;color:#ffcf8a;font-size:12.5px;line-height:1.7"></div>
     <div id="staleNestBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(200,80,80,.14);border:1px solid rgba(220,110,110,.55);border-radius:8px;color:#ffc9c9;font-size:12.5px;line-height:1.7"></div>
     <div id="noBoardBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(200,80,80,.16);border:1px solid rgba(230,110,110,.6);border-radius:8px;color:#ffc9c9;font-size:12.5px;line-height:1.7"></div>
+    <div id="inventedBoardBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(240,165,0,.14);border:1px solid rgba(240,165,0,.5);border-radius:8px;color:#ffdf9b;font-size:12.5px;line-height:1.7"></div>
+    <div id="importNoteBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(240,165,0,.10);border:1px solid rgba(240,165,0,.35);border-radius:8px;color:#ffdf9b;font-size:12.5px;line-height:1.7"></div>
     <div id="doorLikeBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(212,130,10,.14);border:1px solid rgba(212,130,10,.5);border-radius:8px;color:#e8c99a;font-size:12.5px;line-height:1.7"></div>
     <div id="doorBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(212,130,10,.12);border:1px solid rgba(212,130,10,.45);border-radius:8px;color:#e8c99a;font-size:12.5px;line-height:1.7"></div>
     <div id="sheetEquivBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(40,120,170,.16);border:1px solid rgba(70,150,210,.5);border-radius:8px;color:#9cc;font-size:12.5px;line-height:1.7"></div>
@@ -714,7 +716,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-11-06-c';
+const TCE_BUILD='2026-11-06-e';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -1495,9 +1497,15 @@ function _setNestSaved(txt){
 // check it still matches before writing — if it doesn't, the job moved on and the result
 // belongs to a job that is no longer open.
 let _jobEpoch=0;
+// What the last import couldn't be sure of (see _importPreflight). Shown beside the parts.
+// _pending* holds them across _resetJobState, which the import runs after the check.
+// Declared here rather than next to the preflight so _resetJobState can't hit the
+// temporal dead zone of a `let` further down the file.
+var _importNotes=[], _pendingImportNotes=[];
 function _resetJobState(opts){
   const o=opts||{};
   _jobEpoch++;
+  _importNotes=[];   // notes belong to the cutlist that was imported, not to the next job
   // The cut plan and everything derived from it
   _lastSheets=[]; _lastUnplaced=[]; _lastEbMap={}; _lastEbGT=0; _lastEbDetail=[]; _lastBoardNeed=[];
   // Cutting mode
@@ -2056,6 +2064,7 @@ function jss(id,k,v){
 function trimAll(id,v){const s=jobSheets.find(x=>x.id===id);if(!s)return;s.trimT=s.trimB=s.trimL=s.trimR=v;save();renderJobSheets();}
 
 function renderJobSheets(){
+  try{ renderInventedBoards(); }catch(e){}
   const el=document.getElementById('jobSheetList');
   if(!jobSheets.length){el.innerHTML='<div style="text-align:center;padding:18px;color:var(--txt3);font-size:12px">No sheets yet — pick from Library or add blank.</div>';return;}
   el.innerHTML=jobSheets.map(s=>{
@@ -2158,6 +2167,7 @@ function applySheetBoard(gi){
   const oldName=s.name; const _on=String(oldName||'').toLowerCase().trim();
   // update the sheet in place — keep qty and trims, replace board identity
   s.libRef=B.libRef; s.name=B.name; s.l=B.l; s.w=B.w; s.thick=B.thick; s.cost=B.cost; s.color=B.color||s.color; s.grainLen=B.grainLen;
+  s._invented=false;   // it now comes from a real board, so the made-up-board warning clears
   // re-point every part that was on the old material (case-insensitive)
   let n=0; (parts||[]).forEach(p=>{ if(String(p.matName||'').toLowerCase().trim()===_on){ p.matName=B.name; n++; } });
   const ov=document.getElementById('sheetBoardOverlay'); if(ov) ov.remove();
@@ -2251,6 +2261,23 @@ function renderMatCheck(){
 // website submission asking for something we price differently — "22mm shaker door" is a
 // product, not a sheet — and the second commonest is a board renamed after the parts were
 // imported. Either way the panels cannot be cut until it is resolved.
+// Boards the import invented because the cutlist named a material your system doesn't
+// have. They quote at £0 on a guessed 2800×2070, so the bar stays up until each one is
+// either given a real cost or pointed at a real board.
+function renderInventedBoards(){
+  const el=document.getElementById('inventedBoardBar'); if(!el) return;
+  const bad=(jobSheets||[]).filter(s=>s._invented && !(parseFloat(s.cost)||0));
+  if(!bad.length){ el.style.display='none'; el.innerHTML=''; return; }
+  el.style.display='block';
+  el.innerHTML='<span style="font-weight:700">⚠ '+bad.length+' board'+(bad.length!==1?'s were':' was')
+    +' made up from the cutlist</span> — not from your library or price list, so the size is a guess and the cost is £0. '
+    +'Anything quoted off this will be wrong.<br>'
+    + bad.map(s=>'<span style="display:inline-block;background:rgba(0,0,0,.25);border-radius:5px;padding:2px 8px;'
+        +'margin:3px 5px 0 0;font-family:var(--mono);font-size:12px">'+esc(s.name)+' <span style="opacity:.7">'
+        +s.thick+'mm '+s.l+'×'+s.w+' £0</span></span>').join('')
+    +'<div style="font-size:11.5px;opacity:.9;margin-top:5px">Use <b>Pick board</b> on the sheet to point it at a real one, or type the size and cost in by hand.</div>';
+}
+
 function renderNoBoard(){
   const el=document.getElementById('noBoardBar'); if(!el) return;
   const m=window._lastUnmatchedMats||{};
@@ -2366,6 +2393,8 @@ function renderParts(){
   try{ renderMatCheck(); }catch(e){}
   try{ renderStaleNest(); }catch(e){}
   try{ renderNoBoard(); }catch(e){}
+  try{ renderImportNotes(); }catch(e){}
+  try{ renderInventedBoards(); }catch(e){}
   try{ renderDoorLikeBar(); }catch(e){}
   try{ renderDoorBar(); }catch(e){}
   const tb=document.getElementById('partsTbody');
@@ -3392,10 +3421,19 @@ function _calculateInner(opts){
             if(tryPlace(target,piece)){
               const idx=sparse.placements.findIndex(p=>p.id===pl.id&&p.x===pl.x&&p.y===pl.y);
               if(idx>=0) sparse.placements.splice(idx,1);
+              // Rebuilding the sheet's columns from its placements. The width of a column is
+              // the width of the WIDEST panel standing in it — it used to be whatever the
+              // first panel happened to be, and a column holding a 464 then a 500 was
+              // recorded as 464 wide. The compaction below then shifted the next column to
+              // x=467, straight through the 500's right-hand 33mm, and two panels ended up
+              // on top of each other. That is how "U2 Drawer 2 Side L" came to overlap both
+              // Drawer 1 sides on sheet 8 of jaqueline bedroom 3.
+              const snapCols=sparse.placements.map(p2=>({...p2}));
               sparse.cols=[];
               sparse.placements.forEach(p2=>{
                 let col=sparse.cols.find(c=>Math.abs(c.x-p2.x)<1);
                 if(!col){col={x:p2.x,w:p2.w,usedH:0,fullRun:p2.h>sparse.uh-1};sparse.cols.push(col);}
+                col.w=Math.max(col.w,p2.w);
                 col.usedH=Math.max(col.usedH,p2.y+p2.h+kerf);
               });
               // Compact: remove x gaps by shifting columns left
@@ -3409,6 +3447,10 @@ function _calculateInner(opts){
                 }
                 nextX2=col.x+col.w+kerf;
               });
+              // Moving panels sideways is never worth a sheet that cannot be cut. If the
+              // compaction has overlapped anything, or pushed a panel off the board, put it
+              // back exactly as it was.
+              if(_hasOverlapOrOverhang(sparse)) sparse.placements=snapCols;
               improved=true;break;
             }
           }
@@ -3956,11 +3998,26 @@ function isSheetRippable(sh){
   return true;
 }
 // Tidy with a built-in safety net: revert the sheet if the result isn't rippable.
+// Two panels on the same piece of board, or a panel hanging off the edge. Either makes the
+// sheet uncuttable, and both are cheap to test for — cheaper than a ruined board.
+function _hasOverlapOrOverhang(sh){
+  const P=(sh&&sh.placements)||[];
+  for(let i=0;i<P.length;i++){
+    const a=P[i];
+    if(a.x<-1||a.y<-1||a.x+a.w>sh.uw+1) return true;
+    const lim=(a.h>sh.uh-1)?sh.fullL:sh.uh;          // full-length rips legitimately use the untrimmed length
+    if(a.y+a.h>lim+1) return true;
+    for(let j=i+1;j<P.length;j++) if(_stripOv(a,P[j])) return true;
+  }
+  return false;
+}
 function tidySheetSafe(sh,kerf){
   if(!sh.placements||sh.placements.length<3) return;
   const snap=sh.placements.map(p=>({...p}));
   tidySheet(sh,kerf);
-  if(!isSheetRippable(sh)) sh.placements=snap;
+  // It checked rippability and nothing else, so a tidy that overlapped two panels passed
+  // straight through. Rippable and cuttable are not the same claim.
+  if(!isSheetRippable(sh) || _hasOverlapOrOverhang(sh)) sh.placements=snap;
 }
 function fits(pw,ph,r){return pw<=r.w+.001&&ph<=r.h+.001;}
 function scoreMAXR(pw,ph,r){return Math.min(r.w-pw,r.h-ph);}
@@ -5352,7 +5409,78 @@ function confirmShakerDoors(){
     +' — '+pieceCount+' piece'+(pieceCount!==1?'s':'')+' to cut, on '+total+' cutlist row'+(total!==1?'s':'')+'.');
 }
 
+// ── Import pre-flight ───────────────────────────────────────────────────────
+// The importer used to fill in anything it couldn't read and say nothing: no Thickness
+// column meant every board came in at 18mm, and a row whose width was really a
+// thickness (Dylan's face frames at "1594 x 36") nested happily as a 36mm strip, got
+// edged, got charged, and nothing anywhere said it wasn't a panel. Both only came to
+// light by eye. So the import now says what it could not read BEFORE it reads it.
+let _importPreflightOK=false;
+function _importPreflight(){
+  const g=k=>{const el=document.getElementById('map_'+k);return el&&el.value!==''?+el.value:-1;};
+  const lC=g('l'),wC=g('w'),lblC=g('label'),bC=g('board'),tC=g('thick');
+  if(lC<0||wC<0||lblC<0) return true;            // the required-column alert below handles this
+  const num=v=>{const n=parseFloat(String(v).replace(/[^\d.-]/g,''));return isNaN(n)?0:n;};
+  const blocks=[], notes=[];
+
+  // 1 — No thickness anywhere. Only a problem if the material names don't carry one
+  //     either ("19mm Oak Veneer Mdf" is self-describing; "finsa hidrofugo" is not).
+  if(tC<0){
+    const named=(importRows||[]).some(r=>/\d+(?:\.\d+)?\s*mm/i.test(String(bC>=0?(r[bC]||''):'')));
+    if(!named) blocks.push({t:'No thickness found',
+      d:'There is no Thickness column mapped, and the material names don’t carry a thickness either. '
+       +'Every board will be created at <b>18mm</b>, which is a guess. Map the Thickness column above if the file has one.'});
+  }
+
+  // 2 — A size that may really be a thickness. This cannot be decided automatically:
+  //     a 2520x22 filler is a real strip and a 1594x36 "face frame" is a missing width,
+  //     and they look identical in the file. So it reports, and never blocks.
+  const narrow={};
+  (importRows||[]).forEach(r=>{
+    const L=num(r[lC]), W=num(r[wC]); if(!L||!W) return;
+    const m=Math.min(L,W); if(m<50) narrow[Math.round(m)]=(narrow[Math.round(m)]||0)+1;
+  });
+  const nk=Object.keys(narrow).sort((a,b)=>a-b);
+  if(nk.length){
+    const n=nk.reduce((a,k)=>a+narrow[k],0);
+    notes.push({t:n+' row'+(n!==1?'s are':' is')+' under 50mm on one side',
+      d:'Sizes: '+nk.map(k=>k+'mm ×'+narrow[k]).join(', ')
+       +'. Worth a look — these are either real strips, or a thickness typed into a size column with the actual size missing.'});
+  }
+
+  // Notes are carried through to a bar beside the parts list rather than put in the way
+  // here. They would otherwise fire on every job with fillers in it — a 2520x22 filler is
+  // a real strip — and a warning you click past every time stops being a warning.
+  _pendingImportNotes=notes;
+  if(!blocks.length) return true;
+  const card=x=>'<div style="margin:8px 0;padding:9px 11px;border-radius:7px;'
+    +'background:rgba(200,80,80,.16);border:1px solid rgba(230,110,110,.55)">'
+    +'<div style="font-weight:700;color:#ffc9c9;font-size:12.5px">⚠ '+esc(x.t)+'</div>'
+    +'<div style="font-size:12px;color:var(--txt2);margin-top:3px;line-height:1.6">'+x.d+'</div></div>';
+  const ov=document.createElement('div');
+  ov.className='overlay'; ov.id='importPreflightOverlay'; ov.style.display='flex';
+  ov.innerHTML='<div class="modal" style="max-width:560px">'
+    +'<h2>CHECK BEFORE IMPORTING</h2>'
+    +'<div style="font-size:12px;color:var(--txt2);margin-bottom:4px">Nothing has been imported yet.</div>'
+    +blocks.map(card).join('')
+    +'<div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">'
+    +'<button class="btn btn-ghost" id="pfBack">Go back</button>'
+    +'<button class="btn btn-acc" id="pfGo">Import anyway</button></div></div>';
+  document.body.appendChild(ov);
+  document.getElementById('pfBack').onclick=()=>ov.remove();
+  document.getElementById('pfGo').onclick=()=>{ ov.remove(); _importPreflightOK=true; applyImport(); };
+  return false;
+}
+function renderImportNotes(){
+  const el=document.getElementById('importNoteBar'); if(!el) return;
+  if(!(_importNotes||[]).length){ el.style.display='none'; el.innerHTML=''; return; }
+  el.style.display='block';
+  el.innerHTML=_importNotes.map(x=>'<span style="font-weight:700">'+esc(x.t)+'</span> — '+x.d).join('<br>');
+}
+
 function applyImport(){
+  if(!_importPreflightOK && !_importPreflight()) return;
+  _importPreflightOK=false;
   document.querySelector('.app')?.classList.remove('results'); // reviewing a fresh import — widen the input panel
   // A fresh cutlist is a DIFFERENT job. Cut it loose from whatever was loaded before, or
   // Save quietly files it under the old job's name — which is how Karl's cutlist ended up
@@ -5360,6 +5488,7 @@ function applyImport(){
   // One call clears the lot: nest, cut ticks, session, quote basis, origin.
   const _hadCloudJob=!!_loadedCloudJobId;
   _resetJobState();
+  _importNotes=_pendingImportNotes||[]; _pendingImportNotes=[];   // survives the reset above
   if(_hadCloudJob){
     const nb=document.getElementById('cloudJobName'); if(nb) nb.value='';
     if(typeof _setNestSaved==='function') _setNestSaved('new cutlist — name it before saving');
@@ -5509,8 +5638,13 @@ function applyImport(){
         // Plain MDF / MR MDF has no grain → mark it no-grain so the nester can rotate parts to
         // fit more per sheet. Veneered/woodgrain boards stay grained.
         const noGrain=/\bmdf\b/i.test(mn)&&!/veneer|oak|ash|walnut|beech|ply|birch|woodgrain/i.test(mn);
+        // _invented: nothing about this board came from your system. The size is the Egger
+        // default and the cost is zero, both of which quote perfectly happily and wrongly.
+        // The mapping dialog that follows can be dismissed, so the sheet carries a flag and
+        // a bar nags until it is mapped or priced. (Job 180 "ross v2" is why: two £0 boards
+        // at 2800x2070 that should have been Finsa at 2440x1220.)
         jobSheets.push({id:jsid++,libRef:null,name:mn,l:2800,w:2070,thick:thick,
-          cost:0,color:nc(),grainLen:noGrain?false:true,qty:1,trimT:15,trimB:15,trimL:15,trimR:15});
+          cost:0,color:nc(),grainLen:noGrain?false:true,qty:1,trimT:15,trimB:15,trimL:15,trimR:15,_invented:true});
         autoCreated.push(mn);
       }
       sheetsAdded++;

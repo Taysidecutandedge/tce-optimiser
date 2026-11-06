@@ -465,7 +465,7 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
 // says so. A device can run week-old code while you are told a fix is live. So the app asks
 // the server what the current build is and says plainly when it is behind. It never reloads
 // by itself — that is your call, not the app's.
-const TCE_BUILD='2026-11-06-c';
+const TCE_BUILD='2026-11-06-e';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -2208,9 +2208,61 @@ function _isEstimateQuote(qid){
 // end of the job: a job collects revisions, and which one actually went to the customer is
 // not something to work out later from dates. Deliberately does NOT archive the other
 // revisions — at estimate stage they are still live options, unlike at invoice stage.
+// ── Parts lost between revisions ────────────────────────────────────────────
+// Job 179 is why this exists. "U1 18mm shelf" 864x562 fell out of the cutlist between two
+// saves while everything else carried over, and an estimate went to QuickBooks a whole oak
+// sheet short. Nothing noticed — it was spotted by eye, days later.
+// Matching is on parts, not on names: the predecessor of 179 was called "TCE-721817", so a
+// name-based sibling search would have missed it. Archived jobs count too, because the
+// previous revision is usually the one that got tidied away.
+// The check cannot tell a deliberate revision from an accident — "Louise NO DOORS" losing
+// 25 door parts is correct — so it never blocks, it just says what went and asks once.
+async function _lostPartsSince(){
+  if(!_currentJob) return null;
+  const cust=_currentJob.client_name;
+  const pool=(_jobs||[]).filter(j=>j.id<_currentJob.id && (cust?j.client_name===cust:true)).slice(0,40);
+  if(!pool.length) return null;
+  const ids=[_currentJob.id].concat(pool.map(j=>j.id));
+  let rows;
+  try{ rows=await sbFetch('tce_jobs?select=id,job_name,saved_at,parts:job_data->parts&id=in.('+ids.join(',')+')'); }
+  catch(e){ return null; }
+  if(!Array.isArray(rows)) return null;
+  const key=p=>String(p.label||'').trim().toLowerCase()+'|'+Math.round(p.l||0)+'x'+Math.round(p.w||0);
+  const bag=ps=>{const m={};(ps||[]).forEach(p=>{const k=key(p);m[k]=(m[k]||0)+(p.qty||1);});return m;};
+  const mine=rows.find(r=>String(r.id)===String(_currentJob.id)); if(!mine) return null;
+  const B=bag(mine.parts), kb=Object.keys(B); if(!kb.length) return null;
+  let best=null;
+  rows.filter(r=>String(r.id)!==String(_currentJob.id)).forEach(r=>{
+    const A=bag(r.parts), ka=Object.keys(A); if(!ka.length) return;
+    const shared=ka.filter(k=>B[k]);
+    const ov=shared.length/Math.max(ka.length,kb.length);
+    if(ov<0.6) return;                                   // a different job, not a revision
+    const lost=ka.filter(k=>!B[k]).map(k=>({k:k,q:A[k]}));
+    const shrunk=shared.filter(k=>B[k]<A[k]).map(k=>({k:k,q:A[k],to:B[k]}));
+    if(!lost.length && !shrunk.length) return;
+    if(!best || ov>best.ov) best={ov:ov,job:r,lost:lost,shrunk:shrunk};
+  });
+  return best;
+}
+async function _lostPartsGate(what){
+  let f=null;
+  try{ f=await _lostPartsSince(); }catch(e){ return true; }   // a failed check never blocks the job
+  if(!f) return true;
+  const row=x=>'  • '+x.k.split('|')[0]+'  '+x.k.split('|')[1]
+    +(x.to!=null?('   qty '+x.q+' → '+x.to):('   ×'+x.q));
+  const show=a=>a.slice(0,12).map(row).join('\n')+(a.length>12?'\n  …and '+(a.length-12)+' more':'');
+  return confirm('Before you '+what+' — this job is missing parts that “'+f.job.job_name+'” had'
+    +(f.job.saved_at?' (saved '+new Date(f.job.saved_at).toLocaleDateString('en-GB')+')':'')+':\n\n'
+    +(f.lost.length?'GONE:\n'+show(f.lost)+'\n\n':'')
+    +(f.shrunk.length?'FEWER:\n'+show(f.shrunk)+'\n\n':'')
+    +'If that was deliberate — a revision that genuinely drops those parts — carry on.\n'
+    +'If not, stop and put them back first: a panel missing here goes out on both the estimate and the cutlist.\n\n'
+    +'Carry on anyway?');
+}
 async function markReadyForEstimate(qid){
   if(!_currentJob) return;
   const q=_savedQuotes.find(x=>String(x.id)===String(qid)); if(!q) return;
+  if(!await _lostPartsGate('send this as the estimate')) return;
   const when=new Date(q.created_at).toLocaleDateString('en-GB');
   const lines=((q.quote_data||{}).lines)||[];
   if(!confirm('Send the quote saved '+when+' as the estimate for '+_currentJob.job_name+'?\n\n'
@@ -2238,6 +2290,7 @@ function _siblingRevisions(){
 async function markReadyToInvoice(qid){
   if(!_currentJob){ return; }
   const q=_savedQuotes.find(x=>String(x.id)===String(qid)); if(!q) return;
+  if(!await _lostPartsGate('bill this job')) return;
   const when=new Date(q.created_at).toLocaleDateString('en-GB');
   const lines=((q.quote_data||{}).lines)||[];
   if(!lines.length && !confirm('This quote was saved before line detail was recorded, so there is '
