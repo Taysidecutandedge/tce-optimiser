@@ -712,7 +712,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-11-05-d';
+const TCE_BUILD='2026-11-06-a';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -6151,7 +6151,10 @@ function buildApprovalSheet(){
   items.forEach(p=>{ if(p.door){ const d=p.door; const k=(d.ref||'D')+'|'+d.h+'x'+d.w+'|'+(d.panels||1); if(!dmap[k]) dmap[k]={d,qty:(parseInt(d.qty)||1)}; }});
   const doors=Object.values(dmap);
   const pmap={};
-  items.forEach(p=>{ if(p.door) return; const eb=p.eb||{}; const sig=['L1','L2','W1','W2'].map(s=>eb[s]?s+(eb.tk&&eb.tk[s]||'1'):'').filter(Boolean).join(','); const k=(p.label||'')+'|'+p.l+'x'+p.w+'|'+(p.grain||'L')+'|'+sig; if(!pmap[k]) pmap[k]={p:Object.assign({},p,{origL:p.l,origW:p.w}),qty:0}; pmap[k].qty+=(parseInt(p.qty)||1); });
+  // The MATERIAL is part of what makes a panel that panel. Two 600×400s, one in oak veneer
+  // and one in white MFC, are two different items to the person approving them — and they
+  // were being folded into one card as "600×400 — 2 off", which reads as a pair.
+  items.forEach(p=>{ if(p.door) return; const eb=p.eb||{}; const sig=['L1','L2','W1','W2'].map(s=>eb[s]?s+(eb.tk&&eb.tk[s]||'1'):'').filter(Boolean).join(','); const k=(p.label||'')+'|'+p.l+'x'+p.w+'|'+(p.grain||'L')+'|'+sig+'|'+(p.matName||''); if(!pmap[k]) pmap[k]={p:Object.assign({},p,{origL:p.l,origW:p.w}),qty:0}; pmap[k].qty+=(parseInt(p.qty)||1); });
   const panels=Object.values(pmap);
   const cust=((items.find(p=>p&&p.company&&String(p.company).trim())||{}).company)||'';
   let html='<div class="ap-doc">';
@@ -6180,6 +6183,10 @@ function buildApprovalSheet(){
       html+='<div class="ap-card" style="border:1px solid #ddd;border-radius:6px;padding:8px 10px;width:190px;text-align:center">'+_apPanelSvg(p)
         +'<div style="font-size:9.5pt;font-weight:bold;margin-top:4px">'+esc(p.label||'Panel')+' &mdash; '+it.qty+' off</div>'
         +'<div style="font-size:8.5pt;color:#444">'+p.origL+' &times; '+p.origW+' mm</div>'
+        // The board it is cut from. On a job with two or three materials the customer is
+        // approving which panel is in which — and without it the sheet cannot be checked
+        // against the quote at all, since the quote is laid out by material.
+        +(p.matName?'<div style="font-size:8.5pt;color:#111">'+esc(p.matName)+'</div>':'')
         +'<div style="font-size:8pt;color:#666">'+_apGrain(p.grain||'L')+'</div>'
         +'<div style="font-size:8.5pt;color:#1f9d57;font-weight:bold">Edged: '+ebTxt+'</div></div>'; });
     html+='</div>';
