@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TCE Jobs">
+<meta name="theme-color" content="#15171e">
+<title>TCE — Jobs</title>
+<style>
+:root{--bg:#0a0b0f;--surf:#15171e;--surf2:#1e2128;--brd:#2a2e38;--txt:#f0eeea;--txt2:#a8b0bd;--txt3:#6b7280;--acc:#d4820a;--ok:#27ae60;--low:#c0392b;--eb:#2a8a5a;--mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace}
+*{box-sizing:border-box;margin:0;padding:0;touch-action:manipulation}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--txt);font-size:16px;line-height:1.4;-webkit-text-size-adjust:100%}
+.wrap{max-width:1100px;margin:0 auto;padding:0 16px 80px}
+header{position:sticky;top:0;z-index:10;background:var(--surf);border-bottom:2px solid var(--acc);padding:12px 16px;padding-top:max(12px,env(safe-area-inset-top));display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+header h1{font-size:18px;font-weight:800;letter-spacing:.3px}
+header .sub{font-size:11px;color:var(--txt3);font-family:var(--mono)}
+header .right{margin-left:auto;display:flex;gap:8px;align-items:center}
+a{color:var(--acc)}
+.btn{background:var(--surf2);border:1px solid var(--brd);color:var(--txt);border-radius:8px;padding:10px 14px;font-size:14px;cursor:pointer;font-weight:600;min-height:44px;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;font-family:inherit}
+.btn:active{transform:scale(.97)}
+.btn-acc{background:var(--acc);color:#111;border-color:var(--acc)}
+.btn-sm{padding:6px 10px;font-size:13px;border-radius:6px;min-height:36px}
+.btn-ghost{background:transparent}
+.btn[disabled]{opacity:.45;cursor:default}
+.hidden{display:none!important}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:18px 0}
+.stat{background:var(--surf);border:1px solid var(--brd);border-radius:12px;padding:14px 16px;cursor:pointer;text-align:left;color:inherit;font-family:inherit}
+.stat .v{font-size:30px;font-weight:800;font-family:var(--mono);line-height:1}
+.stat .l{font-size:13px;color:var(--txt2);margin-top:6px}
+.stat .m{font-size:12px;color:var(--txt3);margin-top:2px;font-family:var(--mono)}
+.stat.alert{border-color:#7a3a1a}
+.stat.alert .v{color:var(--acc)}
+.stat.red{border-color:#5a2a2a}
+.stat.red .v{color:#ff8a80}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.chip{background:var(--surf);border:1px solid var(--brd);color:var(--txt2);border-radius:999px;padding:8px 14px;font-size:14px;font-weight:600;cursor:pointer;min-height:40px;font-family:inherit}
+.chip b{font-family:var(--mono);margin-left:4px;color:var(--txt3);font-weight:600}
+.chip.on{background:var(--acc);border-color:var(--acc);color:#111}
+.chip.on b{color:#3a2400}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.card{background:var(--surf);border:1px solid var(--brd);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:9px}
+.card .top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.card .nm{font-size:16px;font-weight:800;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+.card .cu{font-size:13px;color:var(--txt2);margin-top:2px}
+.card .amt{font-family:var(--mono);font-weight:700;font-size:15px;white-space:nowrap}
+.tags{display:flex;gap:6px;flex-wrap:wrap}
+.tag{font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;font-family:var(--mono);background:var(--surf2);color:var(--txt2);border:1px solid var(--brd)}
+.flag{font-size:13px;font-weight:600;padding:8px 10px;border-radius:8px;background:#3a2a10;color:#ffc46b}
+.flag.red{background:#3a1717;color:#ff8a80}
+.note{font-size:13px;color:var(--txt2)}
+.acts{display:flex;gap:8px;flex-wrap:wrap}
+.acts .btn{flex:1 1 130px}
+.mat{background:var(--surf2);border:1px dashed var(--brd);border-radius:10px;padding:10px 12px;font-size:13px;display:flex;flex-direction:column;gap:4px}
+.mat .h{font-weight:700;color:var(--txt)}
+.empty{background:var(--surf);border:1px dashed var(--brd);border-radius:14px;padding:24px;text-align:center;color:var(--txt2);font-size:14px}
+.panel{background:var(--surf);border:1px solid var(--brd);border-top:3px solid var(--acc);border-radius:14px;padding:16px;margin-top:22px;display:flex;flex-direction:column;gap:14px}
+.panel h2{font-size:19px;font-weight:800}
+.panel h3{font-size:15px;font-weight:800}
+.cols{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start}
+.col{flex:1 1 320px;min-width:0;display:flex;flex-direction:column;gap:10px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--txt3);padding:6px;border-bottom:1px solid var(--brd)}
+td{padding:9px 6px;border-bottom:1px solid var(--surf2);vertical-align:top}
+td.q{text-align:right;font-family:var(--mono);white-space:nowrap}
+.tblwrap{overflow-x:auto}
+.mail{background:var(--surf2);border:1px solid var(--brd);border-radius:10px;padding:12px;font-size:13px;white-space:pre-wrap;color:var(--txt2);font-family:var(--mono);line-height:1.5}
+.eb{border:1px solid var(--brd);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.seg{display:flex;gap:6px}
+.seg .btn{flex:1}
+.seg .btn.on{background:var(--txt);color:#111;border-color:var(--txt)}
+.reg{align-self:flex-start}
+.reg.on{border-color:var(--eb);color:#9fe3b8;background:#13261d}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:max(18px,env(safe-area-inset-bottom));background:var(--txt);color:#111;border-radius:12px;padding:10px 12px 10px 16px;font-size:14px;font-weight:600;display:flex;gap:12px;align-items:center;max-width:calc(100% - 24px);z-index:20;box-shadow:0 6px 24px rgba(0,0,0,.4)}
+.toast button{background:#111;color:var(--txt);border:0;border-radius:8px;padding:8px 12px;font-weight:700;font-family:inherit;cursor:pointer;min-height:36px}
+.warn{background:#3a2a10;border:1px solid #6a4a10;color:#ffc46b;border-radius:10px;padding:12px 14px;font-size:14px;margin-top:14px}
+#login{max-width:380px;margin:70px auto;padding:0 18px}
+#login .card{padding:24px}
+#login p{font-size:13px;color:var(--txt3);margin-bottom:10px}
+.field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+label{font-size:11px;color:var(--txt2);font-weight:600}
+input{background:var(--surf2);border:1px solid var(--brd);color:var(--txt);border-radius:8px;padding:12px;font-size:16px;width:100%;font-family:inherit}
+input:focus{outline:none;border-color:var(--acc)}
+.foot{text-align:center;color:var(--txt3);font-size:12px;margin-top:34px;font-family:var(--mono)}
+</style>
+</head>
+<body>
+
+<div id="login" class="hidden">
+  <div class="card">
+    <h1 style="font-size:21px">Jobs</h1>
+    <p>Sign in with your TCE account.</p>
+    <div class="field"><label for="li-email">Email</label><input id="li-email" type="email" autocomplete="username" value="cutlist@taysidecutandedge.co.uk"></div>
+    <div class="field"><label for="li-pass">Password</label><input id="li-pass" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
+    <button class="btn btn-acc" style="width:100%;margin-top:6px" onclick="doLogin()">Sign in</button>
+    <div id="li-err" style="color:#ff8a80;font-size:13px;margin-top:10px"></div>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <a class="btn btn-sm btn-ghost" href="./hub.html" aria-label="Back to Workshop Hub">← Hub</a>
+    <div><h1>Jobs on the go</h1><div class="sub" id="asof">loading…</div></div>
+    <div class="right">
+      <button class="btn btn-sm" onclick="load()">↻ Refresh</button>
+    </div>
+  </header>
+  <div class="wrap">
+    <div id="needsql" class="warn hidden">One-off setup: run <b>jobs-tracker.sql</b> in Supabase → SQL Editor. Until then you can see every job, but the Approved / Ordered / Delivered buttons can't save.</div>
+    <div id="err" class="warn hidden"></div>
+
+    <div class="stats">
+      <button class="stat" onclick="setFilter('sent')"><div class="v" id="s-sent">–</div><div class="l">waiting on approval</div><div class="m" id="s-sent-v"></div></button>
+      <button class="stat" id="st-appr" onclick="setFilter('approved')"><div class="v" id="s-appr">–</div><div class="l">approved – order materials</div><div class="m" id="s-appr-v"></div></button>
+      <button class="stat" onclick="setFilter('workshop')"><div class="v" id="s-shop">–</div><div class="l">in the workshop</div><div class="m">ordered · cutting · done</div></button>
+      <button class="stat" id="st-inv" onclick="setFilter('invoiced')"><div class="v" id="s-inv">–</div><div class="l">invoiced, not paid</div><div class="m" id="s-inv-v"></div></button>
+    </div>
+
+    <nav class="chips" id="chips" aria-label="Filter by stage"></nav>
+    <div class="grid" id="list"></div>
+    <div class="empty hidden" id="empty">Nothing at this stage right now.</div>
+
+    <section class="panel" id="order">
+      <div>
+        <h2>Material order</h2>
+        <div class="note" style="margin-top:4px">Everything for the approved jobs that isn't ordered yet, added up across jobs.</div>
+      </div>
+      <div class="chips" id="ojobs" style="margin:0"></div>
+      <div class="cols">
+        <div class="col">
+          <h3>Lathams · email to Martin</h3>
+          <div class="tblwrap"><table><thead><tr><th>Item</th><th>Size</th><th style="text-align:right">Qty</th><th>Job</th></tr></thead><tbody id="lath"></tbody></table></div>
+          <div class="mail" id="mail"></div>
+          <div class="acts">
+            <a class="btn btn-acc" id="mailto" href="#">Open email to Martin</a>
+            <button class="btn" onclick="copyMail()">Copy</button>
+          </div>
+        </div>
+        <div class="col">
+          <h3>Edging</h3>
+          <div class="note">Decors you use a lot come as 200m rolls; occasional ones are cut to length. Your choice is remembered per decor. Switch a line to Lathams to add it to Martin's email.</div>
+          <div id="edges" style="display:flex;flex-direction:column;gap:10px"></div>
+        </div>
+      </div>
+      <div class="acts">
+        <button class="btn btn-acc" id="markall" onclick="markOrdered()">Mark these jobs as ordered</button>
+      </div>
+    </section>
+
+    <div class="foot">Jobs from the optimiser · approvals from QuickBooks are added by Claude's morning check</div>
+  </div>
+</div>
+
+<div class="toast hidden" id="toast" role="status"><span id="toast-t"></span><button id="toast-undo" class="hidden">Undo</button></div>
+
+<script>
+const SB_URL='https://mxjduublgtlpqtdgutzi.supabase.co';
+const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im14amR1dWJsZ3RscHF0ZGd1dHppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwOTg2MjMsImV4cCI6MjA5MTY3NDYyM30.wfG9a91Udp7KQ7ywda6aNS9k-n79qtrGSe-epuCuk34';
+const LATHAMS_TO='Martin.Cassidy@lathams.co.uk';
+let _token=null,_user=null;
+const H=()=>({'apikey':SB_KEY,'Authorization':'Bearer '+(_token||SB_KEY)});
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money=n=>n==null||isNaN(n)?'':'£'+Number(n).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2});
+const DAY=86400000;
+const daysSince=t=>t?Math.floor((Date.now()-new Date(t).getTime())/DAY):null;
+const fmtDate=t=>t?new Date(t).toLocaleDateString('en-GB',{day:'numeric',month:'short'}):'';
+
+// ── sign-in (same account and token as the hub) ──────────────────────────────
+async function init(){
+  const tok=localStorage.getItem('tce_token');
+  if(tok){
+    try{
+      const r=await fetch(SB_URL+'/auth/v1/user',{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+tok}});
+      if(r.ok){const d=await r.json();_token=tok;_user={id:d.id,email:d.email};return showApp();}
+    }catch(e){}
+  }
+  showLogin();
+}
+function showLogin(){$('login').classList.remove('hidden');$('app').classList.add('hidden');}
+function showApp(){$('login').classList.add('hidden');$('app').classList.remove('hidden');load();}
+async function doLogin(){
+  $('li-err').textContent='';
+  const email=$('li-email').value.trim(),password=$('li-pass').value;
+  if(!email||!password){$('li-err').textContent='Enter email and password.';return;}
+  try{
+    const r=await fetch(SB_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{'apikey':SB_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,password})});
+    const d=await r.json(); if(!r.ok)throw new Error(d.error_description||d.msg||'Sign in failed');
+    _token=d.access_token;_user={id:d.user.id,email:d.user.email};
+    localStorage.setItem('tce_token',_token);localStorage.setItem('tce_user',JSON.stringify(_user));
+    showApp();
+  }catch(e){$('li-err').textContent=e.message;}
+}
+async function get(path){
+  const r=await fetch(SB_URL+'/rest/v1/'+path,{headers:H()});
+  if(r.status===401){showLogin();throw new Error('Signed out — please sign in again.');}
+  if(!r.ok)throw Object.assign(new Error(r.status+' '+await r.text()),{status:r.status});
+  return r.json();
+}
+async function patchJob(id,body){
+  const r=await fetch(SB_URL+'/rest/v1/tce_jobs?id=eq.'+encodeURIComponent(id),{method:'PATCH',headers:{...H(),'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify(body)});
+  if(r.status===401){showLogin();throw new Error('Signed out — please sign in again.');}
+  if(!r.ok){const t=await r.text(); if(/approved_at|materials_|approved_via|order_note/.test(t)){$('needsql').classList.remove('hidden');throw new Error('Run jobs-tracker.sql in Supabase first.');} throw new Error(r.status+' '+t);}
+}
+
+// ── data ─────────────────────────────────────────────────────────────────────
+const BASE_COLS='id,job_name,client_name,status,archived,estimate_quote_id,invoice_quote_id,qbo_estimate_number,qbo_invoice_number,estimated_at,invoiced_at,completed_at';
+const NEW_COLS='approved_at,approved_via,materials_ordered_at,materials_delivered_at,order_note';
+const STATUSES='estimated,progress,complete,ready_to_invoice,part_invoiced,invoiced,part_paid,paid';
+let JOBS=[],QUOTES={},HAS_NEW=true,FILTER='active',OPEN_MAT=null,ORDER_OFF={},EDGE_SUP={};
+let REGULAR={};try{REGULAR=JSON.parse(localStorage.getItem('tce_eb_regular')||'{}')}catch(e){}
+
+async function load(){
+  $('err').classList.add('hidden');
+  $('asof').textContent='loading…';
+  try{
+    const q='&status=in.('+STATUSES+')&or=(archived.is.null,archived.eq.false)&order=id.desc&limit=400';
+    let jobs;
+    try{ jobs=await get('tce_jobs?select='+BASE_COLS+','+NEW_COLS+q); HAS_NEW=true; }
+    catch(e){ if(e.status!==400)throw e; jobs=await get('tce_jobs?select='+BASE_COLS+q); HAS_NEW=false; }
+    $('needsql').classList.toggle('hidden',HAS_NEW);
+    // paid jobs: keep only the 20 most recent so the list stays about live work
+    let paid=0; JOBS=jobs.filter(j=>j.status!=='paid'||(++paid<=20));
+    const ids=[...new Set(JOBS.map(j=>j.invoice_quote_id||j.estimate_quote_id).filter(Boolean))];
+    QUOTES={};
+    for(let i=0;i<ids.length;i+=40){
+      const chunk=ids.slice(i,i+40);
+      const rows=await get('tce_quotes?select=id,total_ex_vat,total_inc_vat,quote_data&id=in.('+chunk.join(',')+')');
+      rows.forEach(r=>QUOTES[r.id]=r);
+    }
+    $('asof').textContent='updated '+new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+    render();
+  }catch(e){ $('err').textContent='Could not load jobs: '+e.message; $('err').classList.remove('hidden'); $('asof').textContent='not loaded'; }
+}
+
+function stageOf(j){
+  const s=j.status;
+  if(s==='paid')return 'paid';
+  if(s==='invoiced'||s==='part_invoiced'||s==='part_paid')return 'invoiced';
+  if(s==='ready_to_invoice')return 'toinvoice';
+  if(s==='complete')return 'complete';
+  if(s==='progress')return 'progress';
+  if(j.materials_delivered_at)return 'progress';
+  if(j.materials_ordered_at)return 'ordered';
+  if(j.approved_at)return 'approved';
+  return 'sent';
+}
+const STAGES=[
+  {k:'sent',label:'Estimate sent'},{k:'approved',label:'Approved'},{k:'ordered',label:'Materials ordered'},
+  {k:'progress',label:'In progress'},{k:'complete',label:'Complete'},{k:'toinvoice',label:'Ready to invoice'},
+  {k:'invoiced',label:'Invoiced'},{k:'paid',label:'Paid'}
+];
+const STAGE_LABEL=Object.fromEntries(STAGES.map(s=>[s.k,s.label]));
+const WORKSHOP=['ordered','progress','complete'];
+const quoteOf=j=>QUOTES[j.invoice_quote_id||j.estimate_quote_id];
+const amountOf=j=>{const q=quoteOf(j);return q?Number(q.total_inc_vat):null;};
+
+function materialsOf(j){
+  const q=QUOTES[j.estimate_quote_id||j.invoice_quote_id];
+  const lines=(q&&q.quote_data&&q.quote_data.lines)||[];
+  const boards=[],edges=[];
+  lines.forEach(l=>{
+    const name=l.material_desc||l.group||l.material_code||'Board';
+    if(l.kind==='board') boards.push({item:name,size:(l.sheet_size||'').replace('x','×'),qty:Number(l.qty)||0});
+    else if(l.kind==='edgebanding'){
+      const m=String(l.detail||'').match(/×\s*([0-9]+x[0-9.]+\s*[A-Za-z]*)/);
+      edges.push({decor:name,tape:m?m[1].replace('x','×'):(l.item||'Edging'),metres:Number(l.qty)||0});
+    }
+  });
+  return {boards,edges};
+}
+
+// ── actions ──────────────────────────────────────────────────────────────────
+let _undo=null,_toastT=null;
+function toast(msg,undo){
+  $('toast-t').textContent=msg; $('toast').classList.remove('hidden');
+  _undo=undo||null; $('toast-undo').classList.toggle('hidden',!undo);
+  clearTimeout(_toastT); _toastT=setTimeout(()=>$('toast').classList.add('hidden'),undo?7000:3500);
+}
+$('toast-undo').onclick=async()=>{const u=_undo;$('toast').classList.add('hidden');if(u){try{await u();await load();}catch(e){toast(e.message);}}};
+
+async function step(id,patch,msg){
+  const j=JOBS.find(x=>String(x.id)===String(id)); if(!j)return;
+  const prev={}; Object.keys(patch).forEach(k=>prev[k]=j[k]===undefined?null:j[k]);
+  try{ await patchJob(id,patch); Object.assign(j,patch); OPEN_MAT=null; render(); toast(msg,()=>patchJob(id,prev)); }
+  catch(e){ toast(e.message); }
+}
+const now=()=>new Date().toISOString();
+const ACTIONS={
+  sent:j=>['Mark approved',()=>step(j.id,{approved_at:now(),approved_via:'manual'},(j.job_name||'Job')+' marked approved')],
+  approved:j=>['Mark ordered',()=>step(j.id,{materials_ordered_at:now()},'Materials for '+(j.job_name||'job')+' marked ordered')],
+  ordered:j=>['Delivered – start job',()=>step(j.id,{materials_delivered_at:now(),status:'progress'},(j.job_name||'Job')+' is in progress')],
+  progress:j=>['Mark complete',()=>step(j.id,{status:'complete'},(j.job_name||'Job')+' marked complete')],
+  complete:j=>['Ready to invoice',()=>step(j.id,{status:'ready_to_invoice',invoice_quote_id:j.invoice_quote_id||j.estimate_quote_id,completed_at:now()},(j.job_name||'Job')+' ready to invoice — say "TCE invoices" to Claude')]
+};
+const CB={}; let _cbn=0;
+const cb=fn=>{const k='c'+(++_cbn);CB[k]=fn;return k;};
+function run(k){CB[k]&&CB[k]();}
+
+// ── render ───────────────────────────────────────────────────────────────────
+function setFilter(f){FILTER=(FILTER===f&&f!=='active')?'active':f;OPEN_MAT=null;render();window.scrollTo({top:$('chips').offsetTop-80,behavior:'smooth'});}
+
+function render(){
+  for(const k in CB)delete CB[k];
+  const byStage={}; JOBS.forEach(j=>{const s=stageOf(j);(byStage[s]=byStage[s]||[]).push(j);});
+  const cnt=s=>(byStage[s]||[]).length, sum=arr=>arr.reduce((t,j)=>t+(amountOf(j)||0),0);
+
+  // stats
+  const sent=byStage.sent||[],appr=byStage.approved||[],inv=byStage.invoiced||[];
+  $('s-sent').textContent=sent.length; $('s-sent-v').textContent=money(sum(sent));
+  $('s-appr').textContent=appr.length; $('s-appr-v').textContent=money(sum(appr));
+  $('st-appr').classList.toggle('alert',appr.length>0);
+  $('s-shop').textContent=WORKSHOP.reduce((t,s)=>t+cnt(s),0);
+  $('s-inv').textContent=inv.length; $('s-inv-v').textContent=money(sum(inv));
+
+  // chips
+  const active=JOBS.filter(j=>stageOf(j)!=='paid');
+  const chips=[{k:'active',label:'All live',n:active.length}].concat(STAGES.map(s=>({k:s.k,label:s.label,n:cnt(s.k)})));
+  $('chips').innerHTML=chips.map(c=>`<button class="chip${FILTER===c.k?' on':''}" onclick="setFilter('${c.k}')">${esc(c.label)}<b>${c.n}</b></button>`).join('');
+
+  // list
+  const order={approved:0,toinvoice:1,complete:2,ordered:3,progress:4,sent:5,invoiced:6,paid:7};
+  let list=FILTER==='active'?active:FILTER==='workshop'?JOBS.filter(j=>WORKSHOP.includes(stageOf(j))):(byStage[FILTER]||[]);
+  list=list.slice().sort((a,b)=>(order[stageOf(a)]-order[stageOf(b)])||(a.id-b.id));
+  $('empty').classList.toggle('hidden',list.length>0);
+  $('list').innerHTML=list.map(card).join('');
+
+  renderOrder(appr);
+}
+
+function card(j){
+  const st=stageOf(j), amt=amountOf(j);
+  let flag='',red=false,note='';
+  if(st==='sent'){const d=daysSince(j.estimated_at); note='Estimate sent '+fmtDate(j.estimated_at)+'.'; if(d>=7)flag='No answer for '+d+' days — worth a nudge';}
+  if(st==='approved'){const d=daysSince(j.approved_at); note='Approved '+fmtDate(j.approved_at)+(j.approved_via==='manual'?' (marked by you)':j.approved_via==='quickbooks'?' in QuickBooks':'')+'.'; if(d>2){flag='Approved '+d+' days ago, nothing ordered yet';red=true;}}
+  if(st==='ordered'){const d=daysSince(j.materials_ordered_at); note='Materials ordered '+fmtDate(j.materials_ordered_at)+'.'; if(d>=5)flag='Ordered '+d+' days ago — chase delivery?';}
+  if(st==='progress')note=j.materials_delivered_at?'Materials in '+fmtDate(j.materials_delivered_at)+'.':'In progress.';
+  if(st==='toinvoice')note='Waiting for the invoice — say "TCE invoices" to Claude.';
+  if(st==='invoiced'){const d=daysSince(j.invoiced_at); note='Invoiced '+fmtDate(j.invoiced_at)+(j.status==='part_paid'?' · part paid':j.status==='part_invoiced'?' · part invoiced':'')+'.'; if(d>=14){flag=d+' days since invoiced';red=true;}}
+  if(j.order_note)note+=' '+j.order_note;
+  const ref=['Job '+j.id, j.qbo_estimate_number?'Est '+j.qbo_estimate_number:'', j.qbo_invoice_number?'Inv '+j.qbo_invoice_number:''].filter(Boolean).join(' · ');
+  const a=ACTIONS[st]&&ACTIONS[st](j);
+  const hasMat=st==='approved'||st==='ordered';
+  const open=OPEN_MAT===j.id;
+  let mat='';
+  if(open){
+    const m=materialsOf(j);
+    mat='<div class="mat"><div class="h">Materials (from the optimiser quote)</div>'+
+      (m.boards.length||m.edges.length?'':'<div>No board or edging lines on the quote.</div>')+
+      m.boards.map(b=>`<div>• ${b.qty} × ${esc(b.item)} <span style="color:var(--txt3)">${esc(b.size)}</span></div>`).join('')+
+      m.edges.map(e=>`<div>• Edging ${esc(e.decor)} ${esc(e.tape)} — ${e.metres.toFixed(1)} m</div>`).join('')+'</div>';
+  }
+  return `<article class="card">
+    <div class="top"><div style="min-width:0"><div class="nm">${esc(j.job_name||'Untitled job')}</div><div class="cu">${esc(j.client_name||'')}</div></div><div class="amt">${money(amt)}</div></div>
+    <div class="tags"><span class="tag" style="color:var(--acc);border-color:#5a3a12">${esc(STAGE_LABEL[st])}</span><span class="tag">${esc(ref)}</span></div>
+    ${flag?`<div class="flag${red?' red':''}">${esc(flag)}</div>`:''}
+    <div class="note">${esc(note)}</div>
+    ${mat}
+    ${(a||hasMat)?`<div class="acts">${a?`<button class="btn btn-acc" onclick="run('${cb(a[1])}')">${esc(a[0])}</button>`:''}${hasMat?`<button class="btn" onclick="run('${cb(()=>{OPEN_MAT=open?null:j.id;render();})}')">${open?'Hide materials':'Materials'}</button>`:''}</div>`:''}
+  </article>`;
+}
+
+// ── material order ──────────────────────────────────────────────────────────
+let _mailBody='';
+function renderOrder(appr){
+  const inc=appr.filter(j=>!ORDER_OFF[j.id]);
+  $('order').classList.toggle('hidden',appr.length===0);
+  if(!appr.length)return;
+  $('ojobs').innerHTML=appr.map(j=>{const on=!ORDER_OFF[j.id];return `<button class="chip${on?' on':''}" aria-pressed="${on}" onclick="run('${cb(()=>{ORDER_OFF[j.id]=on;render();})}')">${on?'✓ ':'+ '}Job ${j.id} · ${esc(j.job_name||'')}</button>`;}).join('');
+
+  const boards={},edges={};
+  inc.forEach(j=>{const m=materialsOf(j);
+    m.boards.forEach(b=>{const k=b.item+'|'+b.size;(boards[k]=boards[k]||{item:b.item,size:b.size,qty:0,jobs:[]});boards[k].qty+=b.qty;boards[k].jobs.push(j.id);});
+    m.edges.forEach(e=>{const k=e.decor+'|'+e.tape;(edges[k]=edges[k]||{key:k,decor:e.decor,tape:e.tape,metres:0,jobs:[]});edges[k].metres+=e.metres;edges[k].jobs.push(j.id);});
+  });
+  const B=Object.values(boards), E=Object.values(edges);
+  const lathEdges=E.filter(e=>EDGE_SUP[e.key]==='L');
+  const rows=B.map(b=>({item:b.item,size:b.size,qty:b.qty+(b.qty===1?' sheet':' sheets'),jobs:[...new Set(b.jobs)].join(', ')}))
+    .concat(lathEdges.map(e=>({item:'Edging '+e.decor+' '+e.tape,size:'',qty:Math.ceil(e.metres)+' m',jobs:[...new Set(e.jobs)].join(', ')})));
+  $('lath').innerHTML=rows.length?rows.map(r=>`<tr><td><b>${esc(r.item)}</b></td><td>${esc(r.size)}</td><td class="q">${esc(r.qty)}</td><td style="color:var(--txt3)">${esc(r.jobs)}</td></tr>`).join(''):'<tr><td colspan="4" style="color:var(--txt3)">Nothing for Lathams.</td></tr>';
+
+  const list=rows.map(r=>'- '+r.qty+'  '+r.item+(r.size?'  '+r.size:'')+'  (job '+r.jobs+')').join('\n');
+  _mailBody=rows.length?'Hi Martin,\n\nPlease could I order the following:\n\n'+list+'\n\nThanks\nRobert Cassidy\nTayside Cut & Edge\n07876614414':'';
+  $('mail').textContent=_mailBody||'Nothing for Lathams in this order.';
+  const subj='Order – TCE jobs '+[...new Set(rows.flatMap(r=>r.jobs.split(', ')))].join(', ');
+  $('mailto').href=rows.length?'mailto:'+LATHAMS_TO+'?subject='+encodeURIComponent(subj)+'&body='+encodeURIComponent(_mailBody):'#';
+  $('mailto').classList.toggle('hidden',!rows.length);
+
+  $('edges').innerHTML=E.length?E.map(e=>{
+    const isL=EDGE_SUP[e.key]==='L', reg=!!REGULAR[e.decor];
+    const rolls=isL?Math.ceil(e.metres)+' m from Lathams':reg?Math.ceil(e.metres/200)+' × 200m roll':'cut to '+Math.ceil(e.metres)+' m (+ cut & reroll charge)';
+    return `<div class="eb">
+      <div style="display:flex;justify-content:space-between;gap:8px"><b>${esc(e.decor)} · ${esc(e.tape)}</b><span class="note">Job ${esc([...new Set(e.jobs)].join(', '))}</span></div>
+      <div>Needs ${e.metres.toFixed(1)} m → <b>${esc(rolls)}</b></div>
+      ${isL?'':`<button class="btn btn-sm reg${reg?' on':''}" onclick="run('${cb(()=>{REGULAR[e.decor]=!reg;try{localStorage.setItem('tce_eb_regular',JSON.stringify(REGULAR))}catch(x){};render();})}')">${reg?'✓ Decor we use a lot → 200m rolls':'Occasional decor → cut to length'}</button>`}
+      <div class="seg" role="group" aria-label="Supplier"><button class="btn btn-sm${isL?'':' on'}" aria-pressed="${!isL}" onclick="run('${cb(()=>{EDGE_SUP[e.key]='H';render();})}')">Hranipex</button><button class="btn btn-sm${isL?' on':''}" aria-pressed="${isL}" onclick="run('${cb(()=>{EDGE_SUP[e.key]='L';render();})}')">Lathams</button></div>
+    </div>`;}).join('')+(E.some(e=>EDGE_SUP[e.key]!=='L')?'<div class="note">Order the Hranipex lines on their website. Claude can fill the basket for you — ask "fill my Hranipex basket".</div>':''):'<div class="note">No edging on these jobs.</div>';
+
+  $('markall').disabled=!inc.length;
+  $('markall').textContent=inc.length?'Mark '+inc.length+(inc.length===1?' job':' jobs')+' as ordered':'Mark these jobs as ordered';
+}
+function copyMail(){ if(!_mailBody)return; navigator.clipboard.writeText(_mailBody).then(()=>toast('Order copied'),()=>toast('Could not copy')); }
+async function markOrdered(){
+  const appr=JOBS.filter(j=>stageOf(j)==='approved'&&!ORDER_OFF[j.id]);
+  if(!appr.length)return;
+  const t=now();
+  try{
+    for(const j of appr){await patchJob(j.id,{materials_ordered_at:t});j.materials_ordered_at=t;}
+    render();
+    toast(appr.length+(appr.length===1?' job':' jobs')+' marked ordered',async()=>{for(const j of appr)await patchJob(j.id,{materials_ordered_at:null});});
+  }catch(e){toast(e.message);}
+}
+
+init();
+</script>
+</body>
+</html>
