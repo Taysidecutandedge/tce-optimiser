@@ -36,3 +36,14 @@ comment on column tce_jobs.order_note is
 -- Approved-but-not-ordered is the list that matters most, so it gets an index.
 create index if not exists tce_jobs_approved_not_ordered
   on tce_jobs (approved_at) where approved_at is not null and materials_ordered_at is null;
+
+-- ── Added 14 Nov 2026: declined estimates ──────────────────────────────────
+alter table tce_jobs
+  add column if not exists declined_at     timestamptz,
+  add column if not exists declined_reason text;
+
+comment on column tce_jobs.declined_at is
+  'When the customer turned the estimate down (Decline in QuickBooks, or Rob
+   tapped Declined). Cleared again if the job is reopened.';
+comment on column tce_jobs.declined_reason is
+  'Price / Went elsewhere / Job cancelled / No reply, plus an optional note.';

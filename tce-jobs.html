@@ -118,6 +118,7 @@ input:focus{outline:none;border-color:var(--acc)}
       <button class="stat" id="st-inv" onclick="setFilter('invoiced')"><div class="v" id="s-inv">–</div><div class="l">invoiced, not paid</div><div class="m" id="s-inv-v"></div></button>
     </div>
 
+    <div class="note hidden" id="winrate" style="margin:-6px 0 14px"></div>
     <nav class="chips" id="chips" aria-label="Filter by stage"></nav>
     <div class="grid" id="list"></div>
     <div class="empty hidden" id="empty">Nothing at this stage right now.</div>
@@ -228,14 +229,14 @@ async function patchJob(id,body){
   let r=await send();
   if(r.status===401&&await renew())r=await send();
   if(r.status===401){showLogin();throw new Error('Signed out — please sign in again.');}
-  if(!r.ok){const t=await r.text(); if(/approved_at|materials_|approved_via|order_note/.test(t)){$('needsql').classList.remove('hidden');throw new Error('Run jobs-tracker.sql in Supabase first.');} throw new Error(r.status+' '+t);}
+  if(!r.ok){const t=await r.text(); if(/approved_at|materials_|approved_via|order_note|declined_/.test(t)){$('needsql').classList.remove('hidden');throw new Error('Run jobs-tracker.sql in Supabase first.');} throw new Error(r.status+' '+t);}
 }
 
 // ── data ─────────────────────────────────────────────────────────────────────
 const BASE_COLS='id,job_name,client_name,status,archived,estimate_quote_id,invoice_quote_id,qbo_estimate_number,qbo_invoice_number,estimated_at,invoiced_at,completed_at';
-const NEW_COLS='approved_at,approved_via,materials_ordered_at,materials_delivered_at,order_note';
+const NEW_COLS='approved_at,approved_via,materials_ordered_at,materials_delivered_at,order_note,declined_at,declined_reason';
 const STATUSES='estimated,progress,complete,ready_to_invoice,part_invoiced,invoiced,part_paid,paid';
-let JOBS=[],QUOTES={},HAS_NEW=true,FILTER='active',OPEN_MAT=null,ORDER_OFF={},EDGE_SUP={};
+let JOBS=[],QUOTES={},HAS_NEW=true,FILTER='active',OPEN_MAT=null,ORDER_OFF={},EDGE_SUP={},DECLINE_OPEN=null,DECLINE_REASON='',DECLINE_NOTE='';
 let REGULAR={};try{REGULAR=JSON.parse(localStorage.getItem('tce_eb_regular')||'{}')}catch(e){}
 
 async function load(){
@@ -244,8 +245,13 @@ async function load(){
   try{
     const q='&status=in.('+STATUSES+')&or=(archived.is.null,archived.eq.false)&order=id.desc&limit=400';
     let jobs;
-    try{ jobs=await get('tce_jobs?select='+BASE_COLS+','+NEW_COLS+q); HAS_NEW=true; }
-    catch(e){ if(e.status!==400)throw e; jobs=await get('tce_jobs?select='+BASE_COLS+q); HAS_NEW=false; }
+    // Newest columns first; if the database hasn't had the latest add-on run, step back
+    // rather than show nothing.
+    const tries=[BASE_COLS+','+NEW_COLS, BASE_COLS+',approved_at,approved_via,materials_ordered_at,materials_delivered_at,order_note', BASE_COLS];
+    for(let i=0;i<tries.length;i++){
+      try{ jobs=await get('tce_jobs?select='+tries[i]+q); HAS_NEW=i===0; break; }
+      catch(e){ if(e.status!==400||i===tries.length-1)throw e; }
+    }
     $('needsql').classList.toggle('hidden',HAS_NEW);
     // paid jobs: keep only the 20 most recent so the list stays about live work
     let paid=0; JOBS=jobs.filter(j=>j.status!=='paid'||(++paid<=20));
@@ -270,13 +276,14 @@ function stageOf(j){
   if(s==='progress')return 'progress';
   if(j.materials_delivered_at)return 'progress';
   if(j.materials_ordered_at)return 'ordered';
+  if(j.declined_at)return 'declined';
   if(j.approved_at)return 'approved';
   return 'sent';
 }
 const STAGES=[
   {k:'sent',label:'Estimate sent'},{k:'approved',label:'Approved'},{k:'ordered',label:'Materials ordered'},
   {k:'progress',label:'In progress'},{k:'complete',label:'Complete'},{k:'toinvoice',label:'Ready to invoice'},
-  {k:'invoiced',label:'Invoiced'},{k:'paid',label:'Paid'}
+  {k:'invoiced',label:'Invoiced'},{k:'paid',label:'Paid'},{k:'declined',label:'Declined'}
 ];
 const STAGE_LABEL=Object.fromEntries(STAGES.map(s=>[s.k,s.label]));
 const WORKSHOP=['ordered','progress','complete'];
@@ -340,14 +347,22 @@ function render(){
   $('st-appr').classList.toggle('alert',appr.length>0);
   $('s-shop').textContent=WORKSHOP.reduce((t,s)=>t+cnt(s),0);
   $('s-inv').textContent=inv.length; $('s-inv-v').textContent=money(sum(inv));
+  const recent=t=>t&&daysSince(t)<=30;
+  const won=JOBS.filter(j=>recent(j.approved_at)).length, lost=JOBS.filter(j=>recent(j.declined_at));
+  if(won+lost.length){
+    const rc={}; lost.forEach(j=>{const r=(j.declined_reason||'').split(' — ')[0]||'no reason';rc[r]=(rc[r]||0)+1;});
+    const top=Object.entries(rc).sort((a,b)=>b[1]-a[1])[0];
+    $('winrate').textContent='Last 30 days: won '+won+' of '+(won+lost.length)+' estimates decided'+(top?' · lost mostly: '+top[0]:'')+'.';
+    $('winrate').classList.remove('hidden');
+  } else $('winrate').classList.add('hidden');
 
   // chips
-  const active=JOBS.filter(j=>stageOf(j)!=='paid');
+  const active=JOBS.filter(j=>!['paid','declined'].includes(stageOf(j)));
   const chips=[{k:'active',label:'All live',n:active.length}].concat(STAGES.map(s=>({k:s.k,label:s.label,n:cnt(s.k)})));
   $('chips').innerHTML=chips.map(c=>`<button class="chip${FILTER===c.k?' on':''}" onclick="setFilter('${c.k}')">${esc(c.label)}<b>${c.n}</b></button>`).join('');
 
   // list
-  const order={approved:0,toinvoice:1,complete:2,ordered:3,progress:4,sent:5,invoiced:6,paid:7};
+  const order={approved:0,toinvoice:1,complete:2,ordered:3,progress:4,sent:5,invoiced:6,paid:7,declined:8};
   let list=FILTER==='active'?active:FILTER==='workshop'?JOBS.filter(j=>WORKSHOP.includes(stageOf(j))):(byStage[FILTER]||[]);
   list=list.slice().sort((a,b)=>(order[stageOf(a)]-order[stageOf(b)])||(a.id-b.id));
   $('empty').classList.toggle('hidden',list.length>0);
@@ -359,7 +374,8 @@ function render(){
 function card(j){
   const st=stageOf(j), amt=amountOf(j);
   let flag='',red=false,note='';
-  if(st==='sent'){const d=daysSince(j.estimated_at); note='Estimate sent '+fmtDate(j.estimated_at)+'.'; if(d>=7)flag='No answer for '+d+' days — worth a nudge';}
+  if(st==='sent'){const d=daysSince(j.estimated_at); note='Estimate sent '+fmtDate(j.estimated_at)+'.'; if(d>=30){flag='No answer for '+d+' days — still live, or mark declined?';red=true;} else if(d>=7)flag='No answer for '+d+' days — worth a nudge';}
+  if(st==='declined')note='Declined '+fmtDate(j.declined_at)+(j.declined_reason?' — '+j.declined_reason:'')+'.';
   if(st==='approved'){const d=daysSince(j.approved_at); note='Approved '+fmtDate(j.approved_at)+(j.approved_via==='manual'?' (marked by you)':j.approved_via==='quickbooks'?' in QuickBooks':'')+'.'; if(d>2){flag='Approved '+d+' days ago, nothing ordered yet';red=true;}}
   if(st==='ordered'){const d=daysSince(j.materials_ordered_at); note='Materials ordered '+fmtDate(j.materials_ordered_at)+'.'; if(d>=5)flag='Ordered '+d+' days ago — chase delivery?';}
   if(st==='progress')note=j.materials_delivered_at?'Materials in '+fmtDate(j.materials_delivered_at)+'.':'In progress.';
@@ -370,6 +386,15 @@ function card(j){
   const a=ACTIONS[st]&&ACTIONS[st](j);
   const hasMat=st==='approved'||st==='ordered';
   const open=OPEN_MAT===j.id;
+  let extra='',dec='';
+  if(st==='sent') extra=`<button class="btn" onclick="run('${cb(()=>{DECLINE_OPEN=DECLINE_OPEN===j.id?null:j.id;DECLINE_REASON='';DECLINE_NOTE='';render();})}')">${DECLINE_OPEN===j.id?'Cancel':'Declined'}</button>`;
+  if(st==='declined') extra=`<button class="btn" onclick="run('${cb(()=>step(j.id,{declined_at:null,declined_reason:null},(j.job_name||'Job')+' reopened'))}')">Reopen</button>`;
+  if(st==='sent'&&DECLINE_OPEN===j.id){
+    const reasons=['Price','Went elsewhere','Job cancelled','No reply'];
+    dec=`<div class="mat"><div class="h">Why did it not go ahead?</div><div class="chips" style="margin:4px 0">${reasons.map(r=>`<button class="chip${DECLINE_REASON===r?' on':''}" onclick="run('${cb(()=>{DECLINE_REASON=r;render();})}')">${esc(r)}</button>`).join('')}</div>
+      <label for="dn-${j.id}">Note (optional)</label><input id="dn-${j.id}" type="text" placeholder="e.g. cheaper quote from…" value="${esc(DECLINE_NOTE)}" oninput="DECLINE_NOTE=this.value">
+      <button class="btn btn-acc" style="margin-top:6px" ${DECLINE_REASON?'':'disabled'} onclick="run('${cb(()=>{const n=DECLINE_NOTE;const reason=DECLINE_REASON+(n.trim()?' — '+n.trim():'');DECLINE_OPEN=null;step(j.id,{declined_at:now(),declined_reason:reason},(j.job_name||'Job')+' marked declined');})}')">Mark declined</button></div>`;
+  }
   let mat='';
   if(open){
     const m=materialsOf(j);
@@ -383,8 +408,8 @@ function card(j){
     <div class="tags"><span class="tag" style="color:var(--acc);border-color:#5a3a12">${esc(STAGE_LABEL[st])}</span><span class="tag">${esc(ref)}</span></div>
     ${flag?`<div class="flag${red?' red':''}">${esc(flag)}</div>`:''}
     <div class="note">${esc(note)}</div>
-    ${mat}
-    ${(a||hasMat)?`<div class="acts">${a?`<button class="btn btn-acc" onclick="run('${cb(a[1])}')">${esc(a[0])}</button>`:''}${hasMat?`<button class="btn" onclick="run('${cb(()=>{OPEN_MAT=open?null:j.id;render();})}')">${open?'Hide materials':'Materials'}</button>`:''}</div>`:''}
+    ${mat}${dec}
+    ${(a||hasMat||extra)?`<div class="acts">${a?`<button class="btn btn-acc" onclick="run('${cb(a[1])}')">${esc(a[0])}</button>`:''}${extra}${hasMat?`<button class="btn" onclick="run('${cb(()=>{OPEN_MAT=open?null:j.id;render();})}')">${open?'Hide materials':'Materials'}</button>`:''}</div>`:''}
   </article>`;
 }
 
