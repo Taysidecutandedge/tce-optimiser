@@ -113,7 +113,7 @@ input:focus{outline:none;border-color:var(--acc)}
 
     <div class="stats">
       <button class="stat" onclick="setFilter('sent')"><div class="v" id="s-sent">–</div><div class="l">waiting on approval</div><div class="m" id="s-sent-v"></div></button>
-      <button class="stat" id="st-appr" onclick="setFilter('approved')"><div class="v" id="s-appr">–</div><div class="l">approved – order materials</div><div class="m" id="s-appr-v"></div></button>
+      <button class="stat" id="st-appr" onclick="setFilter('approved')"><div class="v" id="s-appr">–</div><div class="l">approved – materials to order</div><div class="m" id="s-appr-v"></div></button>
       <button class="stat" onclick="setFilter('workshop')"><div class="v" id="s-shop">–</div><div class="l">in the workshop</div><div class="m">ordered · cutting · done</div></button>
       <button class="stat" id="st-inv" onclick="setFilter('invoiced')"><div class="v" id="s-inv">–</div><div class="l">invoiced, not paid</div><div class="m" id="s-inv-v"></div></button>
     </div>
@@ -125,13 +125,13 @@ input:focus{outline:none;border-color:var(--acc)}
 
     <section class="panel" id="order">
       <div>
-        <h2>Material order</h2>
-        <div class="note" style="margin-top:4px">Everything for the approved jobs that isn't ordered yet, added up across jobs.</div>
+        <h2>Order materials</h2>
+        <div class="note" style="margin-top:4px">Everything for the approved jobs, added up across jobs. Three steps: <b>1</b> send the email to Martin, <b>2</b> order the edging on Hranipex, <b>3</b> once both are done, mark the jobs as ordered.</div>
       </div>
       <div class="chips" id="ojobs" style="margin:0"></div>
       <div class="cols">
         <div class="col">
-          <h3>Lathams · email to Martin</h3>
+          <h3>1 · Lathams – email to Martin</h3>
           <div class="tblwrap"><table><thead><tr><th>Item</th><th>Size</th><th style="text-align:right">Qty</th><th>Job</th></tr></thead><tbody id="lath"></tbody></table></div>
           <div class="mail" id="mail"></div>
           <div class="acts">
@@ -140,13 +140,15 @@ input:focus{outline:none;border-color:var(--acc)}
           </div>
         </div>
         <div class="col">
-          <h3>Edging</h3>
+          <h3>2 · Edging – Hranipex</h3>
           <div class="note">Decors you use a lot come as 200m rolls; occasional ones are cut to length. Your choice is remembered per decor. Switch a line to Lathams to add it to Martin's email.</div>
           <div id="edges" style="display:flex;flex-direction:column;gap:10px"></div>
         </div>
       </div>
-      <div class="acts">
-        <button class="btn btn-acc" id="markall" onclick="markOrdered()">Mark these jobs as ordered</button>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <h3>3 · Done both?</h3>
+        <div class="note">Only tap this once the email has gone and the edging is ordered. The jobs then move to Materials ordered.</div>
+        <div class="acts"><button class="btn btn-acc" id="markall" onclick="markOrdered()">Mark these jobs as ordered</button></div>
       </div>
     </section>
 
@@ -323,11 +325,13 @@ async function step(id,patch,msg){
 const now=()=>new Date().toISOString();
 const ACTIONS={
   sent:j=>['Mark approved',()=>step(j.id,{approved_at:now(),approved_via:'manual'},(j.job_name||'Job')+' marked approved')],
-  approved:j=>['Mark ordered',()=>step(j.id,{materials_ordered_at:now()},'Materials for '+(j.job_name||'job')+' marked ordered')],
+  approved:j=>['Order materials',()=>{ORDER_OFF={};appr_only(j.id);$('order').scrollIntoView({behavior:'smooth',block:'start'});}],
   ordered:j=>['Delivered – start job',()=>step(j.id,{materials_delivered_at:now(),status:'progress'},(j.job_name||'Job')+' is in progress')],
   progress:j=>['Mark complete',()=>step(j.id,{status:'complete'},(j.job_name||'Job')+' marked complete')],
   complete:j=>['Ready to invoice',()=>step(j.id,{status:'ready_to_invoice',invoice_quote_id:j.invoice_quote_id||j.estimate_quote_id,completed_at:now()},(j.job_name||'Job')+' ready to invoice — say "TCE invoices" to Claude')]
 };
+// "Order materials" on a card: put just that job in the order (others can be ticked back in)
+function appr_only(id){JOBS.forEach(x=>{if(stageOf(x)==='approved'&&x.id!==id)ORDER_OFF[x.id]=true;});render();}
 const CB={}; let _cbn=0;
 const cb=fn=>{const k='c'+(++_cbn);CB[k]=fn;return k;};
 function run(k){CB[k]&&CB[k]();}
@@ -450,7 +454,7 @@ function renderOrder(appr){
     </div>`;}).join('')+(E.some(e=>EDGE_SUP[e.key]!=='L')?'<div class="note">Order the Hranipex lines on their website. Claude can fill the basket for you — ask "fill my Hranipex basket".</div>':''):'<div class="note">No edging on these jobs.</div>';
 
   $('markall').disabled=!inc.length;
-  $('markall').textContent=inc.length?'Mark '+inc.length+(inc.length===1?' job':' jobs')+' as ordered':'Mark these jobs as ordered';
+  $('markall').textContent=inc.length?'I\'ve ordered – mark '+inc.length+(inc.length===1?' job':' jobs')+' as ordered':'Mark these jobs as ordered';
 }
 function copyMail(){ if(!_mailBody)return; navigator.clipboard.writeText(_mailBody).then(()=>toast('Order copied'),()=>toast('Could not copy')); }
 async function markOrdered(){
