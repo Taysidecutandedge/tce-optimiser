@@ -47,3 +47,9 @@ comment on column tce_jobs.declined_at is
    tapped Declined). Cleared again if the job is reopened.';
 comment on column tce_jobs.declined_reason is
   'Price / Went elsewhere / Job cancelled / No reply, plus an optional note.';
+
+-- ── Added 14 Nov 2026: which quote the materials were ordered from ──────────
+-- So a change made in the optimiser after ordering shows as "order 1 more sheet"
+-- instead of going unnoticed.
+alter table tce_jobs
+  add column if not exists materials_quote_id uuid references tce_quotes(id);

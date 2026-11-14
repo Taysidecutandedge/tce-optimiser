@@ -236,9 +236,9 @@ async function patchJob(id,body){
 
 // ── data ─────────────────────────────────────────────────────────────────────
 const BASE_COLS='id,job_name,client_name,status,archived,estimate_quote_id,invoice_quote_id,qbo_estimate_number,qbo_invoice_number,estimated_at,invoiced_at,completed_at';
-const NEW_COLS='approved_at,approved_via,materials_ordered_at,materials_delivered_at,order_note,declined_at,declined_reason';
+const NEW_COLS='approved_at,approved_via,materials_ordered_at,materials_delivered_at,order_note,declined_at,declined_reason,materials_quote_id';
 const STATUSES='estimated,progress,complete,ready_to_invoice,part_invoiced,invoiced,part_paid,paid';
-let JOBS=[],QUOTES={},HAS_NEW=true,FILTER='active',OPEN_MAT=null,ORDER_OFF={},EDGE_SUP={},DECLINE_OPEN=null,DECLINE_REASON='',DECLINE_NOTE='';
+let JOBS=[],QUOTES={},LATEST={},USE_LATEST={},HAS_NEW=true,FILTER='active',OPEN_MAT=null,ORDER_OFF={},EDGE_SUP={},DECLINE_OPEN=null,DECLINE_REASON='',DECLINE_NOTE='';
 let REGULAR={};try{REGULAR=JSON.parse(localStorage.getItem('tce_eb_regular')||'{}')}catch(e){}
 
 async function load(){
@@ -249,7 +249,7 @@ async function load(){
     let jobs;
     // Newest columns first; if the database hasn't had the latest add-on run, step back
     // rather than show nothing.
-    const tries=[BASE_COLS+','+NEW_COLS, BASE_COLS+',approved_at,approved_via,materials_ordered_at,materials_delivered_at,order_note', BASE_COLS];
+    const tries=[BASE_COLS+','+NEW_COLS, BASE_COLS+',approved_at,approved_via,materials_ordered_at,materials_delivered_at,order_note,declined_at,declined_reason', BASE_COLS+',approved_at,approved_via,materials_ordered_at,materials_delivered_at,order_note', BASE_COLS];
     for(let i=0;i<tries.length;i++){
       try{ jobs=await get('tce_jobs?select='+tries[i]+q); HAS_NEW=i===0; break; }
       catch(e){ if(e.status!==400||i===tries.length-1)throw e; }
@@ -263,6 +263,19 @@ async function load(){
       const chunk=ids.slice(i,i+40);
       const rows=await get('tce_quotes?select=id,total_ex_vat,total_inc_vat,quote_data&id=in.('+chunk.join(',')+')');
       rows.forEach(r=>QUOTES[r.id]=r);
+    }
+    // Newest saved quote for each job still before invoicing, to spot changes made in
+    // the optimiser after the estimate went out or after materials were ordered.
+    LATEST={};
+    const live=JOBS.filter(j=>['sent','approved','ordered','progress','complete'].includes(stageOf(j))).map(j=>j.id);
+    if(live.length){
+      const rows=await get('tce_quotes?select=id,job_id,created_at&job_id=in.('+live.join(',')+')&order=created_at.desc');
+      rows.forEach(r=>{ if(!LATEST[r.job_id]) LATEST[r.job_id]=r.id; });
+      const need=[...new Set(Object.values(LATEST).concat(JOBS.map(j=>j.materials_quote_id)).filter(id=>id&&!QUOTES[id]))];
+      for(let i=0;i<need.length;i+=40){
+        const rows2=await get('tce_quotes?select=id,total_ex_vat,total_inc_vat,quote_data&id=in.('+need.slice(i,i+40).join(',')+')');
+        rows2.forEach(r=>QUOTES[r.id]=r);
+      }
     }
     $('asof').textContent='updated '+new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
     render();
@@ -292,8 +305,31 @@ const WORKSHOP=['ordered','progress','complete'];
 const quoteOf=j=>QUOTES[j.invoice_quote_id||j.estimate_quote_id];
 const amountOf=j=>{const q=quoteOf(j);return q?Number(q.total_inc_vat):null;};
 
-function materialsOf(j){
-  const q=QUOTES[j.estimate_quote_id||j.invoice_quote_id];
+// Which saved quote the materials come from:
+//  - ordered or later: the quote the order was placed from (else the estimate)
+//  - before ordering: the estimate, or the newest revision if Rob chose "Use latest"
+const baseQuoteId=j=>j.materials_quote_id||j.estimate_quote_id||j.invoice_quote_id;
+function orderQuoteId(j){ return (USE_LATEST[j.id]&&LATEST[j.id])?LATEST[j.id]:baseQuoteId(j); }
+function materialsOf(j,qid){ return materialsFromQuote(QUOTES[qid||orderQuoteId(j)]); }
+// What changed between two quotes, in plain words: "+2 sheets W980 ST7", "−12 m edging U636 ST9"
+function materialsDiff(a,b){
+  const tally=m=>{const t={};m.boards.forEach(x=>{const k='B|'+x.item+'|'+x.size;t[k]=(t[k]||0)+x.qty;});m.edges.forEach(x=>{const k='E|'+x.decor+'|'+x.tape;t[k]=(t[k]||0)+x.metres;});return t;};
+  const ta=tally(a),tb=tally(b),out=[];
+  new Set([...Object.keys(ta),...Object.keys(tb)]).forEach(k=>{
+    const d=(tb[k]||0)-(ta[k]||0); const [kind,name,extra]=k.split('|');
+    if(kind==='B'&&d!==0) out.push((d>0?'+':'−')+Math.abs(d)+(Math.abs(d)===1?' sheet ':' sheets ')+name+(extra?' '+extra:''));
+    if(kind==='E'&&Math.abs(d)>=0.5) out.push((d>0?'+':'−')+Math.abs(d).toFixed(1)+' m edging '+name+' '+extra);
+  });
+  return out;
+}
+// Newer quote than the one in use, and the materials actually differ
+function changeOf(j){
+  const latest=LATEST[j.id], base=baseQuoteId(j);
+  if(!latest||!base||latest===base||!QUOTES[latest]||!QUOTES[base])return null;
+  const d=materialsDiff(materialsFromQuote(QUOTES[base]),materialsFromQuote(QUOTES[latest]));
+  return d.length?d:null;
+}
+function materialsFromQuote(q){
   const lines=(q&&q.quote_data&&q.quote_data.lines)||[];
   const boards=[],edges=[];
   lines.forEach(l=>{
@@ -386,6 +422,14 @@ function card(j){
   if(st==='toinvoice')note='Waiting for the invoice — say "TCE invoices" to Claude.';
   if(st==='invoiced'){const d=daysSince(j.invoiced_at); note='Invoiced '+fmtDate(j.invoiced_at)+(j.status==='part_paid'?' · part paid':j.status==='part_invoiced'?' · part invoiced':'')+'.'; if(d>=14){flag=d+' days since invoiced';red=true;}}
   if(j.order_note)note+=' '+j.order_note;
+  const ch=changeOf(j); let chBox='';
+  if(ch&&['sent','approved'].includes(st)){
+    const using=!!USE_LATEST[j.id];
+    chBox=`<div class="flag">Changed in the optimiser since the estimate: ${esc(ch.join(' · '))}${st==='approved'?`<div style="margin-top:8px"><button class="btn btn-sm" onclick="run('${cb(()=>{USE_LATEST[j.id]=!using;render();})}')">${using?'✓ Ordering from the latest version':'Order from the latest version instead'}</button></div>`:'<div style="margin-top:4px;font-weight:500">If the customer needs to see it, pick the new quote as the estimate in the admin page.</div>'}</div>`;
+  }
+  if(ch&&['ordered','progress','complete'].includes(st)){
+    chBox=`<div class="flag red">Changed after ordering — sort with the supplier: ${esc(ch.join(' · '))}<div style="margin-top:8px"><button class="btn btn-sm" onclick="run('${cb(()=>step(j.id,{materials_quote_id:LATEST[j.id]},'Order for '+(j.job_name||'job')+' updated to the latest version'))}')">Sorted – order now matches</button></div></div>`;
+  }
   const ref=['Job '+j.id, j.qbo_estimate_number?'Est '+j.qbo_estimate_number:'', j.qbo_invoice_number?'Inv '+j.qbo_invoice_number:''].filter(Boolean).join(' · ');
   const a=ACTIONS[st]&&ACTIONS[st](j);
   const hasMat=st==='approved'||st==='ordered';
@@ -402,7 +446,7 @@ function card(j){
   let mat='';
   if(open){
     const m=materialsOf(j);
-    mat='<div class="mat"><div class="h">Materials (from the optimiser quote)</div>'+
+    mat='<div class="mat"><div class="h">Materials ('+(st==='ordered'?'as ordered':USE_LATEST[j.id]?'latest version':'from the estimate')+')</div>'+
       (m.boards.length||m.edges.length?'':'<div>No board or edging lines on the quote.</div>')+
       m.boards.map(b=>`<div>• ${b.qty} × ${esc(b.item)} <span style="color:var(--txt3)">${esc(b.size)}</span></div>`).join('')+
       m.edges.map(e=>`<div>• Edging ${esc(e.decor)} ${esc(e.tape)} — ${e.metres.toFixed(1)} m</div>`).join('')+'</div>';
@@ -410,7 +454,7 @@ function card(j){
   return `<article class="card">
     <div class="top"><div style="min-width:0"><div class="nm">${esc(j.job_name||'Untitled job')}</div><div class="cu">${esc(j.client_name||'')}</div></div><div class="amt">${money(amt)}</div></div>
     <div class="tags"><span class="tag" style="color:var(--acc);border-color:#5a3a12">${esc(STAGE_LABEL[st])}</span><span class="tag">${esc(ref)}</span></div>
-    ${flag?`<div class="flag${red?' red':''}">${esc(flag)}</div>`:''}
+    ${flag?`<div class="flag${red?' red':''}">${esc(flag)}</div>`:''}${chBox}
     <div class="note">${esc(note)}</div>
     ${mat}${dec}
     ${(a||hasMat||extra)?`<div class="acts">${a?`<button class="btn btn-acc" onclick="run('${cb(a[1])}')">${esc(a[0])}</button>`:''}${extra}${hasMat?`<button class="btn" onclick="run('${cb(()=>{OPEN_MAT=open?null:j.id;render();})}')">${open?'Hide materials':'Materials'}</button>`:''}</div>`:''}
@@ -462,9 +506,13 @@ async function markOrdered(){
   if(!appr.length)return;
   const t=now();
   try{
-    for(const j of appr){await patchJob(j.id,{materials_ordered_at:t});j.materials_ordered_at=t;}
+    for(const j of appr){const qid=orderQuoteId(j);
+      try{await patchJob(j.id,{materials_ordered_at:t,materials_quote_id:qid});j.materials_quote_id=qid;}
+      catch(e){ if(!/jobs-tracker/.test(e.message))throw e; $('needsql').classList.add('hidden'); await patchJob(j.id,{materials_ordered_at:t}); }
+      j.materials_ordered_at=t;}
     render();
     toast(appr.length+(appr.length===1?' job':' jobs')+' marked ordered',async()=>{for(const j of appr)await patchJob(j.id,{materials_ordered_at:null});});
+    USE_LATEST={};
   }catch(e){toast(e.message);}
 }
 
