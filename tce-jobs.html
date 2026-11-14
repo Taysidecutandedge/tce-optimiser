@@ -169,14 +169,36 @@ const daysSince=t=>t?Math.floor((Date.now()-new Date(t).getTime())/DAY):null;
 const fmtDate=t=>t?new Date(t).toLocaleDateString('en-GB',{day:'numeric',month:'short'}):'';
 
 // ── sign-in (same account and token as the hub) ──────────────────────────────
-async function init(){
-  const tok=localStorage.getItem('tce_token');
-  if(tok){
+// Signs in quietly with whatever session the hub or admin page already holds, so on
+// the workshop iPad you are not asked for the password again. Refresh tokens are
+// single-use: whichever page's token we renew, the new pair is written back to that
+// page's own keys so it stays signed in too.
+const LS={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},set:(k,v)=>{try{v==null?localStorage.removeItem(k):localStorage.setItem(k,v)}catch(e){}}};
+async function userFor(tok){
+  try{const r=await fetch(SB_URL+'/auth/v1/user',{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+tok}}); if(r.ok){const d=await r.json();return {id:d.id,email:d.email};}}catch(e){}
+  return null;
+}
+const SESSIONS=[['tce_jobs_token','tce_jobs_refresh'],['tce_admin_token','tce_admin_refresh'],['tce_token',null]];
+async function renew(){
+  for(const [tk,rk] of SESSIONS){
+    const rt=rk&&LS.get(rk); if(!rt)continue;
     try{
-      const r=await fetch(SB_URL+'/auth/v1/user',{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+tok}});
-      if(r.ok){const d=await r.json();_token=tok;_user={id:d.id,email:d.email};return showApp();}
+      const r=await fetch(SB_URL+'/auth/v1/token?grant_type=refresh_token',{method:'POST',headers:{'apikey':SB_KEY,'Content-Type':'application/json'},body:JSON.stringify({refresh_token:rt})});
+      if(!r.ok)continue;
+      const d=await r.json();
+      LS.set(tk,d.access_token); if(d.refresh_token)LS.set(rk,d.refresh_token);
+      _token=d.access_token; _user={id:d.user&&d.user.id,email:d.user&&d.user.email};
+      return true;
     }catch(e){}
   }
+  return false;
+}
+async function init(){
+  for(const [tk] of SESSIONS){
+    const tok=LS.get(tk); if(!tok)continue;
+    const u=await userFor(tok); if(u){_token=tok;_user=u;return showApp();}
+  }
+  if(await renew())return showApp();
   showLogin();
 }
 function showLogin(){$('login').classList.remove('hidden');$('app').classList.add('hidden');}
@@ -189,18 +211,22 @@ async function doLogin(){
     const r=await fetch(SB_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{'apikey':SB_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,password})});
     const d=await r.json(); if(!r.ok)throw new Error(d.error_description||d.msg||'Sign in failed');
     _token=d.access_token;_user={id:d.user.id,email:d.user.email};
-    localStorage.setItem('tce_token',_token);localStorage.setItem('tce_user',JSON.stringify(_user));
+    LS.set('tce_jobs_token',_token); if(d.refresh_token)LS.set('tce_jobs_refresh',d.refresh_token);
+    LS.set('tce_token',_token); LS.set('tce_user',JSON.stringify(_user));
     showApp();
   }catch(e){$('li-err').textContent=e.message;}
 }
 async function get(path){
-  const r=await fetch(SB_URL+'/rest/v1/'+path,{headers:H()});
+  let r=await fetch(SB_URL+'/rest/v1/'+path,{headers:H()});
+  if(r.status===401&&await renew())r=await fetch(SB_URL+'/rest/v1/'+path,{headers:H()});
   if(r.status===401){showLogin();throw new Error('Signed out — please sign in again.');}
   if(!r.ok)throw Object.assign(new Error(r.status+' '+await r.text()),{status:r.status});
   return r.json();
 }
 async function patchJob(id,body){
-  const r=await fetch(SB_URL+'/rest/v1/tce_jobs?id=eq.'+encodeURIComponent(id),{method:'PATCH',headers:{...H(),'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify(body)});
+  const send=()=>fetch(SB_URL+'/rest/v1/tce_jobs?id=eq.'+encodeURIComponent(id),{method:'PATCH',headers:{...H(),'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify(body)});
+  let r=await send();
+  if(r.status===401&&await renew())r=await send();
   if(r.status===401){showLogin();throw new Error('Signed out — please sign in again.');}
   if(!r.ok){const t=await r.text(); if(/approved_at|materials_|approved_via|order_note/.test(t)){$('needsql').classList.remove('hidden');throw new Error('Run jobs-tracker.sql in Supabase first.');} throw new Error(r.status+' '+t);}
 }
