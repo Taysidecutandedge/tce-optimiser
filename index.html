@@ -716,7 +716,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-11-06-e';
+const TCE_BUILD='2026-11-16-a';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -5479,7 +5479,14 @@ function renderImportNotes(){
 }
 
 function applyImport(){
-  if(!_importPreflightOK && !_importPreflight()) return;
+  // The check must never be able to stop an import. If it throws, it is skipped and the
+  // import runs exactly as it did before — a bug in a warning is not a reason to lose a
+  // cutlist. Same reasoning as the quote gates in admin.
+  if(!_importPreflightOK){
+    let proceed=true;
+    try{ proceed=_importPreflight(); }catch(e){ console.error('[import] pre-flight skipped:',e); proceed=true; }
+    if(!proceed) return;
+  }
   _importPreflightOK=false;
   document.querySelector('.app')?.classList.remove('results'); // reviewing a fresh import — widen the input panel
   // A fresh cutlist is a DIFFERENT job. Cut it loose from whatever was loaded before, or
