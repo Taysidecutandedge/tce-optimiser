@@ -717,7 +717,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-11-18-a';
+const TCE_BUILD='2026-11-18-b';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -2358,6 +2358,30 @@ function renderDupeBar(){
     +'style="background:#1f7a4d;color:#fff;border:none;border-radius:6px;padding:5px 11px;font-size:12px;cursor:pointer">It’s a genuine repeat — carry on</button></div>';
 }
 
+// Is this part one the nester couldn't place? Matched on name + size rather than id, because
+// the unplaced list holds the expanded pieces (a qty-4 part is four of them), not the rows.
+function _isUnplaced(p){
+  const u=_lastUnplaced||[]; if(!u.length) return false;
+  const L=Math.round(p.l||0), W=Math.round(p.w||0), n=String(p.label||'').trim().toLowerCase();
+  return u.some(x=>String(x.label||'').trim().toLowerCase()===n
+    && Math.round(x.origL||x.l||0)===L && Math.round(x.origW||x.w||0)===W);
+}
+// Scroll the parts list to a part and flash it, so "find it" in the unplaced box actually
+// lands you on the row instead of telling you its name and leaving you to search.
+function jumpToPart(label,L,W){
+  const want=String(label||'').trim().toLowerCase();
+  const p=(parts||[]).find(x=>String(x.label||'').trim().toLowerCase()===want
+    && Math.round(x.l||0)===Math.round(L) && Math.round(x.w||0)===Math.round(W))
+   || (parts||[]).find(x=>String(x.label||'').trim().toLowerCase()===want);
+  if(!p){ alert('That part is no longer in the list — it may have been edited or removed.'); return; }
+  const row=document.querySelector('tr[data-partid="'+p.id+'"]');
+  if(!row){ alert('Could not find that row on screen.'); return; }
+  row.scrollIntoView({behavior:'smooth',block:'center'});
+  const old=row.style.outline;
+  let n=0;
+  const flash=setInterval(()=>{ row.style.outline=(n%2)?'3px solid var(--err)':'none'; if(++n>5){clearInterval(flash);row.style.outline=old;} },220);
+}
+
 function renderNoBoard(){
   const el=document.getElementById('noBoardBar'); if(!el) return;
   const m=window._lastUnmatchedMats||{};
@@ -2514,6 +2538,14 @@ function renderParts(){
     </select>`;
 
     const tr=document.createElement('tr');
+    // A part that didn't make it onto the plan is marked here too, not just in the box at the
+    // bottom — otherwise finding it means reading every row of a long list.
+    if(_isUnplaced(p)){
+      tr.style.background='rgba(224,92,42,.10)';
+      tr.style.boxShadow='inset 3px 0 0 var(--err)';
+      tr.title='This part is not on the cut plan — it would not fit the boards on this job';
+    }
+    tr.dataset.partid=p.id;
     tr.innerHTML=`
       <td><input type="text" value="${esc(p.label)}" onchange="ps(${p.id},'label',this.value)"></td>
       <td><input type="number" value="${p.l}" onchange="ps(${p.id},'l',+this.value)" min="1" step="1" style="width:58px"></td>
@@ -4494,11 +4526,57 @@ function renderResults(sheets,unplaced){
   renderBoardStock();
 
   if(unplaced.length){
+    // It used to print the names in one run-on line and advise "add more sheets", which is the
+    // wrong answer when the piece is simply longer than any board on the job — and then you had
+    // to hunt a 90-row parts list to find it. Each one now says WHY it didn't go on, what size
+    // of sheet would take it, and is a button that jumps to that row and flashes it.
+    const rows=unplaced.map(p=>{
+      const L=Math.round(p.origL||p.l||0), W=Math.round(p.origW||p.w||0);
+      const mat=String(p.matName||p.material||'').trim();
+      // The boards on this job that this part was allowed to use
+      const cands=(jobSheets||[]).filter(s=>!mat || String(s.name||'').toLowerCase().trim()===mat.toLowerCase());
+      let why='', need='';
+      if(!cands.length){
+        why = mat ? 'no board on this job is '+esc(mat) : 'no boards on this job';
+      } else {
+        // Biggest usable area any candidate board offers, after its trims
+        const fits=cands.some(s=>{
+          const uw=(s.w||0)-(s.trimL||0)-(s.trimR||0), uh=(s.l||0)-(s.trimT||0)-(s.trimB||0);
+          return (L<=uh&&W<=uw)||(L<=uw&&W<=uh);
+        });
+        if(!fits){
+          const big=cands.reduce((m,s)=>{const uh=(s.l||0)-(s.trimT||0)-(s.trimB||0);return Math.max(m,uh);},0);
+          why='too big for '+esc(cands[0].name||'that board')+' — longest it can cut is '+Math.round(big)+'mm';
+          const minLen=Math.max(L,W);
+          // Suggest a size this BOARD actually comes in, taken from your board list — not the
+          // next number off a generic list. A 2520 filler on Finsa was being told "needs a 2800
+          // sheet", which is an Egger size Finsa isn't made in; the honest answer was 3050.
+          const base=String(cands[0].name||'').toLowerCase().replace(/\d+(\.\d+)?\s*mm/g,'').replace(/[^a-z]+/g,' ').trim();
+          const real=[...new Set((_cbCatalogue||[])
+            .filter(b=>String(b.board_name||'').toLowerCase().replace(/[^a-z]+/g,' ').trim()
+                      && base.includes(String(b.board_name||'').toLowerCase().replace(/[^a-z]+/g,' ').trim()))
+            .map(b=>parseInt(String(b.sheet_size||'').split(/[x×]/)[0])||0)
+            .filter(n=>n>0))].sort((a,b)=>a-b);
+          const pool=real.length?real:[2440,2500,2800,3050];
+          const pick=pool.find(x=>x-30>=minLen);
+          need=pick?('needs a '+pick+' sheet'+(real.length?'':' (check your supplier does that size)'))
+                   :(real.length?('no size you stock of this board is long enough — longest is '+pool[pool.length-1]+'mm')
+                                :('needs a sheet longer than '+minLen+'mm'));
+        } else {
+          why='board ran out — the sheets on the job are full';
+          need='add another sheet of '+esc(cands[0].name||'that board');
+        }
+      }
+      return `<div style="display:flex;align-items:center;gap:8px;margin:5px 0">
+        <button onclick="jumpToPart('${String(p.label||'').replace(/'/g,"\\'")}',${L},${W})"
+          style="background:var(--err);color:#fff;border:none;border-radius:5px;padding:3px 9px;font-size:11.5px;cursor:pointer;flex-shrink:0">find it</button>
+        <span style="font-size:12.5px;color:var(--txt)"><b>${esc(p.label)}</b> ${L}×${W}${mat?' · '+esc(mat):''}</span>
+        <span style="font-size:11.5px;color:var(--txt3)">— ${why}${need?'. <b style="color:var(--acc)">'+need+'</b>':''}</span>
+      </div>`;}).join('');
     document.getElementById('upSec').innerHTML=`
       <div class="unplaced-box">
-        <div style="color:var(--err);font-weight:600;margin-bottom:6px">⚠ ${unplaced.length} part(s) could not be placed</div>
-        <div style="color:var(--txt2);font-size:12px">${unplaced.map(p=>`${esc(p.label)} (${p.l}×${p.w}mm)`).join(', ')}</div>
-        <div style="margin-top:7px;font-size:11px;color:var(--txt3)">Add more sheets or increase sheet quantity.</div>
+        <div style="color:var(--err);font-weight:600;margin-bottom:6px">⚠ ${unplaced.length} part(s) could not be placed — these are NOT on the cut plan</div>
+        ${rows}
       </div>`;
   }
 }
