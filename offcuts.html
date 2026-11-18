@@ -697,6 +697,14 @@ function _ocQrObj(b64,x,y,w,h){
   '<Data>'+b64+'</Data><ScaleMode>Uniform</ScaleMode><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment>'+
   '<ObjectLayout><DYMOPoint><X>'+x+'</X><Y>'+y+'</Y></DYMOPoint><Size><Width>'+w+'</Width><Height>'+h+'</Height></Size></ObjectLayout></ImageObject>';
 }
+// One character per line, so the code reads straight down the wrap strip. OC- is dropped —
+// it's on every offcut, so it would be three lines of nothing, and the full code is printed
+// below the fold anyway. Same function exists in tce-offload.html; keep the two in step.
+function _stackCode(code){
+  const c=String(code||'').replace(/^OC-/i,'').trim().toUpperCase();
+  if(!c) return '';
+  return c.split('').join('\n');
+}
 function offcutLabelXml(o){
   // Printed landscape (the orientation the DYMO is happy with), but every field is rotated 90°
   // and laid along the long 57mm edge. Turn the printed label a quarter-turn and it reads TALL:
@@ -706,10 +714,16 @@ function offcutLabelXml(o){
   if(cust.length>26) cust=cust.slice(0,25).replace(/\s+\S*$/,'').trim()+'…';
   const R='Rotation270', Y=0.06, H=1.01;
   const body=
-    // Wrap strip (the bit you see on the edge in the rack): QR + the 4 characters that make
-    // the code unique, big. The full OC- code is still on the face below the fold.
+    // Wrap strip (the bit you see on the edge in the rack): QR + the characters that make the
+    // code unique. The full OC- code is still on the face below the fold.
+    // KEEP IN STEP WITH tce-offload.html — both pages build this label independently, and a
+    // reprint from here produced the old sideways code while the offload station printed the
+    // new stacked one. If you change the strip in one, change it in the other.
     _ocQrObj(qrPngB64(offcutScanUrl(o.code)),0.07,0.08,0.44,0.44)+
-    _to('OcCodeTop',String(o.code||'').replace(/^OC-/i,''),20,'Center',0.08,0.54,0.42,0.53,R)+
+    // Offcuts stand on edge, so the code is stacked one character per line and reads straight
+    // down the strip. _to prints bold with FitMode AlwaysFit, so the box height is what sets
+    // the size, not the 26 — the box takes all the strip below the QR.
+    _to('OcCodeTop',_stackCode(o.code),26,'Center',0.06,0.53,0.46,0.64,'Rotation0')+
     _to('OcFold','— fold —',7,'Center',0.56,Y,0.10,H,R)+
     _to('OcCode',o.code||'',18,'Center',0.70,Y,0.38,H,R)+
     _to('OcDecor',o.name||'',11,'Center',1.12,Y,0.22,H,R)+
