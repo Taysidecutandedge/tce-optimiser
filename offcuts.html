@@ -143,7 +143,7 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
         <div class="grid">
           <div class="field full">
             <label>Decor / colour</label>
-            <input id="f-name" list="decorlist" placeholder="e.g. Egger H1385 Natural Castella Oak" oninput="onDecorInput()">
+            <input id="f-name" list="decorlist" autocomplete="off" placeholder="e.g. Egger H1385 Natural Castella Oak" oninput="onDecorInput()" onfocus="showMatPicks()"><div id="matPicks" style="display:none;position:relative;z-index:50;margin-top:4px;max-height:220px;overflow-y:auto;border:1px solid var(--brd,#2a2a2a);border-radius:8px;background:var(--surf2,#1b1b1f)"></div>
             <datalist id="decorlist"></datalist>
           </div>
           <div class="field full">
@@ -205,7 +205,7 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 // material snap all looked broken when they had shipped fine. Bump this whenever the file
 // changes. Phones hold a cached page far longer than a desktop does, which is exactly why
 // the page that lives on a phone needed this most.
-const TCE_BUILD='2026-11-18-a';
+const TCE_BUILD='2026-11-18-b';
 async function _tceCheckBuild(){
   try{
     const r=await fetch(location.pathname+'?buildcheck='+Date.now(),{cache:'reload'});
@@ -443,7 +443,42 @@ async function loadOffcuts(){
 
 function genCode(){const a='23456789ABCDEFGHJKLMNPQRSTUVWXYZ';return 'OC-'+Array.from({length:4},()=>a[Math.floor(Math.random()*a.length)]).join('');}
 
+// A <datalist> is desktop-only in practice — on a phone it is a thin strip above the keyboard
+// that frequently never appears, so on the device this page actually lives on there was no
+// suggestion list at all and everything got typed by hand. That is how five spellings of one
+// board happened. This is a plain tappable list instead: works on every browser, big enough
+// to hit with a glove on.
+function showMatPicks(){
+  const inp=$('f-name'), box=$('matPicks'); if(!inp||!box) return;
+  const q=String(inp.value||'').toLowerCase().replace(/\s+/g,' ').trim();
+  // Word-match so "finsa 18" finds "18mm Finsa MR MDF" whichever order you type it
+  const words=q.split(' ').filter(Boolean);
+  const hits=(_decors||[]).filter(d=>{
+    const n=String(d.name||'').toLowerCase();
+    return !words.length || words.every(w=>n.includes(w));
+  }).slice(0,40);
+  if(!hits.length){ box.style.display='none'; box.innerHTML=''; return; }
+  box.style.display='block';
+  box.innerHTML=hits.map(d=>
+    '<div onmousedown="pickMat(this.dataset.n)" ontouchstart="pickMat(this.dataset.n)" data-n="'+esc(d.name)+'"'
+    +' style="padding:11px 12px;font-size:15px;color:var(--txt,#e8f0ec);border-bottom:1px solid rgba(255,255,255,.07);cursor:pointer">'
+    +esc(d.name)+(d.thick?('  <span style="color:var(--txt3,#6b8f7e);font-size:12.5px">'+d.thick+'mm</span>'):'')
+    +'</div>').join('');
+}
+function pickMat(name){
+  const inp=$('f-name'); if(!inp) return;
+  inp.value=name;
+  $('matPicks').style.display='none';
+  onDecorInput();                 // pulls the colour and thickness across as before
+  inp.blur();
+}
+// Tapping anywhere else closes it, but not so fast that the tap on a row is lost.
+document.addEventListener('click',e=>{
+  const box=$('matPicks'); if(!box) return;
+  if(e.target!==$('f-name') && !box.contains(e.target)) box.style.display='none';
+});
 function onDecorInput(){
+  showMatPicks();
   const v=$('f-name').value.trim().toLowerCase();
   const m=_decors.find(d=>d.name.toLowerCase()===v);
   if(m&&m.color)$('f-color').value=m.color;
