@@ -156,7 +156,7 @@
 // says so. A device can run week-old code while you are told a fix is live. So the app asks
 // the server what the current build is and says plainly when it is behind. It never reloads
 // by itself — that is your call, not the app's.
-const TCE_BUILD='2026-11-18-a';
+const TCE_BUILD='2026-11-18-d';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -815,6 +815,15 @@ function _ocQrObj(b64,x,y,w,h){
   '<Data>'+b64+'</Data><ScaleMode>Uniform</ScaleMode><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment>'+
   '<ObjectLayout><DYMOPoint><X>'+x+'</X><Y>'+y+'</Y></DYMOPoint><Size><Width>'+w+'</Width><Height>'+h+'</Height></Size></ObjectLayout></ImageObject>';
 }
+// One character per line, so the code reads straight down the wrap strip. The OC- prefix is
+// dropped — it's on every offcut, so it's four lines of nothing, and the full code is still
+// printed below the fold. Guards against a missing or odd code rather than printing "UNDEFINED"
+// down the edge of a panel.
+function _stackCode(code){
+  const c=String(code||'').replace(/^OC-/i,'').trim().toUpperCase();
+  if(!c) return '';
+  return c.split('').join('\n');
+}
 function offcutLabelXml(o){
   const size=`${o.l} x ${o.w}  -  ${o.thick}mm`;
   let cust=o.notes?String(o.notes).replace(/\s*[-—]\s*Rev\s*\d+\s*$/i,'').trim():'';
@@ -824,7 +833,17 @@ function offcutLabelXml(o){
     // Wrap strip (the bit you see on the edge in the rack): QR + the 4 characters that make
     // the code unique, big. The full OC- code is still on the face below the fold.
     _ocQrObj(qrPngB64(offcutScanUrl(o.code)),0.07,0.08,0.44,0.44)+
-    _to('OcCodeTop',String(o.code||'').replace(/^OC-/i,''),20,'Center',0.08,0.54,0.42,0.53,R)+
+    // Offcuts stand on edge in the rack, so the wrap strip runs vertically. The rest of the
+    // label reads along the strip (R), which means tilting your head. The short code you read
+    // by eye is stacked instead — one character per line, each upright — so it reads straight
+    // down the strip from in front of the rack. The QR above is square and reads any way up.
+    // Four stacked lines need height, and the box gets all of it: the strip column runs to
+    // 1.19 and the old box stopped at 1.07, so that spare 3mm goes to the letters. _to prints
+    // bold with FitMode AlwaysFit, which means the point size asked for is a ceiling and the
+    // box is what actually decides — hence a bigger box rather than a bigger number.
+    // The QR keeps its full 0.44 square: it scans at 0.30mm per module and shrinking it to
+    // buy text height would trade the thing that works for the thing that is merely nicer.
+    _to('OcCodeTop',_stackCode(o.code),26,'Center',0.06,0.53,0.46,0.64,'Rotation0')+
     _to('OcFold','— fold —',7,'Center',0.56,Y,0.10,H,R)+
     _to('OcCode',o.code||'',18,'Center',0.70,Y,0.38,H,R)+
     _to('OcDecor',o.name||'',11,'Center',1.12,Y,0.22,H,R)+

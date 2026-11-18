@@ -122,6 +122,20 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
   <div class="wrap">
     <!-- SCANNED OFFCUT (from the QR on a label) -->
     <section id="scanSec" class="hidden" style="padding-bottom:0"><div id="scanCard"></div></section>
+
+    <!-- CAMERA SCANNER — full-screen while open, closes on a hit or on Close -->
+    <div id="scanOverlay" class="hidden" style="position:fixed;inset:0;z-index:9999;background:#000;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#111;color:#fff;font-size:15px">
+        <span style="font-weight:700">Scan an offcut label</span>
+        <span id="scanState" style="margin-left:auto;font-size:13px;opacity:.8">starting camera…</span>
+        <button class="btn btn-sm" onclick="closeScanner()" style="background:#333;color:#fff;border-color:#555">Close</button>
+      </div>
+      <div style="flex:1;position:relative;overflow:hidden;background:#000">
+        <video id="scanVideo" playsinline muted style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"></video>
+        <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:62vw;max-width:300px;aspect-ratio:1;border:3px solid rgba(255,255,255,.9);border-radius:12px;box-shadow:0 0 0 100vmax rgba(0,0,0,.35)"></div>
+      </div>
+      <div id="scanHint" style="padding:10px 12px;background:#111;color:#bbb;font-size:13px;text-align:center">Hold the QR square inside the box</div>
+    </div>
     <!-- ADD -->
     <section>
       <div class="card">
@@ -161,6 +175,7 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
     <!-- LIST -->
     <section style="padding-top:0">
       <div class="toolbar">
+        <button class="btn btn-sm" id="scanBtn" onclick="openScanner()" style="white-space:nowrap">⬚ Scan</button>
         <input id="q" type="search" placeholder="Search decor, code, bay…" oninput="renderList()">
         <select id="fdecor" onchange="renderList()"><option value="">All decors</option></select>
         <select id="fthick" onchange="renderList()"><option value="">All thickness</option></select>
@@ -267,6 +282,89 @@ async function doLogin(){
   }catch(e){$('li-err').textContent=e.message;}
 }
 function signOut(){localStorage.removeItem('tce_token');localStorage.removeItem('tce_refresh');localStorage.removeItem('tce_user');_token=null;_user=null;showLogin();}
+
+// ---- camera scanner ----------------------------------------------------------
+// Scanning with the phone's own camera app meant leaving this page, pointing, tapping the
+// banner and waiting for a reload — four steps while holding a sheet of board, and worse
+// again for a run of offcuts. This keeps it in the page: tap Scan, point, it jumps to the
+// offcut. The typed-code box stays as the fallback for a refused camera or a dusty lens.
+let _scanStream=null, _scanRAF=null, _jsqrLoading=null;
+// jsQR is fetched only when the button is first used, so nobody pays for it otherwise, and
+// the browser caches it after that. The page already needs the network for Supabase, so a
+// CDN script costs no offline ability that we had.
+function _loadJsQR(){
+  if(typeof jsQR==='function') return Promise.resolve(true);
+  if(_jsqrLoading) return _jsqrLoading;
+  _jsqrLoading=new Promise(res=>{
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
+    s.onload=()=>res(typeof jsQR==='function');
+    s.onerror=()=>res(false);
+    document.head.appendChild(s);
+  });
+  return _jsqrLoading;
+}
+// A scanned label gives a full URL; accept a bare code too, in case a different scanner or a
+// hand-typed value gets here. Anything that isn't one of ours is reported rather than ignored.
+function _codeFromScan(text){
+  const t=String(text||'').trim();
+  const m=t.match(/[?&]oc=([^&\s]+)/i);
+  if(m) return decodeURIComponent(m[1]).toUpperCase();
+  if(/^OC-[A-Z0-9]{3,}$/i.test(t)) return t.toUpperCase();
+  return null;
+}
+function _setScanState(msg){ const el=$('scanState'); if(el) el.textContent=msg; }
+async function openScanner(){
+  const ov=$('scanOverlay'); if(!ov) return;
+  ov.classList.remove('hidden');
+  _setScanState('starting camera…');
+  const ok=await _loadJsQR();
+  if(!ok){ _setScanState('scanner unavailable'); $('scanHint').textContent='Could not load the scanner. Use your phone camera, or type the code into the search box.'; return; }
+  try{
+    _scanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
+  }catch(e){
+    _setScanState('no camera');
+    $('scanHint').textContent='Camera not allowed. Allow it in your browser settings, or type the code into the search box.';
+    return;
+  }
+  const v=$('scanVideo');
+  v.srcObject=_scanStream;
+  try{ await v.play(); }catch(e){}
+  _setScanState('looking…');
+  const c=document.createElement('canvas'), g=c.getContext('2d',{willReadFrequently:true});
+  let frame=0;
+  const tick=()=>{
+    if(!_scanStream) return;                       // closed while we were waiting
+    _scanRAF=requestAnimationFrame(tick);
+    if(v.readyState!==4) return;
+    if((frame++ % 2)) return;                      // every other frame is plenty, and halves the battery cost
+    const w=Math.min(v.videoWidth,640); const h=Math.round(v.videoHeight*(w/v.videoWidth));
+    if(!w||!h) return;
+    c.width=w; c.height=h;
+    g.drawImage(v,0,0,w,h);
+    let res=null;
+    try{ res=jsQR(g.getImageData(0,0,w,h).data,w,h,{inversionAttempts:'dontInvert'}); }catch(e){}
+    if(!res) return;
+    const code=_codeFromScan(res.data);
+    if(!code){ _setScanState('not a TCE label'); return; }
+    if(navigator.vibrate) try{ navigator.vibrate(60); }catch(e){}
+    closeScanner();
+    _scanCode=code;
+    _scanFetched=null;
+    renderScanCard();
+    window.scrollTo({top:0,behavior:'smooth'});
+  };
+  tick();
+}
+function closeScanner(){
+  if(_scanRAF){ cancelAnimationFrame(_scanRAF); _scanRAF=null; }
+  // Release the camera properly — a stream left running keeps the lens busy and the light on.
+  if(_scanStream){ try{ _scanStream.getTracks().forEach(t=>t.stop()); }catch(e){} _scanStream=null; }
+  const v=$('scanVideo'); if(v){ try{ v.pause(); }catch(e){} v.srcObject=null; }
+  const ov=$('scanOverlay'); if(ov) ov.classList.add('hidden');
+}
+// Don't hold the camera while the phone is in a pocket or on another app.
+document.addEventListener('visibilitychange',()=>{ if(document.hidden && _scanStream) closeScanner(); });
 
 // ---- data ----
 async function loadDecors(){
@@ -462,6 +560,7 @@ async function renderScanCard(){
     <div class="s-top">
       <div class="swatch" style="width:30px;height:30px;border-radius:7px;background:${esc(o.color||'#4e9af1')};border:1px solid rgba(255,255,255,.15)"></div>
       <div class="s-code">${esc(o.code||_scanCode)}${o.qty>1?` <span class="pill-qty">×${o.qty}</span>`:''}</div>
+      <button class="btn btn-sm" onclick="openScanner()" title="Scan the next offcut">⬚ Scan next</button>
       <button class="btn btn-sm btn-ghost s-close" onclick="closeScan()">✕ Close</button>
     </div>
     ${warn?`<div class="s-warn">${warn}</div>`:''}
