@@ -373,7 +373,10 @@ async function loadDecors(){
     const r=await fetch(SB_URL+'/rest/v1/tce_library?select=name,color,thick,is_offcut',{headers:H()});
     if(r.ok){
       const rows=await r.json();
-      const norm=s=>String(s||'').toLowerCase().replace(/\s+/g,' ').trim();
+      // Keyed on the WORDS, not the string. Case-and-space matching still treated
+      // "22mm Mr Mdf Finsa" and "22mm Finsa MR MDF" as two materials, so the list meant to
+      // keep you consistent was offering five ways to spell the same board.
+      const norm=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().split(/\s+/).filter(Boolean).sort().join(' ');
       const map={};
       rows.forEach(x=>{
         if(!x.name) return; const k=norm(x.name); if(!k) return;
@@ -411,8 +414,28 @@ function onDecorInput(){
   else if(m&&m.thick&&!$('f-thick').value)$('f-thick').value=m.thick;
 }
 
+// Same material, same words, different order or case — "22mm Mr Mdf Finsa" is the board the
+// rest of the system calls "22mm Finsa MR MDF". Nothing downstream knows they are one board,
+// so 24 offcuts went invisible to the optimiser and sheets got bought with the rack full.
+// The key sorts the words, so spelling and order stop mattering.
+function _matWordKey(s){
+  return String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().split(/\s+/).filter(Boolean).sort().join(' ');
+}
+// If what was typed is word-for-word an existing material, store the EXISTING spelling.
+// Remembering which way round you typed it last time is not a thing anyone should have to do.
+function _canonicalMatName(typed){
+  const k=_matWordKey(typed);
+  if(!k) return typed;
+  const hit=(_decors||[]).find(d=>_matWordKey(d.name)===k);
+  return hit?hit.name:typed;
+}
 async function addOffcut(){
-  const name=$('f-name').value.trim();
+  const typedName=$('f-name').value.trim();
+  const name=_canonicalMatName(typedName);
+  if(name!==typedName){
+    $('f-name').value=name;                       // show what is actually being saved
+    toast('Saved as "'+name+'" — the name already in use');
+  }
   const l=parseInt($('f-l').value),w=parseInt($('f-w').value),thick=parseFloat($('f-thick').value);
   const qty=Math.max(1,parseInt($('f-qty').value)||1);
   if(!name){toast('Enter a decor',true);return;}
