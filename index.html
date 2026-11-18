@@ -531,6 +531,7 @@ select option{background:var(--surf2)}
     <div id="staleNestBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(200,80,80,.14);border:1px solid rgba(220,110,110,.55);border-radius:8px;color:#ffc9c9;font-size:12.5px;line-height:1.7"></div>
     <div id="noBoardBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(200,80,80,.16);border:1px solid rgba(230,110,110,.6);border-radius:8px;color:#ffc9c9;font-size:12.5px;line-height:1.7"></div>
     <div id="inventedBoardBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(240,165,0,.14);border:1px solid rgba(240,165,0,.5);border-radius:8px;color:#ffdf9b;font-size:12.5px;line-height:1.7"></div>
+    <div id="dupeJobBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(200,80,80,.16);border:1px solid rgba(230,110,110,.6);border-radius:8px;color:#ffc9c9;font-size:12.5px;line-height:1.7"></div>
     <div id="importNoteBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(240,165,0,.10);border:1px solid rgba(240,165,0,.35);border-radius:8px;color:#ffdf9b;font-size:12.5px;line-height:1.7"></div>
     <div id="doorLikeBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(212,130,10,.14);border:1px solid rgba(212,130,10,.5);border-radius:8px;color:#e8c99a;font-size:12.5px;line-height:1.7"></div>
     <div id="doorBar" style="display:none;margin:0 0 10px;padding:9px 12px;background:rgba(212,130,10,.12);border:1px solid rgba(212,130,10,.45);border-radius:8px;color:#e8c99a;font-size:12.5px;line-height:1.7"></div>
@@ -716,7 +717,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-11-16-a';
+const TCE_BUILD='2026-11-18-a';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -1506,6 +1507,7 @@ function _resetJobState(opts){
   const o=opts||{};
   _jobEpoch++;
   _importNotes=[];   // notes belong to the cutlist that was imported, not to the next job
+  _dupeJob=null;     // and so does the duplicate warning
   // The cut plan and everything derived from it
   _lastSheets=[]; _lastUnplaced=[]; _lastEbMap={}; _lastEbGT=0; _lastEbDetail=[]; _lastBoardNeed=[];
   // Cutting mode
@@ -2278,6 +2280,84 @@ function renderInventedBoards(){
     +'<div style="font-size:11.5px;opacity:.9;margin-top:5px">Use <b>Pick board</b> on the sheet to point it at a real one, or type the size and cost in by hand.</div>';
 }
 
+// ── Already-had-this-cutlist check ──────────────────────────────────────────
+// Dylan sent the Carolyn library corner list twice and it became jobs 194 and 196 — 87
+// identical panels, nested and priced twice, and only spotted by eye days later.
+// The comparison deliberately IGNORES material. The two differed only because the 2455 face
+// frame had been moved onto the 3050 Medite by hand, so a material-sensitive check would
+// have called them different jobs and said nothing — which is the whole trap. Sizes,
+// quantities and edging are what make a cutlist the same cutlist; the board is a decision
+// taken afterwards.
+function _cutlistSig(list){
+  const m={};
+  (list||[]).forEach(p=>{
+    const k=String(p.label||'').trim().toLowerCase()+'|'+Math.round(p.l||0)+'x'+Math.round(p.w||0)
+      +'|'+['L1','L2','W1','W2'].map(s=>(p.eb&&p.eb[s])?s:'').filter(Boolean).join('+');
+    m[k]=(m[k]||0)+(parseInt(p.qty)||1);
+  });
+  return m;
+}
+function _sigOverlap(A,B){
+  const ka=Object.keys(A), kb=Object.keys(B);
+  if(!ka.length||!kb.length) return 0;
+  const shared=ka.filter(k=>B[k]===A[k]);        // same row AND same quantity
+  return shared.length/Math.max(ka.length,kb.length);
+}
+// The customer on the imported rows, used to narrow the search. Falls back to every recent
+// job when the cutlist doesn't name one.
+function _importCompany(){
+  const c={};
+  (parts||[]).forEach(p=>{ const n=String(p.company||'').trim(); if(n) c[n]=(c[n]||0)+1; });
+  const best=Object.entries(c).sort((a,b)=>b[1]-a[1])[0];
+  return best?best[0]:'';
+}
+let _dupeJob=null;
+async function checkForDuplicateCutlist(){
+  _dupeJob=null;
+  try{
+    if(!_sbToken || !(parts||[]).length) return null;
+    const mine=_cutlistSig(parts);
+    const since=new Date(Date.now()-90*24*3600*1000).toISOString();
+    const co=_importCompany();
+    let q=SB_URL+'/rest/v1/tce_jobs?select=id,job_name,client_name,saved_at,archived,status,parts:job_data->parts'
+      +'&saved_at=gte.'+since+'&order=saved_at.desc&limit=60';
+    if(co) q+='&client_name=eq.'+encodeURIComponent(co);
+    const r=await fetch(q,{headers:sbAuthH()});
+    if(!r.ok) return null;
+    const rows=await r.json();
+    if(!Array.isArray(rows)) return null;
+    let best=null;
+    rows.forEach(j=>{
+      if(_loadedCloudJobId && String(j.id)===String(_loadedCloudJobId)) return;   // this IS the job we're in
+      const ov=_sigOverlap(mine,_cutlistSig(j.parts));
+      // 90% comes from your own history, not a guess. Across 2,619 same-customer pairs the
+      // scores land at 100 (110 pairs), 98, 95 (15), 94, 92 — then nothing until 89 and down.
+      // The 94 and 92 are duplicates that had been edited afterwards; 89 and below are the
+      // real revisions, mostly shaker doors converted into stiles and rails. The line sits in
+      // that gap. A missed duplicate costs a job nested and priced twice; a false warning
+      // costs one click, so it leans towards asking.
+      if(ov>=0.90 && (!best||ov>best.ov)) best={ov,job:j};
+    });
+    _dupeJob=best;
+    return best;
+  }catch(e){ return null; }   // a failed check never blocks an import
+}
+function renderDupeBar(){
+  const el=document.getElementById('dupeJobBar'); if(!el) return;
+  if(!_dupeJob){ el.style.display='none'; el.innerHTML=''; return; }
+  const j=_dupeJob.job, when=j.saved_at?new Date(j.saved_at).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'';
+  el.style.display='block';
+  el.innerHTML='<span style="font-weight:700">⚠ You already have this cutlist.</span> '
+    +'The same panels are saved as <b>'+esc(j.job_name||('job '+j.id))+'</b>'+(when?' ('+esc(when)+')':'')
+    +(j.archived?' <span style="opacity:.8">[archived]</span>':'')
+    +(_dupeJob.ov<1?' — '+Math.round(_dupeJob.ov*100)+'% the same':' — every panel matches')+'.<br>'
+    +'<div style="font-size:11.5px;opacity:.9;margin-top:5px">Same sizes, quantities and edging. '
+    +'Materials are not compared, so a board you changed by hand still counts as the same list. '
+    +'Open that job instead of starting a new one, unless the customer really has sent a repeat order.</div>'
+    +'<div style="margin-top:7px"><button class="btn btn-sm" onclick="_dupeJob=null;renderDupeBar()" '
+    +'style="background:#1f7a4d;color:#fff;border:none;border-radius:6px;padding:5px 11px;font-size:12px;cursor:pointer">It’s a genuine repeat — carry on</button></div>';
+}
+
 function renderNoBoard(){
   const el=document.getElementById('noBoardBar'); if(!el) return;
   const m=window._lastUnmatchedMats||{};
@@ -2394,6 +2474,7 @@ function renderParts(){
   try{ renderStaleNest(); }catch(e){}
   try{ renderNoBoard(); }catch(e){}
   try{ renderImportNotes(); }catch(e){}
+  try{ renderDupeBar(); }catch(e){}
   try{ renderInventedBoards(); }catch(e){}
   try{ renderDoorLikeBar(); }catch(e){}
   try{ renderDoorBar(); }catch(e){}
@@ -5745,6 +5826,7 @@ function applyImport(){
   if(shakerRows.length>0){
     const normalAdded=processNormalRows();
     save();renderParts();cm('importModal');
+    checkForDuplicateCutlist().then(()=>{try{renderDupeBar();}catch(e){}});
     const doors=shakerRows.map(({row,ri,board,l,w})=>{
       // Use notes column directly if found, otherwise scan
       let notes='';
@@ -5772,6 +5854,7 @@ function applyImport(){
   // No shaker doors - standard flow
   const added=processNormalRows();
   save();renderParts();cm('importModal');
+  checkForDuplicateCutlist().then(()=>{try{renderDupeBar();}catch(e){}});
   alert('Imported '+added+' part'+(added!==1?'s':'')+' successfully.'+sheetMsg+aliasMsg+newMsg+pwsMsg);
   _matMapPending=autoCreated; if(autoCreated&&autoCreated.length) setTimeout(openMatMapDialog,60);
 }
