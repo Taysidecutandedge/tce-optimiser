@@ -723,7 +723,7 @@ function offcutLabelXml(o){
     // Offcuts stand on edge, so the code is stacked one character per line and reads straight
     // down the strip. _to prints bold with FitMode AlwaysFit, so the box height is what sets
     // the size, not the 26 — the box takes all the strip below the QR.
-    _to('OcCodeTop',_stackCode(o.code),26,'Center',0.06,0.53,0.46,0.64,'Rotation0')+
+    _to('OcCodeTop',_stackCode(o.code),26,'Center',0.06,0.53,0.46,0.64,'Rotation180')+
     _to('OcFold','— fold —',7,'Center',0.56,Y,0.10,H,R)+
     _to('OcCode',o.code||'',18,'Center',0.70,Y,0.38,H,R)+
     _to('OcDecor',o.name||'',11,'Center',1.12,Y,0.22,H,R)+

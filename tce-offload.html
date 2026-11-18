@@ -156,7 +156,7 @@
 // says so. A device can run week-old code while you are told a fix is live. So the app asks
 // the server what the current build is and says plainly when it is behind. It never reloads
 // by itself — that is your call, not the app's.
-const TCE_BUILD='2026-11-18-d';
+const TCE_BUILD='2026-11-18-e';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -843,7 +843,7 @@ function offcutLabelXml(o){
     // box is what actually decides — hence a bigger box rather than a bigger number.
     // The QR keeps its full 0.44 square: it scans at 0.30mm per module and shrinking it to
     // buy text height would trade the thing that works for the thing that is merely nicer.
-    _to('OcCodeTop',_stackCode(o.code),26,'Center',0.06,0.53,0.46,0.64,'Rotation0')+
+    _to('OcCodeTop',_stackCode(o.code),26,'Center',0.06,0.53,0.46,0.64,'Rotation180')+
     _to('OcFold','— fold —',7,'Center',0.56,Y,0.10,H,R)+
     _to('OcCode',o.code||'',18,'Center',0.70,Y,0.38,H,R)+
     _to('OcDecor',o.name||'',11,'Center',1.12,Y,0.22,H,R)+
