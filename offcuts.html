@@ -205,7 +205,7 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 // material snap all looked broken when they had shipped fine. Bump this whenever the file
 // changes. Phones hold a cached page far longer than a desktop does, which is exactly why
 // the page that lives on a phone needed this most.
-const TCE_BUILD='2026-11-18-b';
+const TCE_BUILD='2026-11-20-a';
 async function _tceCheckBuild(){
   try{
     const r=await fetch(location.pathname+'?buildcheck='+Date.now(),{cache:'reload'});
@@ -533,7 +533,10 @@ async function addOffcut(){
       if(!r.ok){const e=await r.text();toast('Save failed',true);console.warn(e);return;}
       toast('Added '+qty+' boards (own codes)'); clearSizeFields(); $('f-l').focus();
     } else {
-      r=await fetch(SB_URL+'/rest/v1/tce_library',{method:'POST',headers:Hrep(),body:JSON.stringify({...base,qty,status:'in_stock',code:genCode(),user_id:_user.id,label_printed:false})});
+      // _reuseCode is set only by "Log it under this code" on a scanned board whose row is
+      // gone. Used once and cleared, so the next offcut added gets a fresh code as normal.
+      const _code=_reuseCode||genCode(); _reuseCode='';
+      r=await fetch(SB_URL+'/rest/v1/tce_library',{method:'POST',headers:Hrep(),body:JSON.stringify({...base,qty,status:'in_stock',code:_code,user_id:_user.id,label_printed:false})});
       if(!r.ok){const e=await r.text();toast('Save failed',true);console.warn(e);return;}
       const saved=(await r.json())[0]||{}; toast('Added '+(saved.code||'')); clearSizeFields(); $('f-l').focus();
     }
@@ -661,7 +664,9 @@ async function renderScanCard(){
       <button class="btn btn-sm btn-ghost s-close" onclick="closeScan()">✕ Close</button>
     </div>
     ${warn?`<div class="s-warn">${warn}</div>`:''}
-    ${o._missing?'':`
+    ${o._missing?`<div class="s-acts">
+      <button class="btn btn-acc" onclick="logFoundCode()">+ Log it under this code</button>
+    </div>`:`
     <div class="s-decor">${esc(o.name||'')}</div>
     <div class="s-size">${o.l} × ${o.w} · ${o.thick}mm${o.grain_len?' · grain ↕':''}</div>
     ${o.location?`<div class="s-bay">📍 ${esc(o.location)}</div>`:'<div class="s-line">📍 No bay set (tap Edit to add one)</div>'}
@@ -671,11 +676,43 @@ async function renderScanCard(){
       <button class="btn btn-acc" onclick="useOne(${o.id})">Use 1</button>
       <button class="btn" onclick="editOffcut(${o.id})">Edit</button>
       <button class="btn" onclick="printLabel(${o.id})">🏷 Reprint label</button>
-    </div>`:''}`}
+    </div>`:`<div class="s-acts">
+      <button class="btn btn-acc" onclick="foundOffcut(${o.id})">✓ Found it — back in stock</button>
+      <button class="btn" onclick="editOffcut(${o.id})">Edit</button>
+    </div>`}`}
   </div>`;
 }
+
+// A board turns up in the rack carrying a code the list says is missing, used or scrapped.
+// Until now the page said so and stopped there, so the only way back was to cut a brand new
+// label and lose the board's history — the job it came off, its decor, the bay it lived in.
+// The row is still there; it just needs putting back. Quantity returns to 1 because what is
+// in your hands is one board, whatever the count said when it went astray.
+async function foundOffcut(id){
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/tce_library?id=eq.'+id,{method:'PATCH',headers:H(),
+      body:JSON.stringify({status:'in_stock',qty:1,used_at:null})});
+    if(!r.ok){toast('Could not put it back',true);return;}
+    if(_scanFetched) _scanFetched._stale=true;
+    toast('Back in stock — set a bay so it stays found');
+    await loadOffcuts();
+    renderScanCard();
+  }catch(e){toast('Network error',true);}
+}
+
+// Nothing at all under that code — the row was deleted outright, or the label was printed
+// before the offcut was ever logged. Keep the code the board is physically wearing rather
+// than issuing a new one, so the sticker on the board and the row in the list agree and
+// there is no second label to print.
+let _reuseCode='';
+function logFoundCode(){
+  _reuseCode=_scanCode;
+  const f=$('f-name');
+  if(f){ f.focus(); f.scrollIntoView({behavior:'smooth',block:'center'}); }
+  toast('Fill in the board — it will be saved as '+_scanCode);
+}
 function closeScan(){
-  _scanCode=''; _scanFetched=null;
+  _scanCode=''; _scanFetched=null; _reuseCode='';   // never let a code follow you to the next board
   try{ history.replaceState(null,'',location.pathname); }catch(e){}
   renderScanCard();
 }
