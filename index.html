@@ -717,7 +717,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-11-20-c';
+const TCE_BUILD='2026-11-20-d';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -3387,7 +3387,6 @@ function _calculateInner(opts){
       for(let i=0;i<n;i++) addToPool(makeOffcutSheet(oc,js));
     });
 
-    const MIN_SUB=80;   // mm: a leftover narrower or shorter than this isn't worth a second rip
     const placeInSheet=(sh,piece,w,h,rot)=>{
       const isFullRun=h>sh.uh-1&&h<=sh.fullL+.001;
       const effH=isFullRun?sh.fullL:sh.uh;
@@ -3416,7 +3415,7 @@ function _calculateInner(opts){
           others.forEach(c=>{ ext+=kerf+c.w; });
           if(ext>sh.uw+.001) return false;      // won't fit once everything shifts — try another sheet
           record(frX,0);
-          sh.cols.unshift({x:frX,w,usedH:h+kerf,fullRun:true,subs:[]});
+          sh.cols.unshift({x:frX,w,usedH:h+kerf,fullRun:true});
           // Shift non-fullRun columns right to make room
           let nextX=frX+w+kerf;
           const shiftAmount=nextX - (others.length?Math.min(...others.map(c=>c.x)):nextX);
@@ -3473,38 +3472,14 @@ function _calculateInner(opts){
         : (bestFit ? bestFit.col : null);
       if(chosen){
         record(chosen.x, chosen.usedH);
-        // THIRD-LEVEL CUT. Rip the strip, crosscut the panel off it, and what is left BESIDE
-        // the panel used to be abandoned — a 100mm filler support dropped into a 250mm strip
-        // threw away 150mm for the whole 750mm length of it, three times over on one Ross v2
-        // board. Bank it as a rectangle a later panel can claim; the saw just rips that piece
-        // again, which is what we were doing by hand anyway.
-        // Stored as an OFFSET from the column, not an absolute x, so a full-run column opening
-        // later can shove this column sideways without stranding the leftovers.
-        const _free=chosen.w-w-kerf;
-        if(_free>=MIN_SUB && h>=MIN_SUB){ (chosen.subs=chosen.subs||[]).push({dx:w+kerf,y:chosen.usedH,w:_free,h}); }
         chosen.usedH+=h+kerf;return true;
-      }
-      // Pass B: the leftovers banked beside panels already placed. Tried only after every open
-      // strip, because landing in an existing strip costs one crosscut and this costs a rip too.
-      for(const col of sh.cols){
-        const subs=col.subs||[];
-        for(let si=0;si<subs.length;si++){
-          const sb=subs[si];
-          if(w>sb.w+1||h>sb.h+1) continue;
-          record(col.x+sb.dx, sb.y);
-          subs.splice(si,1);
-          const rightW=sb.w-w-kerf, belowH=sb.h-h-kerf;
-          if(rightW>=MIN_SUB&&sb.h>=MIN_SUB) subs.push({dx:sb.dx+w+kerf,y:sb.y,w:rightW,h:sb.h});
-          if(belowH>=MIN_SUB&&w>=MIN_SUB)    subs.push({dx:sb.dx,y:sb.y+h+kerf,w,h:belowH});
-          return true;
-        }
       }
       // Open new column
       const frW=sh.cols.filter(c=>c.fullRun).reduce((a,c)=>Math.max(a,c.x+c.w+kerf),0);
       const nextX=sh.cols.filter(c=>!c.fullRun).reduce((a,c)=>Math.max(a,c.x+c.w+kerf),frW);
       if(nextX+w<=sh.uw+.001&&h<=sh.uh+.001){
         record(nextX,0);
-        sh.cols.push({x:nextX,w,usedH:h+kerf,fullRun:false,subs:[]});
+        sh.cols.push({x:nextX,w,usedH:h+kerf,fullRun:false});
         sh.usedW=nextX+w+kerf;return true;
       }
       return false;
@@ -4170,42 +4145,13 @@ function tidySheet(sh,kerf){
   }
 }
 // True only if every panel falls into clean vertical rip-strips (no staggering, no overlaps).
-// Can this region be cut by repeated edge-to-edge cuts? A region holding one panel or none
-// is done; otherwise some straight cut must split it with no panel straddling the line, and
-// both halves must be cuttable in turn.
-//
-// The old test only understood TWO levels: rip the board into columns, crosscut within a
-// column, stop. That is less than the saw can do. Rip a strip, crosscut a short panel off
-// it, then rip what is left beside that panel — three levels, and the way the leftover
-// beside a 100mm filler in a 250mm strip gets used instead of binned. The two-level test
-// called that uncuttable and the tidy pass threw it away.
-//
-// Checked against every nest in the job history before it went in: 542 sheets, 3,516 panels,
-// identical verdict on all but two — and those two are rejected by both tests, being genuine
-// staircase layouts that no straight cut will separate.
-function _guilOk(ps,x0,y0,x1,y1,depth){
-  depth=depth||0; const tol=1;
-  const inside=ps.filter(p=>p.x+p.w>x0+tol&&p.x<x1-tol&&p.y+p.h>y0+tol&&p.y<y1-tol);
-  if(inside.length<=1) return true;
-  if(depth>40) return false;                       // pathological nest — call it uncuttable
-  const xs=[...new Set(inside.flatMap(p=>[p.x,p.x+p.w]))].filter(v=>v>x0+tol&&v<x1-tol).sort((a,b)=>a-b);
-  for(const cx of xs){
-    if(inside.some(p=>p.x<cx-tol&&p.x+p.w>cx+tol)) continue;     // a panel straddles this cut
-    if(_guilOk(inside,x0,y0,cx,y1,depth+1)&&_guilOk(inside,cx,y0,x1,y1,depth+1)) return true;
-  }
-  const ys=[...new Set(inside.flatMap(p=>[p.y,p.y+p.h]))].filter(v=>v>y0+tol&&v<y1-tol).sort((a,b)=>a-b);
-  for(const cy of ys){
-    if(inside.some(p=>p.y<cy-tol&&p.y+p.h>cy+tol)) continue;
-    if(_guilOk(inside,x0,y0,x1,cy,depth+1)&&_guilOk(inside,x0,cy,x1,y1,depth+1)) return true;
-  }
-  return false;
-}
 function isSheetRippable(sh){
-  const ps=(sh.placements||[]).map(p=>({x:+p.x,y:+p.y,w:+p.w,h:+p.h}));
-  if(ps.length<2) return true;
+  const ps=sh.placements||[]; const cols={};
+  ps.forEach(p=>{ const k=Math.round(p.x/2)*2; (cols[k]=cols[k]||[]).push(p); });
+  const cl=Object.values(cols).map(arr=>({x:Math.min(...arr.map(p=>p.x)),w:Math.max(...arr.map(p=>p.w))})).sort((a,b)=>a.x-b.x);
+  for(let i=0;i<cl.length-1;i++){ if(cl[i].x+cl[i].w>cl[i+1].x+1) return false; }
   for(let i=0;i<ps.length;i++) for(let j=i+1;j<ps.length;j++){ if(_stripOv(ps[i],ps[j])) return false; }
-  const maxX=Math.max(...ps.map(p=>p.x+p.w)), maxY=Math.max(...ps.map(p=>p.y+p.h));
-  return _guilOk(ps,0,0,Math.max(maxX,sh.uw||0)+1,Math.max(maxY,sh.fullL||sh.uh||0)+1,0);
+  return true;
 }
 // Tidy with a built-in safety net: revert the sheet if the result isn't rippable.
 // Two panels on the same piece of board, or a panel hanging off the edge. Either makes the
