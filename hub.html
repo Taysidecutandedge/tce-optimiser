@@ -51,6 +51,79 @@ header .right{margin-left:auto;display:flex;gap:8px;align-items:center}
 #login label{font-size:11px;color:var(--txt2);font-weight:600}
 input{background:var(--surf2);border:1px solid var(--brd);color:var(--txt);border-radius:8px;padding:12px;font-size:16px;width:100%;font-family:inherit}
 input:focus{outline:none;border-color:var(--acc)}
+/* output counters */
+.ctr{background:linear-gradient(160deg,#1a1d25 0%,#12141a 100%);border:1px solid var(--brd);border-radius:16px;padding:16px 16px 14px;margin:10px 0 18px;position:relative;overflow:hidden}
+.ctr::before{content:'';position:absolute;inset:0 0 auto 0;height:3px;background:linear-gradient(90deg,var(--acc),#f0b040,var(--eb))}
+.ctr-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.ctr-title{font-size:13px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:var(--txt2)}
+.ctr-live{width:8px;height:8px;border-radius:50%;background:var(--ok);animation:ctrPing 2.4s infinite}
+@keyframes ctrPing{0%{box-shadow:0 0 0 0 rgba(39,174,96,.6)}70%{box-shadow:0 0 0 8px rgba(39,174,96,0)}100%{box-shadow:0 0 0 0 rgba(39,174,96,0)}}
+.ctr-tabs{margin-left:auto;display:flex;background:var(--surf2);border:1px solid var(--brd);border-radius:9px;padding:3px;gap:2px}
+.ctr-tabs button{background:none;border:0;color:var(--txt3);font:600 13px/1 inherit;font-family:inherit;padding:7px 10px;border-radius:6px;cursor:pointer}
+.ctr-tabs button.on{background:var(--acc);color:#111}
+.ctr-big{background:var(--surf2);border:1px solid var(--brd);color:var(--txt2);border-radius:8px;padding:6px 10px;font:600 13px/1 inherit;font-family:inherit;cursor:pointer}
+.ctr-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+@media(max-width:680px){.ctr-grid{grid-template-columns:1fr}.ctr-tabs{margin-left:0;width:100%;justify-content:space-between}}
+.cc{background:rgba(255,255,255,.025);border:1px solid var(--brd);border-radius:12px;padding:14px 14px 12px;transition:border-color .3s,box-shadow .3s;min-width:0}
+.cc.bump{border-color:var(--acc);box-shadow:0 0 18px rgba(212,130,10,.35)}
+.cc-top{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt2);font-weight:600}
+.cc-ico{font-size:22px;line-height:1}
+.cc-cmp{margin-left:auto;font-size:12px;font-family:var(--mono);font-weight:700;padding:2px 7px;border-radius:20px;background:var(--surf2);color:var(--txt3)}
+.cc-cmp:empty{display:none}
+.cc-cmp.up{color:#4fd18b;background:rgba(39,174,96,.12)}
+.cc-cmp.down{color:#ff8a80;background:rgba(192,57,43,.12)}
+.odo{display:flex;align-items:flex-end;margin:10px 0 4px;font-family:var(--mono);font-weight:800;font-size:40px;line-height:1;height:46px}
+.odo .d{position:relative;display:inline-block;width:.64em;height:1.15em;overflow:hidden;background:#0c0d11;border-radius:5px;margin-right:2px;box-shadow:inset 0 -10px 12px rgba(0,0,0,.45),inset 0 8px 10px rgba(0,0,0,.45)}
+.odo .d span{position:absolute;left:0;right:0;top:0;display:flex;flex-direction:column;align-items:center;transition:transform 1.6s cubic-bezier(.2,.9,.25,1)}
+.odo .d span i{font-style:normal;height:1.15em;line-height:1.15em}
+.odo .sep{width:.3em;text-align:center;color:var(--txt3);align-self:flex-end;padding-bottom:.05em}
+.odo .unit{font-size:.4em;color:var(--txt3);margin-left:6px;padding-bottom:.15em;font-weight:700}
+.cc.sheets .odo{color:#f0b040}
+.cc.panels .odo{color:var(--txt)}
+.cc.eb .odo{color:#4fd18b}
+.cc-fun{font-size:12.5px;color:var(--txt3);min-height:18px}
+.cc-fun b{color:var(--txt2);font-weight:700}
+.spark{display:flex;align-items:flex-end;gap:2px;height:30px;margin:10px 0 2px}
+.spark i{flex:1;background:#2a2e38;border-radius:2px 2px 0 0;min-height:2px;transition:height .8s}
+.spark i.today{background:var(--acc)}
+.cc.sheets .spark i:not(.today){background:#5a4520}
+.cc.panels .spark i:not(.today){background:#3a3e48}
+.cc.eb .spark i:not(.today){background:#1f4a35}
+.spark-l{display:flex;justify-content:space-between;font-size:10px;color:var(--txt3);font-family:var(--mono)}
+.ms{margin-top:9px}
+.ms-bar{height:5px;background:#0c0d11;border-radius:3px;overflow:hidden}
+.ms-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc),#f0b040);border-radius:3px;transition:width 1.4s}
+.ms-t{font-size:11px;color:var(--txt3);margin-top:4px;font-family:var(--mono)}
+.ctr-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px}
+@media(max-width:680px){.ctr-row{grid-template-columns:1fr 1fr}}
+.cs{background:rgba(255,255,255,.025);border:1px solid var(--brd);border-radius:12px;padding:11px 13px}
+.cs .v{font-size:22px;font-weight:800;font-family:var(--mono);line-height:1.1}
+.cs .l{font-size:12px;color:var(--txt2);margin-top:3px}
+.cs .m{font-size:11px;color:var(--txt3);margin-top:2px;font-family:var(--mono)}
+.cs.good .v{color:#4fd18b}.cs.warn .v{color:#f0b040}.cs.bad .v{color:#ff8a80}
+.rec{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center}
+.rec .chip{background:var(--surf2);border:1px solid var(--brd);border-radius:20px;padding:5px 11px;font-size:12px;color:var(--txt2)}
+.rec .chip b{color:var(--txt);font-family:var(--mono)}
+.rec .chip.new{border-color:var(--acc);color:#111;background:var(--acc);font-weight:700;animation:recPulse 1.6s infinite}
+@keyframes recPulse{50%{box-shadow:0 0 16px rgba(212,130,10,.6)}}
+.ctr-note{font-size:11px;color:var(--txt3);margin-top:10px;font-family:var(--mono)}
+/* confetti */
+.cf{position:fixed;top:-12px;width:9px;height:14px;z-index:100;pointer-events:none;animation:cfFall linear forwards}
+@keyframes cfFall{to{transform:translateY(105vh) rotate(720deg)}}
+/* big screen */
+#bigscreen{position:fixed;inset:0;z-index:50;background:#07080b;display:flex;flex-direction:column;padding:3vh 4vw;gap:2.5vh;cursor:pointer}
+#bigscreen .bs-h{display:flex;align-items:center;gap:16px;color:var(--txt2);font-size:2.2vh;font-weight:800;letter-spacing:2px;text-transform:uppercase}
+#bigscreen .bs-h .r{margin-left:auto;font-family:var(--mono);letter-spacing:0;font-weight:600;color:var(--txt3)}
+#bigscreen .bs-grid{flex:1;display:grid;grid-template-rows:repeat(3,1fr);gap:2.5vh}
+#bigscreen .bs-c{display:flex;align-items:center;gap:3vw;background:#101217;border:1px solid var(--brd);border-radius:2vh;padding:0 3vw}
+#bigscreen .bs-c.bump{border-color:var(--acc);box-shadow:0 0 40px rgba(212,130,10,.4)}
+#bigscreen .bs-ico{font-size:8vh}
+#bigscreen .bs-l{font-size:3vh;color:var(--txt2);font-weight:700;min-width:22vw}
+#bigscreen .bs-l small{display:block;font-size:2vh;color:var(--txt3);font-weight:500;font-family:var(--mono);margin-top:.6vh}
+#bigscreen .odo{font-size:13vh;height:15vh;margin:0}
+#bigscreen .bs-wk{margin-left:auto;text-align:right;font-family:var(--mono);color:var(--txt3);font-size:2.4vh}
+#bigscreen .bs-wk b{display:block;font-size:5vh;color:var(--txt2)}
+#bigscreen .bs-f{font-size:1.8vh;color:var(--txt3);text-align:center;font-family:var(--mono)}
 .foot{text-align:center;color:var(--txt3);font-size:12px;margin-top:34px;font-family:var(--mono)}
 </style>
 </head>
@@ -79,6 +152,61 @@ input:focus{outline:none;border-color:var(--acc)}
 
     <div class="hello" id="hello">Welcome back.</div>
 
+    <div class="ctr" id="ctr">
+      <div class="ctr-head">
+        <span class="ctr-live" title="Updates every couple of minutes"></span>
+        <span class="ctr-title">Off the saw</span>
+        <button class="ctr-big" onclick="bigOpen()" title="Full-screen view for the workshop monitor">📺 Big screen</button>
+        <div class="ctr-tabs" id="ctr-tabs">
+          <button data-p="today">Today</button>
+          <button data-p="week" class="on">Week</button>
+          <button data-p="month">Month</button>
+          <button data-p="year">Year</button>
+          <button data-p="all">All time</button>
+        </div>
+      </div>
+      <div class="ctr-grid">
+        <div class="cc sheets" id="cc-sheets">
+          <div class="cc-top"><span class="cc-ico">🪵</span>Sheets cut<span class="cc-cmp" id="cmp-sheets"></span></div>
+          <div class="odo" id="odo-sheets"></div>
+          <div class="cc-fun" id="fun-sheets">&nbsp;</div>
+          <div class="spark" id="sp-sheets"></div><div class="spark-l"><span>14 days ago</span><span>today</span></div>
+          <div class="ms"><div class="ms-bar"><i id="msb-sheets"></i></div><div class="ms-t" id="mst-sheets"></div></div>
+        </div>
+        <div class="cc panels" id="cc-panels">
+          <div class="cc-top"><span class="cc-ico">🧱</span>Panels made<span class="cc-cmp" id="cmp-panels"></span></div>
+          <div class="odo" id="odo-panels"></div>
+          <div class="cc-fun" id="fun-panels">&nbsp;</div>
+          <div class="spark" id="sp-panels"></div><div class="spark-l"><span>14 days ago</span><span>today</span></div>
+          <div class="ms"><div class="ms-bar"><i id="msb-panels"></i></div><div class="ms-t" id="mst-panels"></div></div>
+        </div>
+        <div class="cc eb" id="cc-eb">
+          <div class="cc-top"><span class="cc-ico">🎗️</span>Edgebanding<span class="cc-cmp" id="cmp-eb"></span></div>
+          <div class="odo" id="odo-eb"></div>
+          <div class="cc-fun" id="fun-eb">&nbsp;</div>
+          <div class="spark" id="sp-eb"></div><div class="spark-l"><span>14 days ago</span><span>today</span></div>
+          <div class="ms"><div class="ms-bar"><i id="msb-eb"></i></div><div class="ms-t" id="mst-eb"></div></div>
+        </div>
+      </div>
+      <div class="ctr-row">
+        <div class="cs" id="cs-yield"><div class="v">–</div><div class="l">sheet yield</div><div class="m">board used as panels</div></div>
+        <div class="cs" id="cs-off"><div class="v">–</div><div class="l">offcuts reused</div><div class="m">&nbsp;</div></div>
+        <div class="cs" id="cs-scrap"><div class="v">–</div><div class="l">panels scrapped</div><div class="m">&nbsp;</div></div>
+        <div class="cs" id="cs-rate"><div class="v">–</div><div class="l">panels per hour</div><div class="m">time on the saw</div></div>
+      </div>
+      <div class="rec" id="rec"></div>
+      <div class="ctr-note" id="ctr-note">Counting from the saw's cut log…</div>
+    </div>
+
+    <div id="bigscreen" class="hidden" onclick="bigClose()">
+      <div class="bs-h">🪵 Tayside Cut &amp; Edge · Today off the saw <span class="r" id="bs-clock"></span></div>
+      <div class="bs-grid">
+        <div class="bs-c" id="bs-sheets"><span class="bs-ico">🪵</span><div class="bs-l">Sheets cut<small id="bsx-sheets"></small></div><div class="odo" id="bodo-sheets" style="color:#f0b040"></div><div class="bs-wk">this week<b id="bsw-sheets">–</b></div></div>
+        <div class="bs-c" id="bs-panels"><span class="bs-ico">🧱</span><div class="bs-l">Panels made<small id="bsx-panels"></small></div><div class="odo" id="bodo-panels"></div><div class="bs-wk">this week<b id="bsw-panels">–</b></div></div>
+        <div class="bs-c" id="bs-eb"><span class="bs-ico">🎗️</span><div class="bs-l">Edgebanding<small id="bsx-eb"></small></div><div class="odo" id="bodo-eb" style="color:#4fd18b"></div><div class="bs-wk">this week<b id="bsw-eb">–</b></div></div>
+      </div>
+      <div class="bs-f">Tap anywhere to close · updates every minute</div>
+    </div>
     <div class="stats" id="stats">
       <a class="stat go" href="./tce-offload.html"><div class="v" id="s-labels">–</div><div class="l">labels waiting to print</div></a>
       <a class="stat" href="./edgebanding.html"><div class="v" id="s-eblow">–</div><div class="l">edgebanding rolls low</div></a>
@@ -146,6 +274,8 @@ async function showApp(){
   const hr=new Date().getHours();
   $('hello').innerHTML=(hr<12?'Good morning':hr<17?'Good afternoon':'Good evening')+' — what are we doing?';
   loadStats();
+  loadCounters();
+  if(!window._ctrTimer) window._ctrTimer=setInterval(loadCounters,120000);
 }
 async function doLogin(){
   $('li-err').textContent='';
@@ -195,6 +325,306 @@ async function loadStats(){
   }
 }
 
+// ── "Off the saw" counters ────────────────────────────────────────────────
+// Everything here is READ-ONLY and comes from data the workshop already records:
+//   tce_cut_events  'confirm'      → every panel confirmed at the saw (sizes, edging, sheet)
+//                   'sheet_layout' → each sheet's size and nest, published by cutting mode
+//                   'scrap'/'unscrap' → panels scrapped (and scraps taken back)
+//   tce_library     offcuts marked used (with used_at), and full-board costs for £ values
+// Rules:
+//   Panels made  = confirmed panels. A double-tap counts once; a laminated pair counts once.
+//   Sheets cut   = different sheets with at least one confirmed panel, counted on the day the
+//                  first panel came off it (offcuts used as a sheet count too).
+//   Edgebanding  = edged sides of confirmed panels on cut size (origL/origW) — same as the
+//                  optimiser's EB totals.
+
+// Work done BEFORE the cut log existed. Put rough figures here and "All time" and the
+// milestones include them. Leave at 0 to count only what the saw has logged.
+const CTR_BASELINE={sheets:0, panels:0, eb:0};
+
+const MILESTONES=[100,250,500,1000,2500,5000,10000,25000,50000,100000,250000,500000,1000000,2500000];
+const DAY=86400000, GAP=15*60000;   // gaps over 15 min between confirms = not on the saw
+
+let D=null;                          // everything loaded and pre-worked, see ctrBuild()
+let _ctrPeriod='week', _ctrShown={}, _ctrLoading=false;
+try{ const p=localStorage.getItem('tce_ctr_period'); if(p) _ctrPeriod=p; }catch(e){}
+const LS={get:k=>{try{return localStorage.getItem(k);}catch(e){return null;}},set:(k,v)=>{try{localStorage.setItem(k,v);}catch(e){}}};
+
+async function ctrPaged(path){
+  const out=[]; const PAGE=1000;
+  for(let pg=0; pg<100; pg++){
+    const r=await fetch(SB_URL+'/rest/v1/'+path+'&limit='+PAGE+'&offset='+(pg*PAGE),{headers:H()});
+    if(!r.ok) throw new Error(path.split('?')[0]+' '+r.status);
+    const rows=await r.json(); out.push(...rows);
+    if(rows.length<PAGE) break;
+  }
+  return out;
+}
+const soft=p=>p.catch(()=>[]);   // the extras must never stop the three main counters
+
+async function ctrFetch(){
+  const confSel='id,session_id,created_at,jid:panel->>jobId,label:panel->>label,L:panel->>origL,W:panel->>origW,'
+    +'eb:panel->eb,si:panel->>sheetIdx,sn:panel->>sheetName,x:panel->>x,y:panel->>y,role:panel->>_lamRole';
+  const [conf,lay,scr,offs,boards]=await Promise.all([
+    ctrPaged('tce_cut_events?select='+confSel+'&action=eq.confirm&order=id.asc'),
+    soft(ctrPaged('tce_cut_events?select=id,session_id,created_at,si:panel->>sheetIdx,sn:panel->>sheetName,fL:panel->>fullL,fW:panel->>fullW,pl:panel->placements&action=eq.sheet_layout&order=id.asc')),
+    soft(ctrPaged('tce_cut_events?select=id,action,created_at,sid:panel->>scrapId,undoes:panel->>undoes&action=in.(scrap,unscrap)&order=id.asc')),
+    soft(ctrPaged('tce_library?select=id,name,l,w,used_at&is_offcut=eq.true&status=eq.used&order=id.asc')),
+    soft(ctrPaged('tce_library?select=name,l,w,cost&is_offcut=eq.false&order=id.asc'))
+  ]);
+  return {conf,lay,scr,offs,boards};
+}
+
+const dayKey=t=>{ const d=new Date(t); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
+const weekStart=t=>{ const d=new Date(t); d.setHours(0,0,0,0); d.setDate(d.getDate()-((d.getDay()+6)%7)); return d.getTime(); };
+
+function ctrBuild(raw){
+  // Confirmed panels, de-duplicated
+  const seen=new Set(), ev=[], sheetFirst=new Map();
+  raw.conf.forEach(e=>{
+    const job=e.jid||e.session_id||'';
+    const k=job+'|'+e.si+'|'+Math.round(+e.x||0)+'|'+Math.round(+e.y||0)+'|'+(e.label||'')+'|'+Math.round(+e.L||0)+'x'+Math.round(+e.W||0);
+    if(seen.has(k)) return; seen.add(k);
+    const t=new Date(e.created_at).getTime(); if(!t) return;
+    const L=+e.L||0, W=+e.W||0;
+    let eb=e.eb; if(typeof eb==='string'){ try{eb=JSON.parse(eb);}catch(x){eb=null;} }
+    let ebMm=0; if(eb){ if(eb.L1)ebMm+=L; if(eb.L2)ebMm+=L; if(eb.W1)ebMm+=W; if(eb.W2)ebMm+=W; }
+    const lamHalf=e.role==='lam';                    // second piece of a glued pair
+    ev.push({t, p:lamHalf?0:1, eb:ebMm/1000, a:lamHalf?0:L*W/1e6});
+    if(e.si!=null){
+      const sk=job+'|'+(e.sn||'')+'|'+e.si;
+      const f=sheetFirst.get(sk); if(!f||t<f.t) sheetFirst.set(sk,{t,sess:e.session_id||'',si:String(e.si),sn:e.sn||''});
+    }
+  });
+  ev.sort((a,b)=>a.t-b.t);
+  // Each sheet's size and nest — the latest layout published for it
+  const lay=new Map();
+  (raw.lay||[]).forEach(l=>{
+    let pl=l.pl; if(typeof pl==='string'){ try{pl=JSON.parse(pl);}catch(x){pl=null;} }
+    const area=(+l.fL||0)*(+l.fW||0); if(!area||!Array.isArray(pl)) return;
+    const used=pl.reduce((s,p)=>s+(+p.w||0)*(+p.h||0),0);
+    lay.set((l.session_id||'')+'|'+l.si+'|'+(l.sn||''),{area,used:Math.min(used,area)});
+  });
+  const sheets=[...sheetFirst.values()].map(s=>{ const ly=lay.get(s.sess+'|'+s.si+'|'+s.sn); return {t:s.t, area:ly?ly.area:0, used:ly?ly.used:0}; });
+  // Scraps that were not taken back
+  const undone=new Set((raw.scr||[]).filter(s=>s.action==='unscrap'&&s.undoes).map(s=>s.undoes));
+  const scraps=(raw.scr||[]).filter(s=>s.action==='scrap'&&!undone.has(s.sid)).map(s=>({t:new Date(s.created_at).getTime()}));
+  // Offcuts used up, valued at the matching full board's cost per m²
+  const norm=s=>String(s||'').toLowerCase().replace(/\s+/g,' ').trim();
+  const bmap=new Map(); (raw.boards||[]).forEach(b=>{ const L=+b.l||0,W=+b.w||0,c=+b.cost||0; if(L&&W&&c&&!bmap.has(norm(b.name))) bmap.set(norm(b.name),c/(L*W)); });
+  const offs=(raw.offs||[]).filter(o=>o.used_at).map(o=>{
+    const n=norm(o.name); let rate=bmap.get(n);
+    if(rate==null){ for(const [k,v] of bmap){ if(k&&(n.startsWith(k)||k.startsWith(n))){ rate=v; break; } } }
+    return {t:new Date(o.used_at).getTime(), v:rate!=null?rate*(+o.l||0)*(+o.w||0):0, priced:rate!=null};
+  });
+  // Day-by-day totals, for the mini charts and records
+  const days=new Map(), weeks=new Map();
+  const bump=(m,k,f,v)=>{ const o=m.get(k)||{sheets:0,panels:0,eb:0}; o[f]+=v; m.set(k,o); };
+  ev.forEach(e=>{ bump(days,dayKey(e.t),'panels',e.p); bump(days,dayKey(e.t),'eb',e.eb); bump(weeks,weekStart(e.t),'panels',e.p); bump(weeks,weekStart(e.t),'eb',e.eb); });
+  sheets.forEach(s=>{ bump(days,dayKey(s.t),'sheets',1); bump(weeks,weekStart(s.t),'sheets',1); });
+  return {ev,sheets,scraps,offs,days,weeks};
+}
+
+function ctrRange(a,b){
+  const inR=t=>t>=a&&t<b;
+  let panels=0,eb=0,area=0,active=0,prev=null;
+  D.ev.forEach(e=>{ if(!inR(e.t)) return; panels+=e.p; eb+=e.eb; area+=e.a;
+    if(prev!=null&&e.t-prev<=GAP) active+=e.t-prev; prev=e.t; });
+  let sheets=0,sa=0,su=0; D.sheets.forEach(s=>{ if(inR(s.t)){ sheets++; sa+=s.area; su+=s.used; } });
+  const scraps=D.scraps.filter(s=>inR(s.t)).length;
+  let offN=0,offV=0,offP=0; D.offs.forEach(o=>{ if(inR(o.t)){ offN++; offV+=o.v; if(o.priced)offP++; } });
+  return {sheets,panels,eb:Math.round(eb),area,yield:sa?su/sa:null,scraps,offN,offV,offP,activeH:active/3600000};
+}
+
+// Current period, and the same stretch of the period before ("this time last week")
+function ctrBounds(p){
+  const now=Date.now(), d=new Date(); d.setHours(0,0,0,0);
+  if(p==='all') return {a:0,b:now,pa:null,pb:null};
+  if(p==='today'){ const a=d.getTime(); return {a,b:now,pa:a-DAY,pb:now-DAY}; }
+  if(p==='week'){ const a=weekStart(now); return {a,b:now,pa:a-7*DAY,pb:now-7*DAY}; }
+  if(p==='month'){ const a=new Date(d.getFullYear(),d.getMonth(),1).getTime(), pa=new Date(d.getFullYear(),d.getMonth()-1,1).getTime(); return {a,b:now,pa,pb:Math.min(pa+(now-a),a)}; }
+  const a=new Date(d.getFullYear(),0,1).getTime(), pa=new Date(d.getFullYear()-1,0,1).getTime();
+  return {a,b:now,pa,pb:Math.min(pa+(now-a),a)};
+}
+const CMP_WORDS={today:'this time yesterday',week:'this time last week',month:'this point last month',year:'this point last year'};
+
+// Rolling odometer: one drum per digit, each drum spins to its number.
+function odoSet(id,val,unit){
+  const el=$(id); if(!el) return; const s=Number(val).toLocaleString('en-GB');
+  const sig=s.replace(/\d/g,'9')+'|'+(unit||'');
+  if(el.dataset.sig!==sig){
+    el.innerHTML=[...s].map(ch=>/\d/.test(ch)
+      ?'<span class="d"><span>'+[0,1,2,3,4,5,6,7,8,9].map(n=>'<i>'+n+'</i>').join('')+'</span></span>'
+      :'<span class="sep">'+ch+'</span>').join('')+(unit?'<span class="unit">'+unit+'</span>':'');
+    el.dataset.sig=sig;
+    el.offsetHeight;   // let the drums sit at 0 first, so a new layout still rolls up
+  }
+  const digits=[...s].filter(ch=>/\d/.test(ch));
+  el.querySelectorAll('.d > span').forEach((drum,i)=>{
+    drum.style.transitionDelay=(i*70)+'ms';
+    drum.style.transform='translateY(-'+(Number(digits[i])*10)+'%)';
+  });
+}
+
+const n0=n=>Math.round(n).toLocaleString('en-GB');
+const fmt1=n=>n<10?n.toFixed(1):n0(n);
+const shortDate=k=>{ const d=new Date(typeof k==='number'?k:k+'T12:00'); return d.toLocaleDateString('en-GB',{day:'numeric',month:'short'}); };
+function funSheets(n){
+  if(!n) return 'Saw\'s waiting…';
+  const h=n*0.018;   // stacked flat at 18mm
+  if(h<1)   return 'Stacked flat: <b>'+Math.round(h*100)+' cm</b> of board';
+  if(h<4.4) return 'Stacked flat: <b>'+fmt1(h)+' m</b> high';
+  return 'Stacked flat: <b>'+fmt1(h)+' m</b> — taller than <b>'+fmt1(h/4.4)+'</b> double-decker'+(h/4.4>=1.05?'s':'');
+}
+function funPanels(n,area){ return n?'<b>'+fmt1(area)+' m²</b> of finished panels':'Nothing confirmed yet'; }
+function funEb(m){
+  if(!m) return 'No edging run yet';
+  if(m<100)  return '<b>'+Math.round(m)+'%</b> of a rugby pitch, try line to try line';
+  if(m<2250) return '<b>'+fmt1(m/100)+'</b> rugby pitches end to end';
+  return '<b>'+fmt1(m/2250)+'×</b> across the Tay Road Bridge';
+}
+function cmpSet(id,now,prev,words){
+  const el=$(id); if(!el) return;
+  el.className='cc-cmp'; el.textContent=''; el.title='';
+  if(prev==null) return;
+  el.title='Compared with '+words+' ('+n0(prev)+')';
+  if(!prev&&!now) return;
+  if(!prev){ el.textContent='▲ new'; el.classList.add('up'); return; }
+  const pc=Math.round((now-prev)/prev*100);
+  if(pc===0){ el.textContent='= same'; return; }
+  el.textContent=(pc>0?'▲ ':'▼ ')+Math.abs(pc)+'%'; el.classList.add(pc>0?'up':'down');
+}
+function sparkSet(id,metric){
+  const el=$(id); if(!el) return; const vals=[];
+  for(let i=13;i>=0;i--){ const k=dayKey(Date.now()-i*DAY); vals.push({k,v:(D.days.get(k)||{})[metric]||0}); }
+  const mx=Math.max(1,...vals.map(x=>x.v));
+  el.innerHTML=vals.map((x,i)=>'<i class="'+(i===13?'today':'')+'" style="height:'+Math.max(6,x.v/mx*100)+'%" title="'+shortDate(x.k)+': '+n0(x.v)+'"></i>').join('');
+}
+function confetti(){
+  const cols=['#d4820a','#f0b040','#4fd18b','#f0eeea','#2a8a5a'];
+  for(let i=0;i<90;i++){ const c=document.createElement('i'); c.className='cf';
+    c.style.left=Math.random()*100+'vw'; c.style.background=cols[i%cols.length];
+    c.style.animationDuration=(2.2+Math.random()*2)+'s'; c.style.animationDelay=(Math.random()*.6)+'s';
+    c.style.transform='rotate('+Math.random()*360+'deg)';
+    document.body.appendChild(c); setTimeout(()=>c.remove(),5200); }
+}
+
+// Milestones on the all-time totals (baseline included)
+function msSet(k,total,unit,word){
+  const nxt=MILESTONES.find(m=>m>total)||total, prv=[...MILESTONES].reverse().find(m=>m<=total)||0;
+  $('msb-'+k).style.width=(nxt>prv?Math.min(100,(total-prv)/(nxt-prv)*100):100)+'%';
+  $('mst-'+k).textContent='🎯 '+n0(nxt-total)+(unit?' '+unit:'')+' to '+n0(nxt)+(unit?' '+unit:' '+word);
+  // Celebrate crossing one — once, on whichever device sees it first after it happens
+  const key='tce_ms_'+k, last=+LS.get(key)||0;
+  if(LS.get(key)==null){ LS.set(key,prv); return null; }
+  if(prv>last){ LS.set(key,prv); LS.set(key+'_day',dayKey(Date.now())+'|'+prv); return prv; }
+  const t=String(LS.get(key+'_day')||'').split('|');
+  return t[0]===dayKey(Date.now())?+t[1]:null;   // keep the chip up for the rest of the day
+}
+
+function recordsRender(milestoneHits){
+  const today=dayKey(Date.now()), chips=[];
+  milestoneHits.forEach(h=>chips.push('<span class="chip new">🎉 Passed '+n0(h.v)+(h.k==='eb'?' m of edging':h.k==='sheets'?' sheets':' panels')+'!</span>'));
+  const labels={sheets:['sheets',''],panels:['panels',''],eb:['m','of edging']};
+  ['sheets','panels','eb'].forEach(k=>{
+    let best=0,bestK=null;
+    D.days.forEach((v,dk)=>{ if(dk!==today&&v[k]>best){ best=v[k]; bestK=dk; } });
+    const td=Math.round((D.days.get(today)||{})[k]||0);
+    if(best>0 && td>best){
+      chips.unshift('<span class="chip new">🎉 New record today — '+n0(td)+' '+labels[k][0]+'!</span>');
+      const ck='tce_rec_'+k; if(LS.get(ck)!==today){ LS.set(ck,today); confetti(); }
+    } else if(bestK){
+      chips.push('<span class="chip">🏆 Best day <b>'+n0(best)+'</b> '+labels[k][0]+' · '+shortDate(bestK)+'</span>');
+    }
+  });
+  let bw=0,bwK=null; D.weeks.forEach((v,wk)=>{ if(v.sheets>bw){ bw=v.sheets; bwK=wk; } });
+  if(bwK) chips.push('<span class="chip">📅 Best week <b>'+n0(bw)+'</b> sheets · w/c '+shortDate(bwK)+'</span>');
+  $('rec').innerHTML=chips.join('');
+}
+
+function statSet(id,v,m,cls){ const el=$(id); el.className='cs'+(cls?' '+cls:''); el.querySelector('.v').textContent=v; el.querySelector('.m').innerHTML=m; }
+
+function ctrRender(fromZero){
+  if(!D) return;
+  const B=ctrBounds(_ctrPeriod), cur=ctrRange(B.a,B.b), prev=B.pa!=null?ctrRange(B.pa,B.pb):null;
+  if(_ctrPeriod==='all'){ cur.sheets+=CTR_BASELINE.sheets; cur.panels+=CTR_BASELINE.panels; cur.eb+=CTR_BASELINE.eb; }
+  if(fromZero) ['odo-sheets','odo-panels','odo-eb'].forEach(id=>{ $(id).dataset.sig=''; });
+  [['sheets',''],['panels',''],['eb','m']].forEach(([k,u])=>{
+    const v=cur[k], sk=_ctrPeriod+k;
+    if(!fromZero && _ctrShown[sk]!=null && v>_ctrShown[sk]){ const c=$('cc-'+k); c.classList.add('bump'); setTimeout(()=>c.classList.remove('bump'),2200); }
+    _ctrShown[sk]=v; odoSet('odo-'+k,v,u);
+    cmpSet('cmp-'+k,v,prev?prev[k]:null,CMP_WORDS[_ctrPeriod]);
+    sparkSet('sp-'+k,k);
+  });
+  $('fun-sheets').innerHTML=funSheets(cur.sheets);
+  $('fun-panels').innerHTML=funPanels(cur.panels,cur.area);
+  $('fun-eb').innerHTML=funEb(cur.eb);
+  // Second row
+  if(cur.yield==null) statSet('cs-yield','–','no sheet layouts logged','');
+  else { const y=cur.yield*100; statSet('cs-yield',y.toFixed(1)+'%','board used as panels',y>=85?'good':y>=75?'warn':'bad'); }
+  statSet('cs-off',n0(cur.offN), cur.offV>0?'≈ <b>£'+n0(cur.offV)+'</b> of board saved':(cur.offN?'board price not matched':'none used'), cur.offN?'good':'');
+  const sp=cur.panels?cur.scraps/cur.panels*100:0;
+  statSet('cs-scrap',n0(cur.scraps), cur.panels?sp.toFixed(1)+'% of panels cut':'&nbsp;', !cur.scraps?'good':sp<1?'good':sp<3?'warn':'bad');
+  statSet('cs-rate', cur.activeH>=0.25?n0(cur.panels/cur.activeH):'–', cur.activeH>=0.25?fmt1(cur.activeH)+' h on the saw':'not enough saw time yet','');
+  // All-time totals → milestones
+  const all=ctrRange(0,Date.now()+1), hits=[];
+  [['sheets',all.sheets+CTR_BASELINE.sheets,'','sheets'],['panels',all.panels+CTR_BASELINE.panels,'','panels'],['eb',all.eb+CTR_BASELINE.eb,'m','']].forEach(([k,t,u,w])=>{
+    const h=msSet(k,t,u,w); if(h) hits.push({k,v:h}); });
+  if(hits.some(h=>LS.get('tce_ms_'+h.k+'_fired')!==dayKey(Date.now())+'|'+h.v)){ hits.forEach(h=>LS.set('tce_ms_'+h.k+'_fired',dayKey(Date.now())+'|'+h.v)); confetti(); }
+  recordsRender(hits);
+  const lbl={today:'today',week:'since Monday',month:'this month',year:'this year',all:'since the cut log started'+(CTR_BASELINE.panels?' (plus earlier work)':'')}[_ctrPeriod];
+  $('ctr-note').textContent='From the saw\'s cut log, '+lbl+(prev?' · arrows compare with '+CMP_WORDS[_ctrPeriod]:'')+' · updated '+new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+  if(!$('bigscreen').classList.contains('hidden')) bigRender(false);
+}
+
+async function loadCounters(){
+  if(_ctrLoading) return; _ctrLoading=true;
+  const first=!D;
+  if(first) ['odo-sheets','odo-panels','odo-eb'].forEach((id,i)=>odoSet(id,0,i===2?'m':''));
+  try{ D=ctrBuild(await ctrFetch()); ctrRender(first); }
+  catch(e){ if(first) $('ctr-note').textContent='Couldn\'t reach the cut log just now — will try again shortly.'; }
+  _ctrLoading=false;
+}
+
+document.querySelectorAll('#ctr-tabs button').forEach(b=>{
+  b.classList.toggle('on',b.dataset.p===_ctrPeriod);
+  b.onclick=()=>{
+    _ctrPeriod=b.dataset.p; LS.set('tce_ctr_period',_ctrPeriod);
+    document.querySelectorAll('#ctr-tabs button').forEach(x=>x.classList.toggle('on',x===b));
+    ctrRender(true);
+  };
+});
+
+// ── Big screen: today's numbers, huge, for the monitor at the outfeed ──
+let _bigTimer=null, _bigWake=null, _bigShown={};
+function bigRender(fromZero){
+  if(!D) return;
+  const B=ctrBounds('today'), cur=ctrRange(B.a,B.b), prev=ctrRange(B.pa,B.pb), wk=ctrRange(weekStart(Date.now()),Date.now()+1);
+  if(fromZero) ['bodo-sheets','bodo-panels','bodo-eb'].forEach(id=>{ $(id).dataset.sig=''; });
+  [['sheets',''],['panels',''],['eb','m']].forEach(([k,u])=>{
+    if(!fromZero && _bigShown[k]!=null && cur[k]>_bigShown[k]){ const c=$('bs-'+k); c.classList.add('bump'); setTimeout(()=>c.classList.remove('bump'),2500); }
+    _bigShown[k]=cur[k]; odoSet('bodo-'+k,cur[k],u);
+    const d=cur[k]-prev[k];
+    $('bsx-'+k).textContent=prev[k]||cur[k] ? (d>=0?'▲ ':'▼ ')+n0(Math.abs(d))+(u?' '+u:'')+' vs this time yesterday' : '';
+    $('bsw-'+k).textContent=n0(wk[k])+(u?' m':'');
+  });
+  $('bs-clock').textContent=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+}
+async function bigOpen(){
+  $('bigscreen').classList.remove('hidden');
+  ['bodo-sheets','bodo-panels','bodo-eb'].forEach((id,i)=>odoSet(id,0,i===2?'m':''));
+  setTimeout(()=>bigRender(true),60);
+  try{ await document.documentElement.requestFullscreen(); }catch(e){}
+  try{ _bigWake=await navigator.wakeLock.request('screen'); }catch(e){}   // keep the monitor awake
+  clearInterval(_bigTimer); _bigTimer=setInterval(loadCounters,60000);
+}
+function bigClose(){
+  $('bigscreen').classList.add('hidden');
+  clearInterval(_bigTimer); _bigTimer=null;
+  try{ if(document.fullscreenElement) document.exitFullscreen(); }catch(e){}
+  try{ _bigWake&&_bigWake.release(); }catch(e){} _bigWake=null;
+}
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!$('bigscreen').classList.contains('hidden')) bigClose(); });
 init();
 </script>
 </body>
