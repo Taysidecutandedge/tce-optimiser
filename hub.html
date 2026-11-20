@@ -167,7 +167,7 @@ input:focus{outline:none;border-color:var(--acc)}
       </div>
       <div class="ctr-grid">
         <div class="cc sheets" id="cc-sheets">
-          <div class="cc-top"><span class="cc-ico">🪵</span>Sheets cut<span class="cc-cmp" id="cmp-sheets"></span></div>
+          <div class="cc-top"><span class="cc-ico">🪵</span>Full sheets cut<span class="cc-cmp" id="cmp-sheets"></span></div>
           <div class="odo" id="odo-sheets"></div>
           <div class="cc-fun" id="fun-sheets">&nbsp;</div>
           <div class="spark" id="sp-sheets"></div><div class="spark-l"><span>14 days ago</span><span>today</span></div>
@@ -190,7 +190,7 @@ input:focus{outline:none;border-color:var(--acc)}
       </div>
       <div class="ctr-row">
         <div class="cs" id="cs-yield"><div class="v">–</div><div class="l">sheet yield</div><div class="m">board used as panels</div></div>
-        <div class="cs" id="cs-off"><div class="v">–</div><div class="l">offcuts reused</div><div class="m">&nbsp;</div></div>
+        <div class="cs" id="cs-off"><div class="v">–</div><div class="l">offcuts cut up</div><div class="m">&nbsp;</div></div>
         <div class="cs" id="cs-scrap"><div class="v">–</div><div class="l">panels scrapped</div><div class="m">&nbsp;</div></div>
         <div class="cs" id="cs-rate"><div class="v">–</div><div class="l">panels per hour</div><div class="m">time on the saw</div></div>
       </div>
@@ -201,7 +201,7 @@ input:focus{outline:none;border-color:var(--acc)}
     <div id="bigscreen" class="hidden" onclick="bigClose()">
       <div class="bs-h">🪵 Tayside Cut &amp; Edge · Today off the saw <span class="r" id="bs-clock"></span></div>
       <div class="bs-grid">
-        <div class="bs-c" id="bs-sheets"><span class="bs-ico">🪵</span><div class="bs-l">Sheets cut<small id="bsx-sheets"></small></div><div class="odo" id="bodo-sheets" style="color:#f0b040"></div><div class="bs-wk">this week<b id="bsw-sheets">–</b></div></div>
+        <div class="bs-c" id="bs-sheets"><span class="bs-ico">🪵</span><div class="bs-l">Full sheets<small id="bsx-sheets"></small></div><div class="odo" id="bodo-sheets" style="color:#f0b040"></div><div class="bs-wk">this week<b id="bsw-sheets">–</b></div></div>
         <div class="bs-c" id="bs-panels"><span class="bs-ico">🧱</span><div class="bs-l">Panels made<small id="bsx-panels"></small></div><div class="odo" id="bodo-panels"></div><div class="bs-wk">this week<b id="bsw-panels">–</b></div></div>
         <div class="bs-c" id="bs-eb"><span class="bs-ico">🎗️</span><div class="bs-l">Edgebanding<small id="bsx-eb"></small></div><div class="odo" id="bodo-eb" style="color:#4fd18b"></div><div class="bs-wk">this week<b id="bsw-eb">–</b></div></div>
       </div>
@@ -333,14 +333,17 @@ async function loadStats(){
 //   tce_library     offcuts marked used (with used_at), and full-board costs for £ values
 // Rules:
 //   Panels made  = confirmed panels. A double-tap counts once; a laminated pair counts once.
-//   Sheets cut   = different sheets with at least one confirmed panel, counted on the day the
-//                  first panel came off it (offcuts used as a sheet count too).
+//   Sheets cut   = different FULL boards with at least one confirmed panel, counted on the day
+//                  the first panel came off it. Offcuts are counted separately ("offcuts cut up").
 //   Edgebanding  = edged sides of confirmed panels on cut size (origL/origW) — same as the
 //                  optimiser's EB totals.
 
 // Work done BEFORE the cut log existed. Put rough figures here and "All time" and the
 // milestones include them. Leave at 0 to count only what the saw has logged.
 const CTR_BASELINE={sheets:0, panels:0, eb:0};
+
+// Cut-log sessions that were test runs, not real cutting
+const TEST_SESSION=/^(test-session|lam-test\d*|lam-q|pair)$/i;
 
 const MILESTONES=[100,250,500,1000,2500,5000,10000,25000,50000,100000,250000,500000,1000000,2500000];
 const DAY=86400000, GAP=15*60000;   // gaps over 15 min between confirms = not on the saw
@@ -365,14 +368,14 @@ const soft=p=>p.catch(()=>[]);   // the extras must never stop the three main co
 async function ctrFetch(){
   const confSel='id,session_id,created_at,jid:panel->>jobId,label:panel->>label,L:panel->>origL,W:panel->>origW,'
     +'eb:panel->eb,si:panel->>sheetIdx,sn:panel->>sheetName,x:panel->>x,y:panel->>y,role:panel->>_lamRole';
-  const [conf,lay,scr,offs,boards]=await Promise.all([
+  const [conf,lay,scr,boards,jobs]=await Promise.all([
     ctrPaged('tce_cut_events?select='+confSel+'&action=eq.confirm&order=id.asc'),
     soft(ctrPaged('tce_cut_events?select=id,session_id,created_at,si:panel->>sheetIdx,sn:panel->>sheetName,fL:panel->>fullL,fW:panel->>fullW,pl:panel->placements&action=eq.sheet_layout&order=id.asc')),
     soft(ctrPaged('tce_cut_events?select=id,action,created_at,sid:panel->>scrapId,undoes:panel->>undoes&action=in.(scrap,unscrap)&order=id.asc')),
-    soft(ctrPaged('tce_library?select=id,name,l,w,used_at&is_offcut=eq.true&status=eq.used&order=id.asc')),
-    soft(ctrPaged('tce_library?select=name,l,w,cost&is_offcut=eq.false&order=id.asc'))
+    soft(ctrPaged('tce_library?select=name,l,w,cost&is_offcut=eq.false&order=id.asc')),
+    soft(ctrPaged('tce_jobs?select=id,job_name,status,completed_at,invoiced_at,saved_at,job_data&status=in.(complete,ready_to_invoice,invoiced,part_invoiced,part_paid,paid)&order=id.asc'))
   ]);
-  return {conf,lay,scr,offs,boards};
+  return {conf,lay,scr,boards,jobs};
 }
 
 const dayKey=t=>{ const d=new Date(t); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
@@ -381,7 +384,9 @@ const weekStart=t=>{ const d=new Date(t); d.setHours(0,0,0,0); d.setDate(d.getDa
 function ctrBuild(raw){
   // Confirmed panels, de-duplicated
   const seen=new Set(), ev=[], sheetFirst=new Map();
+  const sessName=sid=>String(sid||'').replace(/-\d{10,}$/,'');
   raw.conf.forEach(e=>{
+    if(TEST_SESSION.test(sessName(e.session_id))) return;   // test runs, not real cutting
     const job=e.jid||e.session_id||'';
     const k=job+'|'+e.si+'|'+Math.round(+e.x||0)+'|'+Math.round(+e.y||0)+'|'+(e.label||'')+'|'+Math.round(+e.L||0)+'x'+Math.round(+e.W||0);
     if(seen.has(k)) return; seen.add(k);
@@ -396,6 +401,33 @@ function ctrBuild(raw){
       const f=sheetFirst.get(sk); if(!f||t<f.t) sheetFirst.set(sk,{t,sess:e.session_id||'',si:String(e.si),sn:e.sn||''});
     }
   });
+  // Jobs invoiced or paid that were NEVER confirmed at the saw (cut before the cut log
+  // started on 10 June 2026, or cut without pressing Confirm) are counted from their saved
+  // cut plan. "Never confirmed" means no version of the job is in the cut log — matched by
+  // job number, or by name with any "— Rev N" ending removed — so a revision that was
+  // confirmed at the saw is never counted twice. A job saved twice under one name counts once.
+  const baseName=n=>String(n||'').toLowerCase().replace(/\s+/g,' ').replace(/\s*[—–-]\s*rev\b.*$/,'').trim();
+  const loggedIds=new Set(), loggedNames=new Set();
+  raw.conf.forEach(e=>{ if(e.jid) loggedIds.add(String(e.jid)); loggedNames.add(baseName(sessName(e.session_id))); });
+  const planDone=new Set(), plan=[];
+  (raw.jobs||[]).forEach(j=>{
+    const bn=baseName(j.job_name);
+    if(loggedIds.has(String(j.id)) || loggedNames.has(bn) || planDone.has(bn)) return;
+    let d=j.job_data; if(typeof d==='string'){ try{d=JSON.parse(d);}catch(x){d=null;} } if(!d) return;
+    const t=new Date(j.completed_at||j.invoiced_at||j.saved_at).getTime(); if(!t) return;
+    planDone.add(bn);
+    let pn=0, ebMm=0, a=0;
+    (d.parts||[]).forEach(p=>{ const q=+p.qty||1, L=+p.l||0, W=+p.w||0, e=p.eb||{};
+      pn+=q; a+=q*L*W; ebMm+=q*((e.L1?L:0)+(e.L2?L:0)+(e.W1?W:0)+(e.W2?W:0)); });
+    ev.push({t, p:pn, eb:ebMm/1000, a:a/1e6, plan:true});
+    ((d.lastResult&&d.lastResult.sheets)||[]).forEach((sh,i)=>{
+      if(sh.placements && !sh.placements.length) return;
+      const big=Math.max(+sh.fullL||0,+sh.fullW||0), sm=Math.min(+sh.fullL||0,+sh.fullW||0);
+      const off=!!sh._isOffcut || (big>0 && !(big>=2400 && sm>=1200));
+      sheetFirst.set('plan|'+j.id+'|'+i,{t,sess:'',si:'',sn:sh.name||'',plan:true,off});
+    });
+    plan.push(j.job_name);
+  });
   ev.sort((a,b)=>a.t-b.t);
   // Each sheet's size and nest — the latest layout published for it
   const lay=new Map();
@@ -403,37 +435,47 @@ function ctrBuild(raw){
     let pl=l.pl; if(typeof pl==='string'){ try{pl=JSON.parse(pl);}catch(x){pl=null;} }
     const area=(+l.fL||0)*(+l.fW||0); if(!area||!Array.isArray(pl)) return;
     const used=pl.reduce((s,p)=>s+(+p.w||0)*(+p.h||0),0);
-    lay.set((l.session_id||'')+'|'+l.si+'|'+(l.sn||''),{area,used:Math.min(used,area)});
+    lay.set((l.session_id||'')+'|'+l.si+'|'+(l.sn||''),{area,used:Math.min(used,area),big:Math.max(+l.fL,+l.fW),small:Math.min(+l.fL,+l.fW)});
   });
-  const sheets=[...sheetFirst.values()].map(s=>{ const ly=lay.get(s.sess+'|'+s.si+'|'+s.sn); return {t:s.t, area:ly?ly.area:0, used:ly?ly.used:0}; });
+  // Board cost per mm², from the full boards in stock, to put a £ value on offcuts used
+  const norm=s=>String(s||'').toLowerCase().replace(/\s+/g,' ').trim();
+  const bmap=new Map(); (raw.boards||[]).forEach(b=>{ const L=+b.l||0,W=+b.w||0,c=+b.cost||0; if(L&&W&&c&&!bmap.has(norm(b.name))) bmap.set(norm(b.name),c/(L*W)); });
+  const rateFor=name=>{ const n=norm(name); if(bmap.has(n)) return bmap.get(n);
+    for(const [k,v] of bmap){ if(k&&(n.startsWith(k)||k.startsWith(n))) return v; } return null; };
+  // A sheet is an OFFCUT when its logged size is smaller than a full board (2400×1200 or
+  // bigger either way round). Sheets with no logged size — everything before sizes started
+  // being logged in Aug 2026 — count as full boards.
+  const sheets=[...sheetFirst.values()].map(s=>{
+    const ly=lay.get(s.sess+'|'+s.si+'|'+s.sn);
+    const off=s.plan ? !!s.off : (!!ly && !(ly.big>=2400 && ly.small>=1200));
+    const rate=(off&&ly)?rateFor(s.sn):null;
+    return {t:s.t, off, area:ly?ly.area:0, used:ly?ly.used:0, v:rate!=null?rate*ly.area:0, priced:rate!=null};
+  });
   // Scraps that were not taken back
   const undone=new Set((raw.scr||[]).filter(s=>s.action==='unscrap'&&s.undoes).map(s=>s.undoes));
   const scraps=(raw.scr||[]).filter(s=>s.action==='scrap'&&!undone.has(s.sid)).map(s=>({t:new Date(s.created_at).getTime()}));
-  // Offcuts used up, valued at the matching full board's cost per m²
-  const norm=s=>String(s||'').toLowerCase().replace(/\s+/g,' ').trim();
-  const bmap=new Map(); (raw.boards||[]).forEach(b=>{ const L=+b.l||0,W=+b.w||0,c=+b.cost||0; if(L&&W&&c&&!bmap.has(norm(b.name))) bmap.set(norm(b.name),c/(L*W)); });
-  const offs=(raw.offs||[]).filter(o=>o.used_at).map(o=>{
-    const n=norm(o.name); let rate=bmap.get(n);
-    if(rate==null){ for(const [k,v] of bmap){ if(k&&(n.startsWith(k)||k.startsWith(n))){ rate=v; break; } } }
-    return {t:new Date(o.used_at).getTime(), v:rate!=null?rate*(+o.l||0)*(+o.w||0):0, priced:rate!=null};
-  });
   // Day-by-day totals, for the mini charts and records
   const days=new Map(), weeks=new Map();
   const bump=(m,k,f,v)=>{ const o=m.get(k)||{sheets:0,panels:0,eb:0}; o[f]+=v; m.set(k,o); };
   ev.forEach(e=>{ bump(days,dayKey(e.t),'panels',e.p); bump(days,dayKey(e.t),'eb',e.eb); bump(weeks,weekStart(e.t),'panels',e.p); bump(weeks,weekStart(e.t),'eb',e.eb); });
-  sheets.forEach(s=>{ bump(days,dayKey(s.t),'sheets',1); bump(weeks,weekStart(s.t),'sheets',1); });
-  return {ev,sheets,scraps,offs,days,weeks};
+  sheets.forEach(s=>{ if(s.off) return; bump(days,dayKey(s.t),'sheets',1); bump(weeks,weekStart(s.t),'sheets',1); });
+  return {ev,sheets,scraps,days,weeks,plan};
 }
 
 function ctrRange(a,b){
   const inR=t=>t>=a&&t<b;
   let panels=0,eb=0,area=0,active=0,prev=null;
+  let sawPanels=0;
   D.ev.forEach(e=>{ if(!inR(e.t)) return; panels+=e.p; eb+=e.eb; area+=e.a;
-    if(prev!=null&&e.t-prev<=GAP) active+=e.t-prev; prev=e.t; });
-  let sheets=0,sa=0,su=0; D.sheets.forEach(s=>{ if(inR(s.t)){ sheets++; sa+=s.area; su+=s.used; } });
+    if(e.plan) return;   // jobs counted from a saved plan have no saw times
+    sawPanels+=e.p; if(prev!=null&&e.t-prev<=GAP) active+=e.t-prev; prev=e.t; });
+  // Full boards and offcuts kept apart: "sheets cut" and yield are full boards only
+  let sheets=0,sa=0,su=0,offN=0,offV=0,offP=0,offA=0;
+  D.sheets.forEach(s=>{ if(!inR(s.t)) return;
+    if(s.off){ offN++; offA+=s.area; offV+=s.v; if(s.priced)offP++; }
+    else { sheets++; sa+=s.area; su+=s.used; } });
   const scraps=D.scraps.filter(s=>inR(s.t)).length;
-  let offN=0,offV=0,offP=0; D.offs.forEach(o=>{ if(inR(o.t)){ offN++; offV+=o.v; if(o.priced)offP++; } });
-  return {sheets,panels,eb:Math.round(eb),area,yield:sa?su/sa:null,scraps,offN,offV,offP,activeH:active/3600000};
+  return {sheets,panels,eb:Math.round(eb),area,yield:sa?su/sa:null,scraps,offN,offV,offP,offA:offA/1e6,activeH:active/3600000,sawPanels};
 }
 
 // Current period, and the same stretch of the period before ("this time last week")
@@ -562,18 +604,18 @@ function ctrRender(fromZero){
   // Second row
   if(cur.yield==null) statSet('cs-yield','–','no sheet layouts logged','');
   else { const y=cur.yield*100; statSet('cs-yield',y.toFixed(1)+'%','board used as panels',y>=85?'good':y>=75?'warn':'bad'); }
-  statSet('cs-off',n0(cur.offN), cur.offV>0?'≈ <b>£'+n0(cur.offV)+'</b> of board saved':(cur.offN?'board price not matched':'none used'), cur.offN?'good':'');
+  statSet('cs-off',n0(cur.offN), cur.offN?'<b>'+fmt1(cur.offA)+' m²</b> of board'+(cur.offN&&cur.offP===cur.offN&&cur.offV>0?' · ≈ £'+n0(cur.offV):''):'none used', cur.offN?'good':'');
   const sp=cur.panels?cur.scraps/cur.panels*100:0;
   statSet('cs-scrap',n0(cur.scraps), cur.panels?sp.toFixed(1)+'% of panels cut':'&nbsp;', !cur.scraps?'good':sp<1?'good':sp<3?'warn':'bad');
-  statSet('cs-rate', cur.activeH>=0.25?n0(cur.panels/cur.activeH):'–', cur.activeH>=0.25?fmt1(cur.activeH)+' h on the saw':'not enough saw time yet','');
+  statSet('cs-rate', cur.activeH>=0.25?n0(cur.sawPanels/cur.activeH):'–', cur.activeH>=0.25?fmt1(cur.activeH)+' h on the saw':'not enough saw time yet','');
   // All-time totals → milestones
   const all=ctrRange(0,Date.now()+1), hits=[];
   [['sheets',all.sheets+CTR_BASELINE.sheets,'','sheets'],['panels',all.panels+CTR_BASELINE.panels,'','panels'],['eb',all.eb+CTR_BASELINE.eb,'m','']].forEach(([k,t,u,w])=>{
     const h=msSet(k,t,u,w); if(h) hits.push({k,v:h}); });
   if(hits.some(h=>LS.get('tce_ms_'+h.k+'_fired')!==dayKey(Date.now())+'|'+h.v)){ hits.forEach(h=>LS.set('tce_ms_'+h.k+'_fired',dayKey(Date.now())+'|'+h.v)); confetti(); }
   recordsRender(hits);
-  const lbl={today:'today',week:'since Monday',month:'this month',year:'this year',all:'since the cut log started'+(CTR_BASELINE.panels?' (plus earlier work)':'')}[_ctrPeriod];
-  $('ctr-note').textContent='From the saw\'s cut log, '+lbl+(prev?' · arrows compare with '+CMP_WORDS[_ctrPeriod]:'')+' · updated '+new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+  const lbl={today:'today',week:'since Monday',month:'this month',year:'this year',all:'all time'}[_ctrPeriod];
+  $('ctr-note').textContent='From the saw\'s cut log'+(D.plan.length?' + '+D.plan.length+' invoiced job'+(D.plan.length>1?'s':'')+' cut without Confirm':'')+', '+lbl+(prev?' · arrows compare with '+CMP_WORDS[_ctrPeriod]:'')+' · updated '+new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
   if(!$('bigscreen').classList.contains('hidden')) bigRender(false);
 }
 
