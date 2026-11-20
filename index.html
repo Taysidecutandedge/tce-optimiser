@@ -717,7 +717,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-11-20-a';
+const TCE_BUILD='2026-11-20-b';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -3181,6 +3181,19 @@ function _calculateInner(opts){
       const f=_finishOf(js.name); if(mFin&&f&&f!==mFin) return false;
       return true;
     });
+    // And the same for thickness, which the LAST pass deliberately strips out before it
+    // compares words — so "18mm Finsa MR MDF" and "22mm Finsa MR MDF" both reduce to
+    // "finsa" and the first board on the job wins whatever it is. On Ross v2 that handed
+    // all 36 of the 18mm Finsa offcuts to the 22mm board, where the caller's thickness
+    // guard then threw every one of them away: the rack was full and the nester saw none.
+    // Only applied when the name states a thickness AND the job actually has a board of it,
+    // so a part named without one, or one asking for a thickness this job doesn't carry,
+    // behaves exactly as before and can still fall through to a near match.
+    const _mThk=parseFloat((String(mn).match(/(\d+(?:\.\d+)?)\s*mm/i)||[])[1]);
+    if(_mThk>0){
+      const _exact=jobSheets.filter(js=>Math.abs((+js.thick||0)-_mThk)<=0.6);
+      if(_exact.length) jobSheets=_exact;
+    }
     try{ return _matchSheetInner(mn); } finally { jobSheets=jobSheetsAll; }
   };
   const _matchSheetInner=mn=>{
