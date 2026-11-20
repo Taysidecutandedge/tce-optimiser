@@ -717,7 +717,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-11-20-d';
+const TCE_BUILD='2026-11-20-e';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -4008,6 +4008,7 @@ function _calculateInner(opts){
     return {tally, unplaced:best.unplaced.length, sheets:best.sheets};
   }
   window._lastUsedOffcuts=Object.values(_usedOff);
+  best.sheets=_fillMargins(best.sheets,kerf);
   _validateNest(best.sheets);
   renderResults(best.sheets,best.unplaced);
 }
@@ -4145,13 +4146,42 @@ function tidySheet(sh,kerf){
   }
 }
 // True only if every panel falls into clean vertical rip-strips (no staggering, no overlaps).
+// Can this sheet be cut by repeated edge-to-edge cuts? A region holding one panel or none
+// is done; otherwise some straight cut must split it with no panel straddling the line, and
+// both halves must be cuttable in turn.
+//
+// The old test understood only two levels: rip the board into columns, crosscut within a
+// column, stop. That is less than the saw does. Rob's own sequence on an oak board is trim
+// the 2440 edge, turn the sheet, crosscut the backs off, then rip what is left once more to
+// free the doors — three levels, and perfectly ordinary. The two-level test called the
+// result uncuttable and the tidy pass threw it away.
+//
+// Checked against every nest in the job history before it went in: 542 sheets, 3,516 panels,
+// same verdict on all but two, and those two are rejected by both tests (genuine staircase
+// layouts that no straight cut separates).
+function _guilOk(ps,x0,y0,x1,y1,depth){
+  depth=depth||0; const tol=1;
+  const inside=ps.filter(p=>p.x+p.w>x0+tol&&p.x<x1-tol&&p.y+p.h>y0+tol&&p.y<y1-tol);
+  if(inside.length<=1) return true;
+  if(depth>40) return false;
+  const xs=[...new Set(inside.flatMap(p=>[p.x,p.x+p.w]))].filter(v=>v>x0+tol&&v<x1-tol).sort((a,b)=>a-b);
+  for(const cx of xs){
+    if(inside.some(p=>p.x<cx-tol&&p.x+p.w>cx+tol)) continue;
+    if(_guilOk(inside,x0,y0,cx,y1,depth+1)&&_guilOk(inside,cx,y0,x1,y1,depth+1)) return true;
+  }
+  const ys=[...new Set(inside.flatMap(p=>[p.y,p.y+p.h]))].filter(v=>v>y0+tol&&v<y1-tol).sort((a,b)=>a-b);
+  for(const cy of ys){
+    if(inside.some(p=>p.y<cy-tol&&p.y+p.h>cy+tol)) continue;
+    if(_guilOk(inside,x0,y0,x1,cy,depth+1)&&_guilOk(inside,x0,cy,x1,y1,depth+1)) return true;
+  }
+  return false;
+}
 function isSheetRippable(sh){
-  const ps=sh.placements||[]; const cols={};
-  ps.forEach(p=>{ const k=Math.round(p.x/2)*2; (cols[k]=cols[k]||[]).push(p); });
-  const cl=Object.values(cols).map(arr=>({x:Math.min(...arr.map(p=>p.x)),w:Math.max(...arr.map(p=>p.w))})).sort((a,b)=>a.x-b.x);
-  for(let i=0;i<cl.length-1;i++){ if(cl[i].x+cl[i].w>cl[i+1].x+1) return false; }
+  const ps=(sh.placements||[]).map(p=>({x:+p.x,y:+p.y,w:+p.w,h:+p.h}));
+  if(ps.length<2) return true;
   for(let i=0;i<ps.length;i++) for(let j=i+1;j<ps.length;j++){ if(_stripOv(ps[i],ps[j])) return false; }
-  return true;
+  const maxX=Math.max(...ps.map(p=>p.x+p.w)), maxY=Math.max(...ps.map(p=>p.y+p.h));
+  return _guilOk(ps,0,0,Math.max(maxX,sh.uw||0)+1,Math.max(maxY,sh.fullL||sh.uh||0)+1,0);
 }
 // Tidy with a built-in safety net: revert the sheet if the result isn't rippable.
 // Two panels on the same piece of board, or a panel hanging off the edge. Either makes the
@@ -4167,6 +4197,75 @@ function _hasOverlapOrOverhang(sh){
   }
   return false;
 }
+// ── Fill the margins ────────────────────────────────────────────────────────
+// A rip strip takes its width from the WIDEST panel in it, so a run of narrower panels
+// further down leaves a margin beside them for the whole length of that run. On Sarah
+// Bradshaw's oak board the three backs set the strip at 1000, the three doors below are
+// 494 wide, and 506 x 1182 sat unused while a fifth board was opened for three panels.
+//
+// The cut order stays orderly, which is the whole point: rip the strip, crosscut above the
+// run, then rip that piece once at the door width — doors down one side, these panels down
+// the other. ONE extra rip for the sheet, not one per panel. An earlier attempt banked a
+// pocket beside each individual panel, which placed doors and sides in alternating bands
+// and needed a separate crosscut for every one of them; that is what made the sheet a mess
+// to cut and why it was pulled.
+//
+// Runs AFTER nesting, so it cannot disturb how the nest was built. It only moves panels off
+// the emptiest sheets into margins on fuller ones, and every move is reverted if the host
+// sheet stops being cuttable.
+function _marginRuns(sh,kerf){
+  const out=[];
+  const cols={}; (sh.placements||[]).forEach(p=>{ const k=Math.round(p.x); (cols[k]=cols[k]||[]).push(p); });
+  Object.keys(cols).forEach(k=>{
+    const c=cols[k].slice().sort((a,b)=>a.y-b.y);
+    const colW=Math.max(...c.map(p=>p.w));
+    let i=0;
+    while(i<c.length){
+      if(c[i].w>=colW-2){ i++; continue; }
+      const runW=c[i].w; let j=i;
+      while(j+1<c.length && Math.abs(c[j+1].w-runW)<=2 && Math.abs(c[j+1].y-(c[j].y+c[j].h+kerf))<=kerf+1) j++;
+      const y0=c[i].y, y1=c[j].y+c[j].h;
+      const free=colW-runW-kerf;
+      if(free>=80 && (y1-y0)>=80) out.push({x:+k+runW+kerf, y:y0, w:free, h:y1-y0});
+      i=j+1;
+    }
+  });
+  return out;
+}
+function _fillMargins(sheets,kerf){
+  const live=sheets.filter(s=>(s.placements||[]).length);
+  const fill=s=>(s.placements||[]).reduce((a,p)=>a+p.w*p.h,0)/((s.uw*s.uh)||1);
+  const donors=live.slice().sort((a,b)=>fill(a)-fill(b));
+  for(const donor of donors){
+    if((donor.placements||[]).length>6) continue;          // only raid nearly-empty sheets
+    const hosts=live.filter(s=>s!==donor && s.jsid===donor.jsid).sort((a,b)=>fill(b)-fill(a));
+    for(const host of hosts){
+      for(const rect of _marginRuns(host,kerf)){
+        // stack panels of ONE width down the margin, widest first, so it reads as a strip
+        const cands=(donor.placements||[]).slice().sort((a,b)=>b.w-a.w||b.h-a.h);
+        for(const seed of cands){
+          if(seed.w>rect.w+1||seed.h>rect.h+1) continue;
+          const group=cands.filter(p=>Math.abs(p.w-seed.w)<=2);
+          let used=0; const take=[];
+          for(const p of group){ if(used+p.h<=rect.h+1){ take.push(p); used+=p.h+kerf; } }
+          if(!take.length) break;
+          const snapH=JSON.parse(JSON.stringify(host.placements));
+          const snapD=JSON.parse(JSON.stringify(donor.placements));
+          let y=rect.y;
+          take.forEach(p=>{ host.placements.push({...p,x:rect.x,y,bandY:y}); y+=p.h+kerf;
+            const ix=donor.placements.indexOf(p); if(ix>=0) donor.placements.splice(ix,1); });
+          if(_hasOverlapOrOverhang(host)||!isSheetRippable(host)){
+            host.placements=snapH; donor.placements=snapD;
+          }
+          break;
+        }
+      }
+      if(!(donor.placements||[]).length) break;
+    }
+  }
+  return sheets.filter(s=>(s.placements||[]).length);
+}
+
 function tidySheetSafe(sh,kerf){
   if(!sh.placements||sh.placements.length<3) return;
   const snap=sh.placements.map(p=>({...p}));
