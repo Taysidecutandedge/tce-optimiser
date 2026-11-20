@@ -717,7 +717,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-11-18-b';
+const TCE_BUILD='2026-11-20-a';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -2053,9 +2053,33 @@ function addBlankSheet(){
 
 function removeJobSheet(id){jobSheets=jobSheets.filter(x=>x.id!==id);save();renderJobSheets();}
 
+// ── One spelling per material, everywhere ───────────────────────────────────
+// The system identifies a board by the text of its name, so "22mm Mr Mdf Finsa" and
+// "22mm Finsa MR MDF" were two different boards to it — 24 offcuts went invisible to the
+// nester and sheets got bought with the rack full of the right material. The key sorts the
+// words, so order and case stop mattering, and anything typed snaps to the spelling already
+// in use. Offcuts page does the same; keep the three in step.
+function _matWordKey(s){
+  return String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().split(/\s+/).filter(Boolean).sort().join(' ');
+}
+// Every material name the system already knows: the cutting library and the priced catalogue.
+function _knownMatNames(){
+  const out=[];
+  (typeof library!=='undefined'?library:[]).forEach(l=>{ if(l&&l.name) out.push(l.name); });
+  (typeof _cbCatalogue!=='undefined'?_cbCatalogue:[]).forEach(b=>{ if(b&&b.board_name) out.push(_cbName(b)); });
+  return out;
+}
+// Returns the existing spelling when the words match, otherwise what was given. A genuinely
+// new material is never altered.
+function _canonMat(name){
+  const k=_matWordKey(name); if(!k) return name;
+  const hit=_knownMatNames().find(n=>_matWordKey(n)===k);
+  return (hit&&hit!==name)?hit:name;
+}
 function jss(id,k,v){
   const s=jobSheets.find(x=>x.id===id); if(!s) return;
   if(k==='name'){
+    v=_canonMat(v);                  // same words as a board you already have -> use that spelling
     const oldName=s.name; s.name=v;
     if(oldName!==v){ let n=0; const _on=String(oldName||'').toLowerCase().trim(); (parts||[]).forEach(p=>{ if(String(p.matName||'').toLowerCase().trim()===_on){ p.matName=v; n++; } }); if(n) renderParts(); }
     save(); renderJobSheets(); return;
@@ -5753,6 +5777,9 @@ function applyImport(){
   const aliasMap={};      // effective material (key) -> mapped board name, from remembered aliases
   let aliasedCount=0;
   const aliasApplied=[];   // what memory mapped, so it can be listed instead of just counted
+  // Snap each material the cutlist names onto a spelling the system already uses, before any
+  // board is created from it. Dylan writing "22mm Mr Mdf Finsa" shouldn't make a second board.
+  matsFound=new Set([...matsFound].map(mn=>/shaker\s*door/i.test(mn)?mn:_canonMat(mn)));
   matsFound.forEach(mn=>{
     if(/shaker\s*door/i.test(mn)) return;          // shaker doors handled separately
     // Remembered from a previous import? Map straight to that board — no prompt.
@@ -7150,22 +7177,34 @@ async function cmReconcileFromCloud(){
   // moment a job was re-nested the positions stopped matching and there was nothing to fall
   // back on — panels cut yesterday came back as still to cut. A cut is a cut; the layout
   // changing must never undo it.
+  // A position on its own is NOT an identity. Sheet 3 at 0,0 was "U1 Side L" (2118x582) on
+  // Becky Rodgers before a re-nest and "D1-P2-Top" (1254x630) after it, so three cabinet
+  // sides cut on the Tuesday ticked off three shaker door panels on the Wednesday. They came
+  // up already-confirmed, the auto-advance stepped straight over them, and three door panels
+  // went uncut until someone noticed and reprinted by hand. The slot has to carry the part
+  // that was cut there, not just the corner of the board it came off.
+  const _posKey=p=>p.sheetIdx+'|'+Math.round(p.x)+'|'+Math.round(p.y)
+    +'|'+(p.label||'')+'|'+Math.round(p.origL||0)+'x'+Math.round(p.origW||0);
   const posDone=new Set();
   const seen=new Set(), cnt={};
   loose.forEach(p=>{
     const hasPos = p.x!=null && p.y!=null && p.sheetIdx!=null;
     // De-dupe: the same physical panel confirmed twice shouldn't count twice.
-    const key = hasPos ? 'P|'+p.sheetIdx+'|'+Math.round(p.x)+'|'+Math.round(p.y)
+    // Same blind spot as above: without the part's identity, a panel cut at sheet 3 (0,0)
+    // yesterday and a DIFFERENT panel cut at sheet 3 (0,0) after a re-nest looked like one
+    // double-tap, and the second genuine cut was thrown away. A real double-tap still
+    // matches itself exactly, because the part and the place are both the same.
+    const key = hasPos ? 'P|'+_posKey(p)
                        : 'L|'+(p.label||'')+'|'+(p.panelNum||'')+'|'+(p.origL||'')+'|'+(p.origW||'');
     if(seen.has(key)) return; seen.add(key);
-    if(hasPos) posDone.add(p.sheetIdx+'|'+Math.round(p.x)+'|'+Math.round(p.y));
+    if(hasPos) posDone.add(_posKey(p));
     const ck=(p.label||'')+'|'+(p.origL||'')+'|'+(p.origW||'');
     cnt[ck]=(cnt[ck]||0)+1;
   });
   const rem={...cnt}; const done=new Set(); let posHits=0;
   // Pass 1 — exact position. Best case: same nest, panels land back where they were.
   _cmPanels.forEach((p,i)=>{ if(_cmRecut.has(i)) return;   // keep panels the operator marked for re-cut
-    if(posDone.has(p.sheetIdx+'|'+Math.round(p.x)+'|'+Math.round(p.y))){
+    if(posDone.has(_posKey(p))){
       done.add(i); posHits++;
       const ck=(p.label||'')+'|'+(p.origL||'')+'|'+(p.origW||''); if(rem[ck]>0) rem[ck]--;
     } });
