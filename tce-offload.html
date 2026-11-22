@@ -96,7 +96,7 @@
 <div id="offcutModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:1000;align-items:center;justify-content:center;padding:16px">
   <div style="background:#15171e;border:1px solid #2a2e38;border-radius:14px;max-width:460px;width:100%;padding:20px;color:#f0eeea;font-family:inherit">
     <h2 style="font-size:18px;margin:0 0 3px">♻ Log offcut</h2>
-    <div style="font-size:12px;color:#6b8f7e;margin-bottom:14px">Measure the actual leftover in hand, then save &amp; print its label.</div>
+    <div id="of-title" style="font-size:12px;color:#6b8f7e;margin-bottom:14px">Measure the actual leftover in hand, then save &amp; print its label.</div>
     <label style="font-size:12px;color:#a8b0bd">Decor</label>
     <input id="of-decor" oninput="onOfDecorInput()" style="width:100%;background:#1e2128;border:1px solid #2a2e38;color:#f0eeea;border-radius:8px;padding:10px;font-size:15px;margin-bottom:8px">
     <div style="display:flex;gap:10px">
@@ -156,7 +156,7 @@
 // says so. A device can run week-old code while you are told a fix is live. So the app asks
 // the server what the current build is and says plainly when it is behind. It never reloads
 // by itself — that is your call, not the app's.
-const TCE_BUILD='2026-11-18-e';
+const TCE_BUILD='2026-11-22-a';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -947,9 +947,24 @@ function showRemainderPrompt(info){
   if(g('of-bay'))   g('of-bay').value=info.location||'';
   if(g('of-thick')) g('of-thick').value=(info.thick!=null?info.thick:'');
   if(g('of-err'))   g('of-err').textContent='';
-  if(g('of-descr')) g('of-descr').value=info.code?('Remainder of '+info.code+(info.wasL?(' (was '+info.wasL+'×'+info.wasW+')'):'')):'';
+  // Where it came from, in words, so the rack list reads sensibly a month later. A fresh
+  // board has no offcut code, so it gets named by its material and sheet number instead.
+  if(g('of-descr')) g('of-descr').value = info.code
+      ? ('Remainder of '+info.code+(info.wasL?(' (was '+info.wasL+'×'+info.wasW+')'):''))
+      : (info.fromBoard
+          ? ('Remainder of '+(info.name||'board')+(info.sheetNo?(' sheet '+info.sheetNo):'')
+             +(info.company?(' — '+info.company):''))
+          : '');
+  // Sizes are deliberately NOT filled in. The nest's figure is an expectation; the real
+  // piece is whatever is left after a cleanup cut or a bad edge, so it gets measured.
   if(g('of-sep'))   g('of-sep').checked=false;
   _ofBoard={color:info.color||'#4e9af1', grain_len:info.grain_len!==false};
+  // Say what was just finished, then the standing instruction: measure it, don't trust a number.
+  const ttl=g('of-title');
+  if(ttl) ttl.textContent = (info.fromBoard
+      ? ('Board finished — '+(info.name||'')+(info.sheetNo?(' sheet '+info.sheetNo):'')+'. ')
+      : (info.code?('Offcut '+info.code+' used. '):''))
+    + 'Measure the actual leftover in hand, then save & print its label.';
   const modal=g('offcutModal'); if(modal) modal.style.display='flex';
   if(g('of-l')) g('of-l').focus();
 }

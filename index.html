@@ -717,7 +717,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-11-22-d';
+const TCE_BUILD='2026-11-22-f';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -5137,7 +5137,7 @@ function _attachDrag(cv,idx){
     if(!_dropOnSheet(target,dragged)) return;
     try{ saveLocal(); }catch(e){}
     if(typeof toast==='function') toast('Keeping '+dragged.label+' with that board — re-nesting…');
-    calculate();
+    _recalcKeepingPlace();
   });
 }
 // The groups you have asked for, listed so they can be undone. Without this a drag is a
@@ -5158,8 +5158,17 @@ function renderGroups(){
     +'<div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="ungroupAll()">Clear all</button></div>'
     +'</div>';
 }
-function ungroup(i){ _keepGroups.splice(i,1); try{saveLocal();}catch(e){} calculate(); }
-function ungroupAll(){ _keepGroups=[]; try{saveLocal();}catch(e){} calculate(); }
+// Re-nesting rebuilds the whole results panel, which throws the page back to the top —
+// so after dragging a panel you had to scroll down again to find out whether it moved.
+// Hold the scroll position across the rebuild and put it back once the sheets are drawn.
+function _recalcKeepingPlace(){
+  const y=window.scrollY||document.documentElement.scrollTop||0;
+  const back=()=>requestAnimationFrame(()=>requestAnimationFrame(()=>window.scrollTo(0,y)));
+  try{ const r=calculate(); if(r&&typeof r.then==='function') r.then(back,back); else back(); }
+  catch(e){ back(); }
+}
+function ungroup(i){ _keepGroups.splice(i,1); try{saveLocal();}catch(e){} _recalcKeepingPlace(); }
+function ungroupAll(){ _keepGroups=[]; try{saveLocal();}catch(e){} _recalcKeepingPlace(); }
 
 function drawSheet(cid,sheet){
   const cv=document.getElementById(cid);if(!cv)return;
@@ -7791,6 +7800,7 @@ function cmConfirm(){
   }
   _cmSave();
   cmCheckOffcutDone(_curSheet);   // if that was the last panel on an offcut, mark it used + offer to log the remainder
+  cmCheckBoardDone(_curSheet);    // and if it was the last panel on a fresh BOARD, ask about its remainder too
   cmRender();
 }
 
@@ -7944,6 +7954,48 @@ async function cmOffcutJustMissing(){
   if(document.getElementById('cuttingMode')&&document.getElementById('cuttingMode').classList.contains('active')) closeCuttingMode();
   alert(code+' marked missing.\n\nPress Calculate to re-nest without it.\nAny panels you\'ve already cut are saved and will come back ticked.');
 }
+// Biggest single piece the nest expects to be left on a board. Only an expectation — the
+// real remainder is whatever is in your hands after a cleanup cut or a bad edge, which is
+// why nothing is ever pre-filled. It is used solely to decide whether a prompt is WORTH
+// showing, so a 97%-full board doesn't nag.
+function _sheetRemainder(sh){
+  const ps=(sh&&sh.placements)||[]; if(!ps.length) return {w:sh.uw,h:sh.uh};
+  const right=ps.reduce((a,p)=>Math.max(a,p.x+p.w),0);
+  let best={w:Math.max(0,sh.uw-right),h:sh.uh};
+  const cols={}; ps.forEach(p=>{ const k=Math.round(p.x); (cols[k]=cols[k]||[]).push(p); });
+  Object.keys(cols).forEach(k=>{
+    const c=cols[k], w=Math.max(...c.map(p=>p.w)), used=Math.max(...c.map(p=>p.y+p.h));
+    const cand={w,h:Math.max(0,sh.uh-used)};
+    if(cand.w*cand.h>best.w*best.h) best=cand;
+  });
+  return best;
+}
+// The remainder prompt only ever fired for OFFCUTS. Finish a fresh board with three quarters
+// of it still attached and nothing asked you anything — across 20 saved jobs, 52 of 108 fresh
+// boards ended with a single usable piece of 200x400 or better still on them, about 57 m² of
+// board. Some of it reached the rack because somebody remembered. This asks instead.
+async function cmCheckBoardDone(si){
+  const sheet=_lastSheets[si];
+  if(!sheet || sheet._isOffcut || sheet._remPrompted) return;
+  const idxs=[]; _cmPanels.forEach((x,i)=>{ if(x.sheetIdx===si) idxs.push(i); });
+  if(!idxs.length || !idxs.every(i=>_cmDone.has(i))) return;   // board not finished yet
+  const rem=_sheetRemainder(sheet);
+  if(rem.w<200 || rem.h<400) return;                            // not worth a trip to the rack
+  sheet._remPrompted=true;
+  const js=(jobSheets||[]).find(x=>x.id===sheet.jsid)||{};
+  try{
+    if(_sbToken){
+      const body={ session_id:_cmSession||(projectName||'job'), action:'offcut_remainder',
+        panel:{ code:'', offcutId:null, name:sheet.name||'',
+          thick:(js.thick!=null?js.thick:null), wasL:sheet.fullL, wasW:sheet.fullW,
+          fromBoard:true, sheetNo:si+1, company:projectName||'',
+          location:'', color:sheet.color||js.color||null, grain_len:js.grainLen!==false } };
+      fetch(SB_URL+'/rest/v1/tce_cut_events',{method:'POST',headers:{...sbAuthH(),'Prefer':'return=minimal'},body:JSON.stringify(body)}).catch(()=>{});
+    }
+  }catch(e){}
+  if(typeof cmToast==='function') cmToast('Board finished — measure and log the remainder at the station');
+}
+
 function cmCheckOffcutDone(si){
   const sheet=_lastSheets[si];
   if(!sheet || !sheet._isOffcut || sheet._offcutDone) return;
