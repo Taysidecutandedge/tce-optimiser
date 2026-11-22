@@ -717,7 +717,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-11-20-e';
+const TCE_BUILD='2026-11-22-a';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -759,6 +759,24 @@ setInterval(_tceCheckBuild, 60*60*1000);
 // ═══════════════════════════════════════════════
 let library=[], jobSheets=[], parts=[];
 let _offcutStock=[]; // in-stock offcuts for the nester (Phase 2)
+
+// ── Keep-together groups ────────────────────────────────────────────────────
+// Drag a panel onto another sheet and what gets remembered is not "sheet 4" — sheet
+// numbers are meaningless the moment you recalculate, because a different set of offcuts
+// comes back and sheet 4 is a different board. What is remembered is that those panels
+// belong on the SAME sheet as each other. That survives any re-nest, any change to the
+// rack, and it is what the move actually meant.
+//
+// Keyed on part name + size, the same identity the cut log and the resume tally use.
+let _keepGroups=[];                     // [[key,key,…], …] — saved with the job
+function _pkeyOf(p){ return String(p&&p.label||'')+'|'+Math.round(+(p&&p.l)||0)+'x'+Math.round(+(p&&p.w)||0); }
+function _grpIdOf(p){
+  const k=_pkeyOf(p);
+  for(let i=0;i<_keepGroups.length;i++) if(_keepGroups[i].indexOf(k)>=0) return i;
+  return null;
+}
+// Panels the nester could NOT keep together this run — surfaced rather than silently split.
+let _grpBroken=[];
 // What the board is actually made of. A veneer or decor is the SURFACE; this is the core
 // underneath, and two boards with different cores are never the same board however similar
 // their names read. Checked most-specific first, so "birch ply" is birch, not plain ply.
@@ -1366,6 +1384,7 @@ async function cloudSaveJob(quiet){
     quoteBasis:_quoteBasis,   // fresh-board count with offcuts OFF — the admin quotes from this
     sheetEquiv:_sheetEquiv,   // fresh-board count worked out independently of how it was nested
     pwsOrder:_pwsOrder,       // supply-only PWS parts (never cut) — kept with the job to order
+    keepGroups:_keepGroups,   // panels dragged onto the same sheet — a constraint, not a layout
     customer: savedCustomer || null,
     customerTier: savedCustomerTier
   };
@@ -1504,6 +1523,7 @@ let _jobEpoch=0;
 // temporal dead zone of a `let` further down the file.
 var _importNotes=[], _pendingImportNotes=[];
 function _resetJobState(opts){
+  _keepGroups=[]; _grpBroken=[];
   const o=opts||{};
   _jobEpoch++;
   _importNotes=[];   // notes belong to the cutlist that was imported, not to the next job
@@ -1541,6 +1561,7 @@ async function cloudLoadJob(id){
     if(d.library)library=d.library;
     jobSheets=d.jobSheets||[];
     parts=d.parts||[];
+    _keepGroups=Array.isArray(d.keepGroups)?d.keepGroups:[];
     // Set the project name. Website submissions send the company as projectName and the
     // customer's own job reference in contact.notes (e.g. "stephen office") — prefer that as
     // the project name, and remember the company so the Save dialog pre-picks the account.
@@ -3153,6 +3174,7 @@ function _ebTotalsFor(sheets){
 // relying on someone remembering to calculate with offcuts off first.
 function _calculateInner(opts){
   const _dry=!!(opts&&opts.dry);
+  _grpBroken=[];
   const cncMode=document.getElementById('cncMode')&&document.getElementById('cncMode').checked;
   const sawKerf=parseFloat(document.getElementById('kerf').value)||0;
   const cncKerf=parseFloat((document.getElementById('cncKerf')||{}).value)||8;
@@ -3302,7 +3324,7 @@ function _calculateInner(opts){
     const ov=p.laminate?(parseInt((document.getElementById('lamOversize')||{}).value)||0):0;
     const pl=p.l+ov, pw=p.w+ov;
     for(let i=0;i<p.qty*lam;i++){
-      const piece={...p,l:pl,w:pw,grain,_msid:ms?ms.id:null,_matMissing:(_named&&!ms)?_named:null};
+      const piece={...p,l:pl,w:pw,grain,_msid:ms?ms.id:null,_matMissing:(_named&&!ms)?_named:null,_grp:_grpIdOf(p)};
       if(p.laminate){
         piece.label=(p.label||'Part')+' ·LAM×2';
         // Carry the finished (trim) size + oversize so the print station can print
@@ -3344,6 +3366,23 @@ function _calculateInner(opts){
       return r!==0?r:a._origIdx-b._origIdx;
     };
     pieces.sort(stableSort);
+    // Panels you dragged together are nested together. Whatever order the strategy wants,
+    // a group's members are pulled up so they follow the first one immediately — otherwise
+    // the first lands wherever the scoring sends it, the rest arrive long after that sheet
+    // has filled, and the group is reported broken without a single panel having moved.
+    // Biggest first inside the group, so the one that is hardest to place picks the sheet.
+    if(_keepGroups.length){
+      const seen={}, out=[];
+      pieces.forEach(pc=>{
+        if(pc._grp==null){ out.push(pc); return; }
+        if(seen[pc._grp]) return;
+        seen[pc._grp]=1;
+        pieces.filter(q=>q._grp===pc._grp)
+              .sort((x,y)=>(y._pw*y._ph)-(x._pw*x._ph)||x._origIdx-y._origIdx)
+              .forEach(q=>out.push(q));
+      });
+      pieces.length=0; out.forEach(q=>pieces.push(q));
+    }
 
     const makeSheet=s=>{
       const uw=s.w-(s.trimL??15)-(s.trimR??15);
@@ -3357,6 +3396,7 @@ function _calculateInner(opts){
     };
 
     const pool=[];
+    const _grpSheet={};        // group id -> the sheet its first panel landed on, this run
     const addToPool=sh=>{sh._poolIdx=pool.length;pool.push(sh);return sh;};
     jobSheets.forEach(s=>addToPool(makeSheet(s)));
     // Seed finite offcut "mini-sheets" (Phase 2) — preferred over fresh boards in findSheet()
@@ -3497,7 +3537,23 @@ function _calculateInner(opts){
       if(placeInSheet(sh,piece,piece._pw,piece._ph,false)) return true;
       return false;
     };
+    // Every placement remembers which sheet the piece's group landed on, so the rest of
+    // the group follows it rather than going wherever the scoring happens to prefer.
+    const _tryG=(sh,piece)=>{
+      if(!tryPlace(sh,piece)) return false;
+      if(piece._grp!=null) _grpSheet[piece._grp]=sh;
+      return true;
+    };
     const findSheet=piece=>{
+      // Kept together: this panel was dragged onto the same sheet as its group, so that
+      // sheet is tried before anything else. If it genuinely will not fit any more — the
+      // rack changed, the cutlist changed — the panel is placed normally and the broken
+      // group is reported, never split in silence.
+      if(piece._grp!=null && _grpSheet[piece._grp]){
+        if(_tryG(_grpSheet[piece._grp],piece)) return true;
+        const _k=_pkeyOf(piece);
+        if(_grpBroken.indexOf(_k)<0) _grpBroken.push(_k);
+      }
       // Named a board we do not have? Then it has no home. Reported as unplaced, which the
       // readiness gate already blocks a quote on, rather than being cut from a guess.
       if(piece._matMissing) return false;
@@ -3518,7 +3574,7 @@ function _calculateInner(opts){
         return (a.uw*a.uh)-(b.uw*b.uh)||a._poolIdx-b._poolIdx;
       };
       // 1a) offcuts ALREADY OPEN on this job — fetched already, so filling them is free.
-      for(const sh of matching.filter(s=>s._isOffcut&&ocSmall(s)&&s.placements.length).sort(bySize)) if(tryPlace(sh,piece)) return true;
+      for(const sh of matching.filter(s=>s._isOffcut&&ocSmall(s)&&s.placements.length).sort(bySize)) if(_tryG(sh,piece)) return true;
       // 2) Boards ALREADY IN USE — fullest first (original behaviour).
       //    Untouched boards are excluded here: an empty board is effectively a NEW
       //    board, and big offcuts (step 3) exist precisely to avoid opening one.
@@ -3531,22 +3587,22 @@ function _calculateInner(opts){
           if(ub!==ua) return ub-ua;
           return a._poolIdx-b._poolIdx; // stable tie-break
         });
-      for(const sh of fullCands) if(tryPlace(sh,piece)) return true;
+      for(const sh of fullCands) if(_tryG(sh,piece)) return true;
       // 1b) UNTOUCHED small offcuts — only once the boards already on the saw have no room.
       // Fetching a fresh offcut means a trip to the rack, a piece of stock gone and another
       // setup; spare space on a board already open costs none of those. Reaching for them
       // BEFORE the open boards is what spread one Ross v2 across eighteen separate pieces
       // when two boards and ten offcuts would do.
-      for(const sh of matching.filter(s=>s._isOffcut&&ocSmall(s)&&!s.placements.length).sort(bySize)) if(tryPlace(sh,piece)) return true;
+      for(const sh of matching.filter(s=>s._isOffcut&&ocSmall(s)&&!s.placements.length).sort(bySize)) if(_tryG(sh,piece)) return true;
       // 3) BIG offcuts — only now, i.e. only to avoid opening a NEW board (so they only get used when they actually save a board)
-      for(const sh of matching.filter(s=>s._isOffcut&&!ocSmall(s)).sort(bySize)) if(tryPlace(sh,piece)) return true;
+      for(const sh of matching.filter(s=>s._isOffcut&&!ocSmall(s)).sort(bySize)) if(_tryG(sh,piece)) return true;
       // 4) Open a fresh full board — reuse an untouched board already in the pool first
       const emptyBoard=matching.find(sh=>!sh._isOffcut&&!sh.placements.length);
-      if(emptyBoard&&tryPlace(emptyBoard,piece)) return true;
+      if(emptyBoard&&_tryG(emptyBoard,piece)) return true;
       const src=jobSheets.find(s=>!piece._msid||s.id===piece._msid);
       if(!src) return false;
       const newSh=addToPool(makeSheet(src));
-      return tryPlace(newSh,piece);
+      return _tryG(newSh,piece);
     };
 
     const unplaced=[];
@@ -4548,6 +4604,7 @@ function renderResults(sheets,unplaced){
     </div>
     <div id="ebSec"></div>
     <div id="bsSec"></div>
+    <div id="grpSec"></div>
     <div class="sheet-grid" id="sheetGrid"></div>
     <div id="cutSec"></div><div id="upSec"></div>`;
 
@@ -4555,6 +4612,13 @@ function renderResults(sheets,unplaced){
     const sa=s.uw*s.fullL, pa=s.placements.reduce((a,p)=>a+p.w*p.h,0);
     const wp=Math.max(0,(100-pa/sa*100)).toFixed(1);
     const wc=wp<=20?'wb-ok':wp<=40?'wb-mid':'wb-bad';
+    // A sheet no straight cut will separate. Two of these are sitting in saved jobs right
+    // now (175 and 179) — the guard that spots them has always existed, nothing ever showed
+    // its answer, so they reached the saw and somebody had to improvise. Warn, don't block:
+    // the layout may still be workable with a second setup, and that call is yours.
+    const _cutWarn=(s.placements.length>1 && !isSheetRippable(s))
+      ? ` <span title="No straight edge-to-edge cut separates these panels — check before cutting" style="background:#5a1f1f;color:#ffb4b4;font-size:10px;padding:1px 6px;border-radius:4px;font-family:var(--mono)">⚠ can&rsquo;t cut straight</span>`
+      : '';
     const card=document.createElement('div');card.className='sheet-card';
     card.innerHTML=`
       <div class="sc-hdr">
@@ -4562,12 +4626,14 @@ function renderResults(sheets,unplaced){
           <div class="sc-title">${esc(s.name)} <span style="color:var(--txt3)">#${idx+1}</span>${s._isOffcut?` <span style="background:#27ae60;color:#fff;font-size:10px;padding:1px 6px;border-radius:4px;font-family:var(--mono)">♻ ${esc(s._offcutCode||'OFFCUT')}</span>${(function(){const oc=_ocFor(s._offcutId);const loc=oc&&oc.location&&String(oc.location).trim();return (loc?` <span style="background:#1f3a34;color:#cfe7dd;font-size:10px;padding:1px 6px;border-radius:4px;font-family:var(--mono)">📍 ${esc(loc)}</span>`:'')+(_ocIsStale(oc)?` <span title="In stock ${_ocAgeDays(oc)} days — check the rack" style="background:#5a3a12;color:#ffc46b;font-size:10px;padding:1px 6px;border-radius:4px;font-family:var(--mono)">⚠ ${_ocAgeDays(oc)}d</span>`:'');})()}`:''}</div>
           <div class="sc-meta">${s._isOffcut?'Offcut ':'Full '}${s.fullL}×${s.fullW}mm · Usable ${s.uw}×${s.uh}mm${s._isOffcut&&s._ocTrim?` · <span title="Taken off each edge so you can clean it up">${s._ocTrim}mm trim allowed</span>`:''}</div>
         </div>
-        <span class="wb ${wc}">${wp}% waste</span>
+        <span class="wb ${wc}">${wp}% waste</span>${_cutWarn}
       </div>
       <div style="padding:12px"><canvas id="cv-${idx}"></canvas></div>`;
     document.getElementById('sheetGrid').appendChild(card);
-    requestAnimationFrame(()=>drawSheet(`cv-${idx}`,s));
+    requestAnimationFrame(()=>{ drawSheet(`cv-${idx}`,s); const _cv=document.getElementById(`cv-${idx}`); if(_cv) _attachDrag(_cv,idx); });
   });
+
+  try{ renderGroups(); }catch(e){}
 
   // Cut list
   let rows='',n=1;
@@ -4935,6 +5001,109 @@ function getLabelCol(lbl){
 // ═══════════════════════════════════════════════
 // DRAW CANVAS
 // ═══════════════════════════════════════════════
+// ── Drag a panel onto another sheet ─────────────────────────────────────────
+// Picking a panel up and dropping it on another sheet does NOT move it to a position —
+// it records that this panel belongs on the same board as the panels already there, and
+// re-nests. The nester then decides where it sits, which keeps the rip strips tidy. The
+// first version of margin-filling placed panels wherever they fitted and produced sheets
+// that were a nuisance to cut; letting the nester lay out what you've asked for avoids
+// repeating that.
+let _dragP=null, _dragFromIdx=-1, _dragGhost=null;
+function _gkeyOf(p){ return String(p&&p.label||'')+'|'+Math.round(+(p&&(p.origL!=null?p.origL:p.l))||0)+'x'+Math.round(+(p&&(p.origW!=null?p.origW:p.w))||0); }
+function _cvPoint(cv,sheet,ev){
+  const r=cv.getBoundingClientRect();
+  const px=(ev.clientX-r.left)*(cv.width/r.width);
+  const py=(ev.clientY-r.top)*(cv.height/r.height);
+  const PAD=28, sc=Math.min(320/sheet.uw, 420/sheet.uh);
+  return {x:(px-PAD)/sc, y:(py-PAD)/sc};
+}
+function _panelAt(sheet,pt){
+  return (sheet.placements||[]).find(p=>pt.x>=p.x&&pt.x<=p.x+p.w&&pt.y>=p.y&&pt.y<=p.y+p.h)||null;
+}
+// Merge two panels into one keep-together group, joining existing groups if either is
+// already in one — so three separate drags onto the same board end up as a single group
+// rather than three that quietly fight each other.
+function _joinGroup(ka,kb){
+  if(ka===kb) return;
+  let ia=_keepGroups.findIndex(g=>g.indexOf(ka)>=0);
+  let ib=_keepGroups.findIndex(g=>g.indexOf(kb)>=0);
+  if(ia<0&&ib<0){ _keepGroups.push([ka,kb]); return; }
+  if(ia>=0&&ib<0){ _keepGroups[ia].push(kb); return; }
+  if(ib>=0&&ia<0){ _keepGroups[ib].push(ka); return; }
+  if(ia===ib) return;
+  _keepGroups[ia]=[...new Set(_keepGroups[ia].concat(_keepGroups[ib]))];
+  _keepGroups.splice(ib,1);
+}
+function _dropOnSheet(target,dragged){
+  // Anchor on the BIGGEST panel already on the target board. A big panel is the one least
+  // likely to be shuffled elsewhere on the next re-nest, so the group has something solid
+  // to follow. Anchoring on every panel of the board would over-constrain it.
+  const anchor=(target.placements||[]).slice().sort((a,b)=>b.w*b.h-a.w*a.h)[0];
+  if(!anchor||anchor===dragged) return false;
+  _joinGroup(_gkeyOf(dragged), _gkeyOf(anchor));
+  return true;
+}
+function _attachDrag(cv,idx){
+  cv.style.touchAction='none';
+  cv.addEventListener('pointerdown',ev=>{
+    const sh=(_lastSheets||[])[idx]; if(!sh) return;
+    const p=_panelAt(sh,_cvPoint(cv,sh,ev)); if(!p) return;
+    _dragP=p; _dragFromIdx=idx;
+    _dragGhost=document.createElement('div');
+    _dragGhost.textContent='→ '+p.label;
+    _dragGhost.style.cssText='position:fixed;z-index:9999;pointer-events:none;background:#d4820a;color:#fff;'
+      +'font:600 12px/1.4 system-ui;padding:4px 9px;border-radius:5px;box-shadow:0 3px 10px rgba(0,0,0,.45)';
+    document.body.appendChild(_dragGhost);
+    cv.setPointerCapture(ev.pointerId);
+    ev.preventDefault();
+  });
+  cv.addEventListener('pointermove',ev=>{
+    if(!_dragGhost) return;
+    _dragGhost.style.left=(ev.clientX+14)+'px';
+    _dragGhost.style.top=(ev.clientY-10)+'px';
+  });
+  cv.addEventListener('pointerup',ev=>{
+    if(!_dragP){ return; }
+    try{ cv.releasePointerCapture(ev.pointerId); }catch(e){}
+    if(_dragGhost){ _dragGhost.remove(); _dragGhost=null; }
+    // Which sheet is under the pointer? The canvas has pointer capture, so ask the document.
+    const el=document.elementFromPoint(ev.clientX,ev.clientY);
+    const tgt=el&&el.id&&/^cv-\d+$/.test(el.id)?parseInt(el.id.slice(3),10):-1;
+    const dragged=_dragP; const from=_dragFromIdx;
+    _dragP=null; _dragFromIdx=-1;
+    if(tgt<0||tgt===from) return;                       // dropped on nothing, or back home
+    const target=(_lastSheets||[])[tgt]; if(!target) return;
+    if(target.jsid!==(_lastSheets||[])[from].jsid){
+      alert('That is a different board.\n\n"'+dragged.label+'" is '+((_lastSheets||[])[from].name||'')
+        +' and you dropped it on '+(target.name||'')+'. A panel can only move to a sheet of its own material.');
+      return;
+    }
+    if(!_dropOnSheet(target,dragged)) return;
+    try{ saveLocal(); }catch(e){}
+    if(typeof toast==='function') toast('Keeping '+dragged.label+' with that board — re-nesting…');
+    calculate();
+  });
+}
+// The groups you have asked for, listed so they can be undone. Without this a drag is a
+// one-way door: the job quietly carries a constraint nobody can see or remove.
+function renderGroups(){
+  const el=document.getElementById('grpSec'); if(!el) return;
+  if(!_keepGroups.length){ el.innerHTML=''; return; }
+  const broke=_grpBroken.length;
+  el.innerHTML='<div style="margin:0 0 10px;padding:9px 12px;background:rgba(212,130,10,.10);'
+    +'border:1px solid rgba(212,130,10,.45);border-radius:8px;font-size:12.5px;line-height:1.7;color:#ffd9a3">'
+    +'<b>Kept together</b> — panels you dragged onto the same board. Survives re-calculating.'
+    +(broke?'<div style="color:#ffb4b4;margin-top:4px">⚠ '+broke+' could not be kept together this time — they are placed normally.</div>':'')
+    +_keepGroups.map((g,i)=>'<div style="margin-top:6px;display:flex;gap:8px;align-items:flex-start">'
+      +'<button onclick="ungroup('+i+')" title="Remove this group" style="background:none;border:1px solid rgba(255,255,255,.25);'
+      +'color:#ffd9a3;border-radius:4px;cursor:pointer;font-size:11px;padding:0 6px;line-height:18px">✕</button>'
+      +'<span style="font-family:var(--mono);font-size:11px">'+g.map(k=>esc(k.split('|')[0])).join('  +  ')+'</span></div>').join('')
+    +'<div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="ungroupAll()">Clear all</button></div>'
+    +'</div>';
+}
+function ungroup(i){ _keepGroups.splice(i,1); try{saveLocal();}catch(e){} calculate(); }
+function ungroupAll(){ _keepGroups=[]; try{saveLocal();}catch(e){} calculate(); }
+
 function drawSheet(cid,sheet){
   const cv=document.getElementById(cid);if(!cv)return;
   const PAD=28;
