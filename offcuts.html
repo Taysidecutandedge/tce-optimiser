@@ -205,7 +205,7 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 // material snap all looked broken when they had shipped fine. Bump this whenever the file
 // changes. Phones hold a cached page far longer than a desktop does, which is exactly why
 // the page that lives on a phone needed this most.
-const TCE_BUILD='2026-11-20-a';
+const TCE_BUILD='2026-11-22-b';
 async function _tceCheckBuild(){
   try{
     const r=await fetch(location.pathname+'?buildcheck='+Date.now(),{cache:'reload'});
@@ -419,8 +419,8 @@ async function loadDecors(){
       const map={};
       rows.forEach(x=>{
         if(!x.name) return; const k=norm(x.name); if(!k) return;
-        if(!map[k]){ map[k]={name:x.name,color:x.color,thick:x.thick,isBoard:x.is_offcut===false}; }
-        else if(x.is_offcut===false && !map[k].isBoard){ map[k]={name:x.name,color:x.color,thick:x.thick,isBoard:true}; } // prefer a board's canonical spelling
+        if(!map[k]){ map[k]={name:x.name,color:x.color,thick:x.thick,grain:x.grain_len,isBoard:x.is_offcut===false}; }
+        else if(x.is_offcut===false && !map[k].isBoard){ map[k]={name:x.name,color:x.color,thick:x.thick,grain:x.grain_len,isBoard:true}; } // prefer a board's canonical spelling
       });
       _decors=Object.values(map).sort((a,b)=>String(a.name).localeCompare(String(b.name)));
       $('decorlist').innerHTML=_decors.map(d=>`<option value="${esc(d.name)}">`).join('');
@@ -477,6 +477,21 @@ document.addEventListener('click',e=>{
   const box=$('matPicks'); if(!box) return;
   if(e.target!==$('f-name') && !box.contains(e.target)) box.style.display='none';
 });
+// Does this material have a grain? The board in the library is the authority; failing that,
+// Egger's own convention — U and W are plain colours, H is a woodgrain — then plain MDF.
+// The form used to default every new offcut to GRAINED whatever it was made of, which is how
+// 48 pieces in the rack ended up claiming a grain they do not have, including every one of
+// the 18mm Finsa. An offcut should not have its own opinion about this.
+function _grainFor(name){
+  const d=(_decors||[]).find(x=>_matWordKey(x.name)===_matWordKey(name));
+  if(d && d.grain!=null) return !!d.grain;
+  const c=String(name||'').trim();
+  if(/^[UW]\d{3,4}\b/i.test(c)) return false;
+  if(/^H\d{3,4}\b/i.test(c))    return true;
+  if(/veneer|oak|walnut|ash|birch|querkus|ply|cherry|maple/i.test(c)) return true;
+  if(/mdf|medite|\bmr\b/i.test(c)) return false;
+  return null;                                  // genuinely unknown — leave the box alone
+}
 function onDecorInput(){
   showMatPicks();
   const v=$('f-name').value.trim().toLowerCase();
@@ -486,6 +501,8 @@ function onDecorInput(){
   const tm=v.match(/^(\d+(?:\.\d+)?)\s*mm\b/);
   if(tm)$('f-thick').value=tm[1];
   else if(m&&m.thick&&!$('f-thick').value)$('f-thick').value=m.thick;
+  const g=_grainFor($('f-name').value);
+  if(g!==null && $('f-grain')) $('f-grain').checked=g;
 }
 
 // Same material, same words, different order or case — "22mm Mr Mdf Finsa" is the board the
