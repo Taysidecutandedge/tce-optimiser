@@ -717,7 +717,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-11-22-a';
+const TCE_BUILD='2026-11-22-b';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -770,11 +770,7 @@ let _offcutStock=[]; // in-stock offcuts for the nester (Phase 2)
 // Keyed on part name + size, the same identity the cut log and the resume tally use.
 let _keepGroups=[];                     // [[key,key,…], …] — saved with the job
 function _pkeyOf(p){ return String(p&&p.label||'')+'|'+Math.round(+(p&&p.l)||0)+'x'+Math.round(+(p&&p.w)||0); }
-function _grpIdOf(p){
-  const k=_pkeyOf(p);
-  for(let i=0;i<_keepGroups.length;i++) if(_keepGroups[i].indexOf(k)>=0) return i;
-  return null;
-}
+
 // Panels the nester could NOT keep together this run — surfaced rather than silently split.
 let _grpBroken=[];
 // What the board is actually made of. A veneer or decor is the SURFACE; this is the core
@@ -3324,7 +3320,7 @@ function _calculateInner(opts){
     const ov=p.laminate?(parseInt((document.getElementById('lamOversize')||{}).value)||0):0;
     const pl=p.l+ov, pw=p.w+ov;
     for(let i=0;i<p.qty*lam;i++){
-      const piece={...p,l:pl,w:pw,grain,_msid:ms?ms.id:null,_matMissing:(_named&&!ms)?_named:null,_grp:_grpIdOf(p)};
+      const piece={...p,l:pl,w:pw,grain,_msid:ms?ms.id:null,_matMissing:(_named&&!ms)?_named:null};
       if(p.laminate){
         piece.label=(p.label||'Part')+' ·LAM×2';
         // Carry the finished (trim) size + oversize so the print station can print
@@ -3366,24 +3362,6 @@ function _calculateInner(opts){
       return r!==0?r:a._origIdx-b._origIdx;
     };
     pieces.sort(stableSort);
-    // Panels you dragged together are nested together. Whatever order the strategy wants,
-    // a group's members are pulled up so they follow the first one immediately — otherwise
-    // the first lands wherever the scoring sends it, the rest arrive long after that sheet
-    // has filled, and the group is reported broken without a single panel having moved.
-    // Biggest first inside the group, so the one that is hardest to place picks the sheet.
-    if(_keepGroups.length){
-      const seen={}, out=[];
-      pieces.forEach(pc=>{
-        if(pc._grp==null){ out.push(pc); return; }
-        if(seen[pc._grp]) return;
-        seen[pc._grp]=1;
-        pieces.filter(q=>q._grp===pc._grp)
-              .sort((x,y)=>(y._pw*y._ph)-(x._pw*x._ph)||x._origIdx-y._origIdx)
-              .forEach(q=>out.push(q));
-      });
-      pieces.length=0; out.forEach(q=>pieces.push(q));
-    }
-
     const makeSheet=s=>{
       const uw=s.w-(s.trimL??15)-(s.trimR??15);
       const uh=s.l-(s.trimT??15)-(s.trimB??15);
@@ -3396,7 +3374,6 @@ function _calculateInner(opts){
     };
 
     const pool=[];
-    const _grpSheet={};        // group id -> the sheet its first panel landed on, this run
     const addToPool=sh=>{sh._poolIdx=pool.length;pool.push(sh);return sh;};
     jobSheets.forEach(s=>addToPool(makeSheet(s)));
     // Seed finite offcut "mini-sheets" (Phase 2) — preferred over fresh boards in findSheet()
@@ -3537,23 +3514,7 @@ function _calculateInner(opts){
       if(placeInSheet(sh,piece,piece._pw,piece._ph,false)) return true;
       return false;
     };
-    // Every placement remembers which sheet the piece's group landed on, so the rest of
-    // the group follows it rather than going wherever the scoring happens to prefer.
-    const _tryG=(sh,piece)=>{
-      if(!tryPlace(sh,piece)) return false;
-      if(piece._grp!=null) _grpSheet[piece._grp]=sh;
-      return true;
-    };
     const findSheet=piece=>{
-      // Kept together: this panel was dragged onto the same sheet as its group, so that
-      // sheet is tried before anything else. If it genuinely will not fit any more — the
-      // rack changed, the cutlist changed — the panel is placed normally and the broken
-      // group is reported, never split in silence.
-      if(piece._grp!=null && _grpSheet[piece._grp]){
-        if(_tryG(_grpSheet[piece._grp],piece)) return true;
-        const _k=_pkeyOf(piece);
-        if(_grpBroken.indexOf(_k)<0) _grpBroken.push(_k);
-      }
       // Named a board we do not have? Then it has no home. Reported as unplaced, which the
       // readiness gate already blocks a quote on, rather than being cut from a guess.
       if(piece._matMissing) return false;
@@ -3574,7 +3535,7 @@ function _calculateInner(opts){
         return (a.uw*a.uh)-(b.uw*b.uh)||a._poolIdx-b._poolIdx;
       };
       // 1a) offcuts ALREADY OPEN on this job — fetched already, so filling them is free.
-      for(const sh of matching.filter(s=>s._isOffcut&&ocSmall(s)&&s.placements.length).sort(bySize)) if(_tryG(sh,piece)) return true;
+      for(const sh of matching.filter(s=>s._isOffcut&&ocSmall(s)&&s.placements.length).sort(bySize)) if(tryPlace(sh,piece)) return true;
       // 2) Boards ALREADY IN USE — fullest first (original behaviour).
       //    Untouched boards are excluded here: an empty board is effectively a NEW
       //    board, and big offcuts (step 3) exist precisely to avoid opening one.
@@ -3587,22 +3548,22 @@ function _calculateInner(opts){
           if(ub!==ua) return ub-ua;
           return a._poolIdx-b._poolIdx; // stable tie-break
         });
-      for(const sh of fullCands) if(_tryG(sh,piece)) return true;
+      for(const sh of fullCands) if(tryPlace(sh,piece)) return true;
       // 1b) UNTOUCHED small offcuts — only once the boards already on the saw have no room.
       // Fetching a fresh offcut means a trip to the rack, a piece of stock gone and another
       // setup; spare space on a board already open costs none of those. Reaching for them
       // BEFORE the open boards is what spread one Ross v2 across eighteen separate pieces
       // when two boards and ten offcuts would do.
-      for(const sh of matching.filter(s=>s._isOffcut&&ocSmall(s)&&!s.placements.length).sort(bySize)) if(_tryG(sh,piece)) return true;
+      for(const sh of matching.filter(s=>s._isOffcut&&ocSmall(s)&&!s.placements.length).sort(bySize)) if(tryPlace(sh,piece)) return true;
       // 3) BIG offcuts — only now, i.e. only to avoid opening a NEW board (so they only get used when they actually save a board)
-      for(const sh of matching.filter(s=>s._isOffcut&&!ocSmall(s)).sort(bySize)) if(_tryG(sh,piece)) return true;
+      for(const sh of matching.filter(s=>s._isOffcut&&!ocSmall(s)).sort(bySize)) if(tryPlace(sh,piece)) return true;
       // 4) Open a fresh full board — reuse an untouched board already in the pool first
       const emptyBoard=matching.find(sh=>!sh._isOffcut&&!sh.placements.length);
-      if(emptyBoard&&_tryG(emptyBoard,piece)) return true;
+      if(emptyBoard&&tryPlace(emptyBoard,piece)) return true;
       const src=jobSheets.find(s=>!piece._msid||s.id===piece._msid);
       if(!src) return false;
       const newSh=addToPool(makeSheet(src));
-      return _tryG(newSh,piece);
+      return tryPlace(newSh,piece);
     };
 
     const unplaced=[];
@@ -4065,6 +4026,7 @@ function _calculateInner(opts){
   }
   window._lastUsedOffcuts=Object.values(_usedOff);
   best.sheets=_fillMargins(best.sheets,kerf);
+  best.sheets=_applyGroups(best.sheets,kerf);
   _validateNest(best.sheets);
   renderResults(best.sheets,best.unplaced);
 }
@@ -4269,6 +4231,62 @@ function _hasOverlapOrOverhang(sh){
 // Runs AFTER nesting, so it cannot disturb how the nest was built. It only moves panels off
 // the emptiest sheets into margins on fuller ones, and every move is reverted if the host
 // sheet stops being cuttable.
+// ── Honour the panels you dragged ───────────────────────────────────────────
+// Done AFTER nesting, deliberately. The first version made a group a constraint on the
+// packing itself, which meant the whole job was re-solved around it: dragging one side
+// panel onto a board moved two panels Rob never touched, scattered the doors across three
+// offcuts instead of two, and cost a sheet. Asking the optimiser to re-think everything is
+// not what "put that panel on that board" means.
+//
+// So the nest is built exactly as it would have been, and then the dragged panel is lifted
+// onto the board you chose. Nothing else can move, because nothing else is re-nested. If it
+// will not fit, or the board would stop being cuttable, the move is undone and reported.
+function _freeSpots(sh,kerf){
+  const spots=[];
+  const cols={}; (sh.placements||[]).forEach(p=>{ const k=Math.round(p.x); (cols[k]=cols[k]||[]).push(p); });
+  Object.keys(cols).map(Number).sort((a,b)=>a-b).forEach(x=>{
+    const c=cols[x], w=Math.max(...c.map(p=>p.w)), used=Math.max(...c.map(p=>p.y+p.h));
+    if(sh.uh-used-kerf>=50) spots.push({x,y:used+kerf,w,h:sh.uh-used-kerf});   // below the strip
+  });
+  _marginRuns(sh,kerf).forEach(r=>spots.push(r));                              // beside a narrow run
+  const right=(sh.placements||[]).reduce((a,p)=>Math.max(a,p.x+p.w),0);
+  const nx=right?right+kerf:0;
+  if(sh.uw-nx>=50) spots.push({x:nx,y:0,w:sh.uw-nx,h:sh.uh});                  // a fresh strip
+  return spots;
+}
+function _applyGroups(sheets,kerf){
+  if(!_keepGroups.length) return sheets;
+  const keyOf=p=>String(p&&p.label||'')+'|'+Math.round(+(p&&p.origL)||0)+'x'+Math.round(+(p&&p.origW)||0);
+  _keepGroups.forEach(g=>{
+    const found=[];
+    sheets.forEach(s=>(s.placements||[]).forEach(p=>{ if(g.indexOf(keyOf(p))>=0) found.push({s,p}); }));
+    if(found.length<2) return;
+    // The board holding the BIGGEST member is the one everything else joins. A big panel is
+    // the least likely to be somewhere silly, so it is the sensible anchor.
+    const target=found.slice().sort((a,b)=>b.p.w*b.p.h-a.p.w*a.p.h)[0].s;
+    found.forEach(({s,p})=>{
+      if(s===target || s.jsid!==target.jsid) return;
+      // Try as it lies; then turned, but only if the panel has no grain to respect.
+      const tries=[{w:p.w,h:p.h,rot:p.rot}];
+      if(p.grain==='N'&&p.w!==p.h) tries.push({w:p.h,h:p.w,rot:!p.rot});
+      let done=false;
+      for(const t of tries){
+        const spot=_freeSpots(target,kerf).find(r=>t.w<=r.w+1&&t.h<=r.h+1);
+        if(!spot) continue;
+        const snapT=JSON.parse(JSON.stringify(target.placements));
+        const snapS=JSON.parse(JSON.stringify(s.placements));
+        target.placements.push({...p,x:spot.x,y:spot.y,bandY:spot.y,w:t.w,h:t.h,rot:t.rot});
+        const ix=s.placements.indexOf(p); if(ix>=0) s.placements.splice(ix,1);
+        if(_hasOverlapOrOverhang(target)||!isSheetRippable(target)){
+          target.placements=snapT; s.placements=snapS;
+        } else { done=true; break; }
+      }
+      if(!done && _grpBroken.indexOf(keyOf(p))<0) _grpBroken.push(keyOf(p));
+    });
+  });
+  return sheets.filter(s=>(s.placements||[]).length);
+}
+
 function _marginRuns(sh,kerf){
   const out=[];
   const cols={}; (sh.placements||[]).forEach(p=>{ const k=Math.round(p.x); (cols[k]=cols[k]||[]).push(p); });
