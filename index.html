@@ -717,7 +717,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-11-22-b';
+const TCE_BUILD='2026-11-22-d';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -768,7 +768,18 @@ let _offcutStock=[]; // in-stock offcuts for the nester (Phase 2)
 // rack, and it is what the move actually meant.
 //
 // Keyed on part name + size, the same identity the cut log and the resume tally use.
-let _keepGroups=[];                     // [[key,key,…], …] — saved with the job
+// Each entry is {a:anchorKey, m:[memberKeys]} — the anchor is a panel on the board you
+// DROPPED ON, the members are the panels you dragged there. Storing a flat set lost the
+// direction of the drag: on the library corner job U4 Back and U3 Back are both 1500x319,
+// so "the biggest panel decides the board" was a coin toss, it picked the board Rob dragged
+// FROM, tried to move the wrong panel the wrong way onto a sheet with 264mm spare, and
+// nothing happened. The anchor says which way round it goes.
+// Older jobs saved a plain array; those are read as "first key is the anchor".
+let _keepGroups=[];                     // [{a,m:[…]}, …] — saved with the job
+function _grpNorm(g){
+  if(Array.isArray(g)) return {a:g[0], m:g.slice(1)};
+  return {a:g&&g.a, m:(g&&g.m)||[]};
+}
 function _pkeyOf(p){ return String(p&&p.label||'')+'|'+Math.round(+(p&&p.l)||0)+'x'+Math.round(+(p&&p.w)||0); }
 
 // Panels the nester could NOT keep together this run — surfaced rather than silently split.
@@ -4254,16 +4265,41 @@ function _freeSpots(sh,kerf){
   if(sh.uw-nx>=50) spots.push({x:nx,y:0,w:sh.uw-nx,h:sh.uh});                  // a fresh strip
   return spots;
 }
+// Close the gap left behind. Lifting a panel off a sheet leaves a hole, and the panels
+// that remain used to sit exactly where the nester had put them — so after moving two side
+// panels off a board, what was left floated in the middle with dead space down the left
+// edge. Nothing wrong with it arithmetically; it just isn't how you'd lay a board out, and
+// it splits the leftover in two instead of leaving one usable piece.
+//
+// Strips slide left to the edge and panels slide up within their strip. Order is preserved,
+// so the cut sequence is unchanged — only the dead space moves, and it ends up in one piece
+// at the far edge where it is worth keeping. Reverts if the result won't cut.
+function _compactSheet(sh,kerf){
+  const snap=JSON.parse(JSON.stringify(sh.placements||[]));
+  const cols={}; (sh.placements||[]).forEach(p=>{ const k=Math.round(p.x); (cols[k]=cols[k]||[]).push(p); });
+  let x=0;
+  Object.keys(cols).map(Number).sort((a,b)=>a-b).forEach(k=>{
+    const c=cols[k].slice().sort((a,b)=>a.y-b.y);
+    const w=Math.max(...c.map(p=>p.w));
+    let y=0;
+    c.forEach(p=>{ p.x=x; p.y=y; p.bandY=y; y+=p.h+kerf; });
+    x+=w+kerf;
+  });
+  if(_hasOverlapOrOverhang(sh)||!isSheetRippable(sh)) sh.placements=snap;
+}
 function _applyGroups(sheets,kerf){
   if(!_keepGroups.length) return sheets;
   const keyOf=p=>String(p&&p.label||'')+'|'+Math.round(+(p&&p.origL)||0)+'x'+Math.round(+(p&&p.origW)||0);
-  _keepGroups.forEach(g=>{
+  _keepGroups.forEach(G=>{
+    const g=_grpNorm(G);
+    if(!g.a||!g.m.length) return;
+    // The destination is the board carrying the anchor — the board you dropped on. Not the
+    // board with the biggest panel, which is a guess and gets it backwards on equal sizes.
+    let target=null;
+    sheets.forEach(s=>{ if((s.placements||[]).some(p=>keyOf(p)===g.a)) target=s; });
+    if(!target) return;
     const found=[];
-    sheets.forEach(s=>(s.placements||[]).forEach(p=>{ if(g.indexOf(keyOf(p))>=0) found.push({s,p}); }));
-    if(found.length<2) return;
-    // The board holding the BIGGEST member is the one everything else joins. A big panel is
-    // the least likely to be somewhere silly, so it is the sensible anchor.
-    const target=found.slice().sort((a,b)=>b.p.w*b.p.h-a.p.w*a.p.h)[0].s;
+    sheets.forEach(s=>(s.placements||[]).forEach(p=>{ if(g.m.indexOf(keyOf(p))>=0) found.push({s,p}); }));
     found.forEach(({s,p})=>{
       if(s===target || s.jsid!==target.jsid) return;
       // Try as it lies; then turned, but only if the panel has no grain to respect.
@@ -4279,7 +4315,7 @@ function _applyGroups(sheets,kerf){
         const ix=s.placements.indexOf(p); if(ix>=0) s.placements.splice(ix,1);
         if(_hasOverlapOrOverhang(target)||!isSheetRippable(target)){
           target.placements=snapT; s.placements=snapS;
-        } else { done=true; break; }
+        } else { done=true; _compactSheet(s,kerf); break; }
       }
       if(!done && _grpBroken.indexOf(keyOf(p))<0) _grpBroken.push(keyOf(p));
     });
@@ -5041,16 +5077,18 @@ function _panelAt(sheet,pt){
 // Merge two panels into one keep-together group, joining existing groups if either is
 // already in one — so three separate drags onto the same board end up as a single group
 // rather than three that quietly fight each other.
-function _joinGroup(ka,kb){
-  if(ka===kb) return;
-  let ia=_keepGroups.findIndex(g=>g.indexOf(ka)>=0);
-  let ib=_keepGroups.findIndex(g=>g.indexOf(kb)>=0);
-  if(ia<0&&ib<0){ _keepGroups.push([ka,kb]); return; }
-  if(ia>=0&&ib<0){ _keepGroups[ia].push(kb); return; }
-  if(ib>=0&&ia<0){ _keepGroups[ib].push(ka); return; }
-  if(ia===ib) return;
-  _keepGroups[ia]=[...new Set(_keepGroups[ia].concat(_keepGroups[ib]))];
-  _keepGroups.splice(ib,1);
+// moverKey joins the board that anchorKey is on. Direction matters, so the anchor is kept
+// separate rather than thrown into a flat set with everything else.
+function _joinGroup(moverKey,anchorKey){
+  if(moverKey===anchorKey) return;
+  // already heading somewhere else? that drag is superseded by this one.
+  _keepGroups.forEach(G=>{ const g=_grpNorm(G); const i=g.m.indexOf(moverKey);
+    if(i>=0){ g.m.splice(i,1); G.a=g.a; G.m=g.m; } });
+  let grp=_keepGroups.map(_grpNorm).find(g=>g.a===anchorKey);
+  if(grp){ if(grp.m.indexOf(moverKey)<0) grp.m.push(moverKey); }
+  else _keepGroups.push({a:anchorKey,m:[moverKey]});
+  // tidy away any group left with nothing to move
+  _keepGroups=_keepGroups.map(_grpNorm).filter(g=>g.a&&g.m.length);
 }
 function _dropOnSheet(target,dragged){
   // Anchor on the BIGGEST panel already on the target board. A big panel is the one least
@@ -5112,10 +5150,11 @@ function renderGroups(){
     +'border:1px solid rgba(212,130,10,.45);border-radius:8px;font-size:12.5px;line-height:1.7;color:#ffd9a3">'
     +'<b>Kept together</b> — panels you dragged onto the same board. Survives re-calculating.'
     +(broke?'<div style="color:#ffb4b4;margin-top:4px">⚠ '+broke+' could not be kept together this time — they are placed normally.</div>':'')
-    +_keepGroups.map((g,i)=>'<div style="margin-top:6px;display:flex;gap:8px;align-items:flex-start">'
+    +_keepGroups.map(_grpNorm).map((g,i)=>'<div style="margin-top:6px;display:flex;gap:8px;align-items:flex-start">'
       +'<button onclick="ungroup('+i+')" title="Remove this group" style="background:none;border:1px solid rgba(255,255,255,.25);'
       +'color:#ffd9a3;border-radius:4px;cursor:pointer;font-size:11px;padding:0 6px;line-height:18px">✕</button>'
-      +'<span style="font-family:var(--mono);font-size:11px">'+g.map(k=>esc(k.split('|')[0])).join('  +  ')+'</span></div>').join('')
+      +'<span style="font-family:var(--mono);font-size:11px">'+g.m.map(k=>esc(k.split('|')[0])).join(', ')
+      +' &rarr; the board with '+esc(String(g.a).split('|')[0])+'</span></div>').join('')
     +'<div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="ungroupAll()">Clear all</button></div>'
     +'</div>';
 }
