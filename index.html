@@ -717,7 +717,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-11-26-d';
+const TCE_BUILD='2026-11-26-e';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -4380,7 +4380,7 @@ function _applyGroups(sheets,kerf){
 function _applyHand(sheets,kerf){
   _handBroken=0;
   if(!_handSheets.length) return sheets;
-  const taken=new Set();
+  const taken=new Set(), dead=[];
   _handSheets.forEach(H=>{
     if(!H||!Array.isArray(H.pos)||!H.pos.length) return;
     const want=(H.keys||[]).slice().sort().join('\u0001');
@@ -4389,7 +4389,7 @@ function _applyHand(sheets,kerf){
       if(taken.has(i)) continue;
       if(_sheetKeys(sheets[i]).join('\u0001')===want){ sh=sheets[i]; taken.add(i); break; }
     }
-    if(!sh){ _handBroken++; return; }
+    if(!sh){ _handBroken++; dead.push(H); return; }
     const snap=JSON.parse(JSON.stringify(sh.placements));
     const pool=(sh.placements||[]).slice();
     let ok=true;
@@ -4404,6 +4404,9 @@ function _applyHand(sheets,kerf){
     if(_hasOverlapOrOverhang(sh)){ sh.placements=snap; _handBroken++; return; }
     sh._handArranged=true;
   });
+  // No sheet in this nest carries that set of panels, so nothing will ever bring it back.
+  // Forget it rather than leave it waiting to land on some unrelated sheet later.
+  if(dead.length) _handSheets=_handSheets.filter(H=>dead.indexOf(H)<0);
   return sheets;
 }
 // Remember where every panel on this sheet now sits. One entry per sheet; arranging the same
@@ -5250,6 +5253,12 @@ function _moveToSheet(src,target,panel,pt,kerf){
   }
   const snapS=JSON.parse(JSON.stringify(src.placements));
   const snapT=JSON.parse(JSON.stringify(target.placements));
+  // Both sheets are about to hold a different set of panels, so whatever was remembered for
+  // the sets they hold RIGHT NOW describes something that no longer exists. Note the two
+  // signatures before the move so they can be thrown away after it — otherwise every move
+  // leaves an orphan behind, and an orphan is not merely clutter: if a later nest happens to
+  // produce a sheet carrying that old set, the stale layout gets stamped onto it.
+  const sigS=_sheetKeys(src).join('\u0001'), sigT=_sheetKeys(target).join('\u0001');
   src.placements.splice(i,1);
   target.placements.push(panel);
   panel.sheetIdx=_lastSheets.indexOf(target);
@@ -5257,6 +5266,12 @@ function _moveToSheet(src,target,panel,pt,kerf){
     src.placements=snapS; target.placements=snapT; return false;
   }
   if(src.placements.length){ src._handArranged=true; _rememberHand(src); }
+  const nowS=_sheetKeys(src).join('\u0001'), nowT=_sheetKeys(target).join('\u0001');
+  _handSheets=_handSheets.filter(H=>{
+    const sig=(H.keys||[]).slice().sort().join('\u0001');
+    if(sig===nowS||sig===nowT) return true;          // the two just written
+    return sig!==sigS && sig!==sigT;                 // the two now superseded
+  });
   return true;
 }
 
