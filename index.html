@@ -717,7 +717,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-11-26-c';
+const TCE_BUILD='2026-11-26-d';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -5187,7 +5187,12 @@ function _reflowSheet(sh,kerf){
 // line up flush at their edges. Aiming a drop to the millimetre on a phone is impossible;
 // this means you only have to get within about 20mm of where you mean.
 function _snapTo(sh,panel,x,y,kerf){
-  const TOL=20;
+  // The tolerance has to be a distance ON SCREEN, not on the board. These sheets draw at
+  // about 0.17 scale, so the old flat 20mm meant you had to land within three pixels of the
+  // panel you were butting up to — which is why nothing ever snapped. 16 screen pixels,
+  // converted back into millimetres, is a target you can actually hit with a finger.
+  const sc=Math.min(320/(sh.uw||1), 420/(sh.uh||1)) || 1;
+  const TOL=Math.max(20, 16/sc);
   const others=(sh.placements||[]).filter(p=>p!==panel);
   const xs=[0, sh.uw-panel.w], ys=[0, sh.uh-panel.h];
   others.forEach(p=>{
@@ -5299,6 +5304,36 @@ function _dropOnSheet(target,dragged){
   _joinGroup(_gkeyOf(dragged), _gkeyOf(anchor));
   return true;
 }
+// Show where the panel will actually land while you are still holding it — snapped, clamped
+// to the board, and red if it would land on top of something. Snapping you cannot see is
+// just the panel moving on its own, which is exactly how this felt.
+let _hintCid=null;
+function _clearHint(){
+  if(!_hintCid) return;
+  const i=+String(_hintCid).slice(3), sh=(_lastSheets||[])[i];
+  if(sh) try{ drawSheet(_hintCid,sh); }catch(e){}
+  _hintCid=null;
+}
+function _showHint(cid,sheet,panel,pt,kerf){
+  const cv=document.getElementById(cid); if(!cv) return;
+  if(_hintCid&&_hintCid!==cid) _clearHint();
+  try{ drawSheet(cid,sheet); }catch(e){ return; }
+  _hintCid=cid;
+  let {x,y}=_snapTo(sheet,panel,pt.x,pt.y,kerf);
+  x=Math.max(0,Math.min(x,sheet.uw-panel.w));
+  y=Math.max(0,Math.min(y,sheet.uh-panel.h));
+  const clash=(sheet.placements||[]).some(q=>q!==panel
+    && x<q.x+q.w-0.5 && x+panel.w>q.x+0.5 && y<q.y+q.h-0.5 && y+panel.h>q.y+0.5);
+  const PAD=28, sc=Math.min(320/sheet.uw, 420/sheet.uh);
+  const ctx=cv.getContext('2d'); if(!ctx) return;
+  ctx.save();
+  ctx.lineWidth=2; ctx.setLineDash([7,5]);
+  ctx.strokeStyle=clash?'#ff6b6b':'#ffd166';
+  ctx.fillStyle=clash?'rgba(255,107,107,.22)':'rgba(255,209,102,.22)';
+  ctx.fillRect(PAD+x*sc, PAD+y*sc, panel.w*sc, panel.h*sc);
+  ctx.strokeRect(PAD+x*sc, PAD+y*sc, panel.w*sc, panel.h*sc);
+  ctx.restore();
+}
 function _attachDrag(cv,idx){
   cv.style.touchAction='none';
   cv.addEventListener('pointerdown',ev=>{
@@ -5317,15 +5352,31 @@ function _attachDrag(cv,idx){
     cv.setPointerCapture(ev.pointerId);
     ev.preventDefault();
   });
+  let _hintPending=false;
   cv.addEventListener('pointermove',ev=>{
     if(!_dragGhost) return;
     _dragGhost.style.left=(ev.clientX+14)+'px';
     _dragGhost.style.top=(ev.clientY-10)+'px';
+    if(_hintPending) return;
+    _hintPending=true;
+    requestAnimationFrame(()=>{
+      _hintPending=false;
+      if(!_dragP) return;
+      const el=document.elementFromPoint(ev.clientX,ev.clientY);
+      const over=el&&el.id&&/^cv-\d+$/.test(el.id)?el.id:null;
+      if(!over){ _clearHint(); return; }
+      const sh2=(_lastSheets||[])[+over.slice(3)]; if(!sh2) return;
+      const cv2=document.getElementById(over); if(!cv2) return;
+      const kerf=parseFloat((document.getElementById('kerf')||{}).value)||3.2;
+      const c=_cvPoint(cv2,sh2,ev);
+      _showHint(over,sh2,_dragP,{x:c.x-_dragOff.x, y:c.y-_dragOff.y},kerf);
+    });
   });
   cv.addEventListener('pointerup',ev=>{
     if(!_dragP){ return; }
     try{ cv.releasePointerCapture(ev.pointerId); }catch(e){}
     if(_dragGhost){ _dragGhost.remove(); _dragGhost=null; }
+    _clearHint();
     // Which sheet is under the pointer? The canvas has pointer capture, so ask the document.
     const el=document.elementFromPoint(ev.clientX,ev.clientY);
     const tgt=el&&el.id&&/^cv-\d+$/.test(el.id)?parseInt(el.id.slice(3),10):-1;
