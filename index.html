@@ -717,7 +717,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-11-24-a';
+const TCE_BUILD='2026-11-26-a';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -5087,6 +5087,96 @@ function getLabelCol(lbl){
 // ═══════════════════════════════════════════════
 // DRAW CANVAS
 // ═══════════════════════════════════════════════
+// ── Moving a panel around one sheet ─────────────────────────────────────────
+// Dropped on the sheet it already lives on, a panel is RE-ARRANGED rather than grouped.
+// This exists because some arrangements are a judgement the optimiser cannot make: a mitre
+// fold needs the top, face and bottom out of neighbouring strips in that order so the grain
+// carries round both folds and it reads as one piece, and a pair of doors sometimes has to
+// come off adjacent board for the figure to match. Neither is a rule worth inferring —
+// Rob doesn't offer mitre folds as standard, so a nester that forced them would be wrong
+// on almost every job. It is a hand decision, so it gets a hand tool.
+//
+// The move is expressed the way the saw works: the panel joins a STRIP, at a position in
+// that strip. Not free pixels. That keeps the sheet cuttable by construction, and keeps the
+// cut order sensible, which is what went wrong the first time margins were filled.
+function _stripsOf(sh){
+  const cols={}; (sh.placements||[]).forEach(p=>{ const k=Math.round(p.x); (cols[k]=cols[k]||[]).push(p); });
+  return Object.keys(cols).map(Number).sort((a,b)=>a-b)
+    .map(x=>({x, w:Math.max(...cols[x].map(p=>p.w)), items:cols[x].slice().sort((a,b)=>a.y-b.y)}));
+}
+// Re-stack every strip from the top with one kerf between panels, strips packed from the
+// left edge. Same routine the gap-closing uses, so a hand move leaves the sheet as tidy as
+// the nester would.
+function _reflowSheet(sh,kerf){
+  const strips=_stripsOf(sh);
+  let x=0;
+  strips.forEach(st=>{
+    let y=0;
+    st.items.forEach(p=>{ p.x=x; p.y=y; p.bandY=y; y+=p.h+kerf; });
+    x+=st.w+kerf;
+  });
+}
+function _moveWithinSheet(sh,panel,pt,kerf){
+  const snap=JSON.parse(JSON.stringify(sh.placements||[]));
+  const strips=_stripsOf(sh);
+  const i=sh.placements.indexOf(panel);
+  if(i<0) return false;
+  sh.placements.splice(i,1);
+
+  // Which strip was it dropped on, and which side of that strip?
+  let di=-1;
+  for(let k2=0;k2<strips.length;k2++){
+    const st=strips[k2];
+    if(pt.x>=st.x-kerf && pt.x<=st.x+st.w+kerf){ di=k2; break; }
+  }
+  const after = di>=0 ? (pt.x > strips[di].x+strips[di].w/2) : true;
+
+  // WHERE in the strip you let go decides what happens, because both answers are wanted:
+  //   • middle of a strip  -> join it, stacked down its length. The usual tidy answer.
+  //   • near its left or right edge -> sit BESIDE it as a strip of its own.
+  // The second is the mitre fold. A shelf top, face and bottom are all the same length, so
+  // stacking them would put them end to end — the figure has to carry ACROSS the folds, so
+  // they must be side by side in order. Same for a pair of doors that need matching figure.
+  const edge = di>=0 && (Math.abs(pt.x-strips[di].x) < strips[di].w*0.25
+                      || Math.abs(pt.x-(strips[di].x+strips[di].w)) < strips[di].w*0.25);
+  if(di>=0 && !edge){
+    const rest=strips[di].items.filter(p=>p!==panel);
+    const used=rest.reduce((a,p)=>a+p.h+kerf,0);
+    if(panel.w<=strips[di].w+1 && used+panel.h<=sh.uh+0.001){
+      let at=rest.length;
+      for(let k2=0;k2<rest.length;k2++){ if(pt.y < rest[k2].y+rest[k2].h/2){ at=k2; break; } }
+      rest.splice(at,0,panel);
+      let y=0; rest.forEach(p=>{ p.x=strips[di].x; p.y=y; p.bandY=y; y+=p.h+kerf; });
+      sh.placements.push(panel);
+      _reflowSheet(sh,kerf);
+      if(_hasOverlapOrOverhang(sh)||!isSheetRippable(sh)){ sh.placements=snap; return false; }
+      sh._handArranged=true; return true;
+    }
+  }
+
+  // Otherwise it becomes a strip of its OWN, inserted where it was dropped. This is the
+  // mitre-fold case: a shelf top, face and bottom are all the same length, so they can
+  // never stack in one strip — they have to sit side by side, in order, with the grain
+  // running through all three. Dropping the face on the right-hand side of the top's strip
+  // puts it immediately after it.
+  const order=strips.filter(st=>st.items.some(p=>p!==panel)).map(st=>st.items.filter(p=>p!==panel));
+  const at = di<0 ? order.length : (after ? di+1 : di);
+  order.splice(Math.max(0,Math.min(order.length,at)),0,[panel]);
+  // width check before committing: every strip side by side must fit the board
+  const total=order.reduce((a,items)=>a+Math.max(...items.map(p=>p.w))+kerf,0)-kerf;
+  if(total>sh.uw+0.001){ sh.placements=snap; return false; }
+  let x=0;
+  order.forEach(items=>{
+    const w=Math.max(...items.map(p=>p.w));
+    let y=0; items.forEach(p=>{ p.x=x; p.y=y; p.bandY=y; y+=p.h+kerf; });
+    x+=w+kerf;
+  });
+  sh.placements.push(panel);
+  if(_hasOverlapOrOverhang(sh)||!isSheetRippable(sh)){ sh.placements=snap; return false; }
+  sh._handArranged=true;
+  return true;
+}
+
 // ── Drag a panel onto another sheet ─────────────────────────────────────────
 // Picking a panel up and dropping it on another sheet does NOT move it to a position —
 // it records that this panel belongs on the same board as the panels already there, and
@@ -5159,7 +5249,20 @@ function _attachDrag(cv,idx){
     const tgt=el&&el.id&&/^cv-\d+$/.test(el.id)?parseInt(el.id.slice(3),10):-1;
     const dragged=_dragP; const from=_dragFromIdx;
     _dragP=null; _dragFromIdx=-1;
-    if(tgt<0||tgt===from) return;                       // dropped on nothing, or back home
+    if(tgt<0) return;                                   // dropped on nothing
+    if(tgt===from){
+      // Same sheet: re-arrange rather than group. This is the hand control for grain
+      // matching and mitre folds — see _moveWithinSheet.
+      const sh=(_lastSheets||[])[from]; if(!sh) return;
+      const kerf=parseFloat((document.getElementById('kerf')||{}).value)||3.2;
+      const pt=_cvPoint(cv,sh,ev);
+      if(_moveWithinSheet(sh,dragged,pt,kerf)){
+        drawSheet('cv-'+from,sh);
+        try{ saveLocal(); }catch(e){}
+        if(typeof toast==='function') toast('Moved '+dragged.label+' on this sheet');
+      } else if(typeof toast==='function') toast('Won\u2019t go there — it would make the sheet uncuttable',true);
+      return;
+    }
     const target=(_lastSheets||[])[tgt]; if(!target) return;
     if(target.jsid!==(_lastSheets||[])[from].jsid){
       alert('That is a different board.\n\n"'+dragged.label+'" is '+((_lastSheets||[])[from].name||'')
