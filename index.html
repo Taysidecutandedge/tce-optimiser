@@ -717,7 +717,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-11-26-a';
+const TCE_BUILD='2026-11-26-b';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -784,6 +784,19 @@ function _pkeyOf(p){ return String(p&&p.label||'')+'|'+Math.round(+(p&&p.l)||0)+
 
 // Panels the nester could NOT keep together this run — surfaced rather than silently split.
 let _grpBroken=[];
+
+// ── Sheets you have arranged BY HAND ───────────────────────────────────────
+// Moving a panel about on one sheet edits that sheet's layout. Re-nesting rebuilds every
+// sheet from scratch, so without this the hand work vanished the moment anything else was
+// dragged — you moved one panel and the one you set up earlier jumped somewhere new.
+// So the arrangement is remembered as an ORDER, not as pixels: for each sheet you touched,
+// the rip strips left to right and the panels down each strip. After every nest the order
+// is laid back down on the sheet carrying the same panels. Saved with the job.
+//   [{ keys:[…sorted panel keys on that sheet…], strips:[[key,…],[key,…]] }, …]
+let _handSheets=[];
+let _handBroken=0;                      // arrangements that could not be re-applied this run
+function _hkeyOf(p){ return String(p&&p.label||'')+'|'+Math.round(+(p&&p.origL)||0)+'x'+Math.round(+(p&&p.origW)||0); }
+function _sheetKeys(sh){ return (sh.placements||[]).map(_hkeyOf).sort(); }
 // What the board is actually made of. A veneer or decor is the SURFACE; this is the core
 // underneath, and two boards with different cores are never the same board however similar
 // their names read. Checked most-specific first, so "birch ply" is birch, not plain ply.
@@ -1391,6 +1404,7 @@ async function cloudSaveJob(quiet){
     quoteBasis:_quoteBasis,   // fresh-board count with offcuts OFF — the admin quotes from this
     sheetEquiv:_sheetEquiv,   // fresh-board count worked out independently of how it was nested
     pwsOrder:_pwsOrder,       // supply-only PWS parts (never cut) — kept with the job to order
+    handSheets:_handSheets,   // sheets you arranged by hand — the strip order, re-applied after every nest
     keepGroups:_keepGroups,   // panels dragged onto the same sheet — a constraint, not a layout
     customer: savedCustomer || null,
     customerTier: savedCustomerTier
@@ -1530,7 +1544,7 @@ let _jobEpoch=0;
 // temporal dead zone of a `let` further down the file.
 var _importNotes=[], _pendingImportNotes=[];
 function _resetJobState(opts){
-  _keepGroups=[]; _grpBroken=[];
+  _keepGroups=[]; _grpBroken=[]; _handSheets=[]; _handBroken=0;
   const o=opts||{};
   _jobEpoch++;
   _importNotes=[];   // notes belong to the cutlist that was imported, not to the next job
@@ -1569,6 +1583,7 @@ async function cloudLoadJob(id){
     jobSheets=d.jobSheets||[];
     parts=d.parts||[];
     _keepGroups=Array.isArray(d.keepGroups)?d.keepGroups:[];
+    _handSheets=Array.isArray(d.handSheets)?d.handSheets:[];
     // Set the project name. Website submissions send the company as projectName and the
     // customer's own job reference in contact.notes (e.g. "stephen office") — prefer that as
     // the project name, and remember the company so the Save dialog pre-picks the account.
@@ -4070,6 +4085,7 @@ function _calculateInner(opts){
   window._lastUsedOffcuts=Object.values(_usedOff);
   best.sheets=_fillMargins(best.sheets,kerf);
   best.sheets=_applyGroups(best.sheets,kerf);
+  best.sheets=_applyHand(best.sheets,kerf);
   _validateNest(best.sheets);
   renderResults(best.sheets,best.unplaced);
 }
@@ -4353,6 +4369,59 @@ function _applyGroups(sheets,kerf){
     });
   });
   return sheets.filter(s=>(s.placements||[]).length);
+}
+
+// Lay a remembered hand arrangement back down. Runs last, after grouping and margin-filling,
+// so whatever the nester decided this time, the sheets you arranged yourself come out the way
+// you left them. A sheet is matched by the panels on it, not by its position in the list —
+// sheet 3 this run may be sheet 5 the next.
+function _applyHand(sheets,kerf){
+  _handBroken=0;
+  if(!_handSheets.length) return sheets;
+  const taken=new Set();
+  _handSheets.forEach(H=>{
+    if(!H||!Array.isArray(H.strips)||!H.strips.length) return;
+    const want=(H.keys||[]).slice().sort().join('\u0001');
+    // the sheet holding exactly these panels. Exact, because a strip order only makes sense
+    // for the set it was drawn for — if grouping has moved a panel on or off, say so instead
+    // of forcing a layout that no longer describes the sheet.
+    let sh=null;
+    for(let i=0;i<sheets.length;i++){
+      if(taken.has(i)) continue;
+      if(_sheetKeys(sheets[i]).join('\u0001')===want){ sh=sheets[i]; taken.add(i); break; }
+    }
+    if(!sh){ _handBroken++; return; }
+    const snap=JSON.parse(JSON.stringify(sh.placements));
+    const pool=(sh.placements||[]).slice();
+    const pick=k=>{ const i=pool.findIndex(p=>_hkeyOf(p)===k); return i<0?null:pool.splice(i,1)[0]; };
+    const order=[];
+    for(const strip of H.strips){
+      const items=[];
+      for(const k of strip){ const p=pick(k); if(p) items.push(p); }
+      if(items.length) order.push(items);
+    }
+    if(pool.length||!order.length){ sh.placements=snap; _handBroken++; return; }
+    const total=order.reduce((a,items)=>a+Math.max(...items.map(p=>p.w))+kerf,0)-kerf;
+    if(total>sh.uw+0.001){ sh.placements=snap; _handBroken++; return; }
+    let x=0;
+    order.forEach(items=>{
+      const w=Math.max(...items.map(p=>p.w));
+      let y=0; items.forEach(p=>{ p.x=x; p.y=y; p.bandY=y; y+=p.h+kerf; });
+      x+=w+kerf;
+    });
+    if(_hasOverlapOrOverhang(sh)||!isSheetRippable(sh)){ sh.placements=snap; _handBroken++; return; }
+    sh._handArranged=true;
+  });
+  return sheets;
+}
+// Remember how a sheet now reads, so the next nest can put it back. One entry per sheet;
+// arranging the same sheet again replaces it rather than stacking up stale orders.
+function _rememberHand(sh){
+  const keys=_sheetKeys(sh);
+  const entry={keys, strips:_stripsOf(sh).map(st=>st.items.map(_hkeyOf))};
+  const sig=keys.join('\u0001');
+  const i=_handSheets.findIndex(H=>(H.keys||[]).slice().sort().join('\u0001')===sig);
+  if(i>=0) _handSheets[i]=entry; else _handSheets.push(entry);
 }
 
 function _marginRuns(sh,kerf){
@@ -5116,7 +5185,9 @@ function _reflowSheet(sh,kerf){
     x+=st.w+kerf;
   });
 }
+let _moveWhy='';
 function _moveWithinSheet(sh,panel,pt,kerf){
+  _moveWhy='';
   const snap=JSON.parse(JSON.stringify(sh.placements||[]));
   const strips=_stripsOf(sh);
   const i=sh.placements.indexOf(panel);
@@ -5149,8 +5220,10 @@ function _moveWithinSheet(sh,panel,pt,kerf){
       let y=0; rest.forEach(p=>{ p.x=strips[di].x; p.y=y; p.bandY=y; y+=p.h+kerf; });
       sh.placements.push(panel);
       _reflowSheet(sh,kerf);
-      if(_hasOverlapOrOverhang(sh)||!isSheetRippable(sh)){ sh.placements=snap; return false; }
-      sh._handArranged=true; return true;
+      if(_hasOverlapOrOverhang(sh)||!isSheetRippable(sh)){
+        sh.placements=snap; _moveWhy='that would leave the sheet impossible to cut straight'; return false;
+      }
+      sh._handArranged=true; _rememberHand(sh); return true;
     }
   }
 
@@ -5164,7 +5237,11 @@ function _moveWithinSheet(sh,panel,pt,kerf){
   order.splice(Math.max(0,Math.min(order.length,at)),0,[panel]);
   // width check before committing: every strip side by side must fit the board
   const total=order.reduce((a,items)=>a+Math.max(...items.map(p=>p.w))+kerf,0)-kerf;
-  if(total>sh.uw+0.001){ sh.placements=snap; return false; }
+  if(total>sh.uw+0.001){
+    sh.placements=snap;
+    _moveWhy='no room for another rip on this sheet — it needs '+Math.round(total-sh.uw)+'mm more width';
+    return false;
+  }
   let x=0;
   order.forEach(items=>{
     const w=Math.max(...items.map(p=>p.w));
@@ -5172,8 +5249,11 @@ function _moveWithinSheet(sh,panel,pt,kerf){
     x+=w+kerf;
   });
   sh.placements.push(panel);
-  if(_hasOverlapOrOverhang(sh)||!isSheetRippable(sh)){ sh.placements=snap; return false; }
+  if(_hasOverlapOrOverhang(sh)||!isSheetRippable(sh)){
+    sh.placements=snap; _moveWhy='that would leave the sheet impossible to cut straight'; return false;
+  }
   sh._handArranged=true;
+  _rememberHand(sh);
   return true;
 }
 
@@ -5258,9 +5338,10 @@ function _attachDrag(cv,idx){
       const pt=_cvPoint(cv,sh,ev);
       if(_moveWithinSheet(sh,dragged,pt,kerf)){
         drawSheet('cv-'+from,sh);
+        renderGroups();
         try{ saveLocal(); }catch(e){}
-        if(typeof toast==='function') toast('Moved '+dragged.label+' on this sheet');
-      } else if(typeof toast==='function') toast('Won\u2019t go there — it would make the sheet uncuttable',true);
+        if(typeof toast==='function') toast('Moved '+dragged.label+' — this sheet is now kept as you arranged it');
+      } else if(typeof toast==='function') toast('Won\u2019t go there — '+(_moveWhy||'it would make the sheet uncuttable'),true);
       return;
     }
     const target=(_lastSheets||[])[tgt]; if(!target) return;
@@ -5279,9 +5360,9 @@ function _attachDrag(cv,idx){
 // one-way door: the job quietly carries a constraint nobody can see or remove.
 function renderGroups(){
   const el=document.getElementById('grpSec'); if(!el) return;
-  if(!_keepGroups.length){ el.innerHTML=''; return; }
+  if(!_keepGroups.length && !_handSheets.length){ el.innerHTML=''; return; }
   const broke=_grpBroken.length;
-  el.innerHTML='<div style="margin:0 0 10px;padding:9px 12px;background:rgba(212,130,10,.10);'
+  el.innerHTML=_handHtml()+(!_keepGroups.length?'':'<div style="margin:0 0 10px;padding:9px 12px;background:rgba(212,130,10,.10);'
     +'border:1px solid rgba(212,130,10,.45);border-radius:8px;font-size:12.5px;line-height:1.7;color:#ffd9a3">'
     +'<b>Kept together</b> — panels you dragged onto the same board. Survives re-calculating.'
     +(broke?'<div style="color:#ffb4b4;margin-top:4px">⚠ '+broke+' could not be kept together this time — they are placed normally.</div>':'')
@@ -5291,8 +5372,29 @@ function renderGroups(){
       +'<span style="font-family:var(--mono);font-size:11px">'+g.m.map(k=>esc(k.split('|')[0])).join(', ')
       +' &rarr; the board with '+esc(String(g.a).split('|')[0])+'</span></div>').join('')
     +'<div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="ungroupAll()">Clear all</button></div>'
+    +'</div>');
+}
+// Sheets arranged by hand are a standing instruction too, so they get the same treatment as
+// keep-together groups: listed, countable, and removable one at a time.
+function _handHtml(){
+  if(!_handSheets.length) return '';
+  const lbl=H=>{
+    const names=[]; (H.strips||[]).forEach(st=>st.forEach(k=>{ const n=String(k).split('|')[0]; if(names.indexOf(n)<0) names.push(n); }));
+    return names.slice(0,4).join(', ')+(names.length>4?' +'+(names.length-4)+' more':'');
+  };
+  return '<div style="margin:0 0 10px;padding:9px 12px;background:rgba(90,160,255,.10);'
+    +'border:1px solid rgba(90,160,255,.45);border-radius:8px;font-size:12.5px;line-height:1.7;color:#cfe3ff">'
+    +'<b>Arranged by hand</b> — sheets you laid out yourself. Put back after every re-calculate.'
+    +(_handBroken?'<div style="color:#ffb4b4;margin-top:4px">\u26a0 '+_handBroken+' could not be put back this time — the panels on that sheet changed, so it was nested normally.</div>':'')
+    +_handSheets.map((H,i)=>'<div style="margin-top:6px;display:flex;gap:8px;align-items:flex-start">'
+      +'<button onclick="unhand('+i+')" title="Let the optimiser lay this sheet out again" style="background:none;border:1px solid rgba(255,255,255,.25);'
+      +'color:#cfe3ff;border-radius:4px;cursor:pointer;font-size:11px;padding:0 6px;line-height:18px">\u2715</button>'
+      +'<span style="font-family:var(--mono);font-size:11px">'+((H.strips||[]).length)+' rips \u2014 '+esc(lbl(H))+'</span></div>').join('')
+    +'<div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="unhandAll()">Clear all</button></div>'
     +'</div>';
 }
+function unhand(i){ _handSheets.splice(i,1); try{saveLocal();}catch(e){} _recalcKeepingPlace(); }
+function unhandAll(){ _handSheets=[]; try{saveLocal();}catch(e){} _recalcKeepingPlace(); }
 // Re-nesting rebuilds the whole results panel, which throws the page back to the top —
 // so after dragging a panel you had to scroll down again to find out whether it moved.
 // Hold the scroll position across the rebuild and put it back once the sheets are drawn.
