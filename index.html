@@ -717,7 +717,7 @@ select option{background:var(--surf2)}
 // So the app asks the server what the current build is, and if it isn't the one running, it
 // says so in a bar you cannot miss. It never reloads by itself — you might be mid-cut, and
 // that is your decision, not the app's.
-const TCE_BUILD='2026-11-26-b';
+const TCE_BUILD='2026-11-26-c';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -4371,20 +4371,19 @@ function _applyGroups(sheets,kerf){
   return sheets.filter(s=>(s.placements||[]).length);
 }
 
-// Lay a remembered hand arrangement back down. Runs last, after grouping and margin-filling,
-// so whatever the nester decided this time, the sheets you arranged yourself come out the way
-// you left them. A sheet is matched by the panels on it, not by its position in the list —
-// sheet 3 this run may be sheet 5 the next.
+// Lay a remembered hand arrangement back down. Positions are remembered EXACTLY, because
+// free placement means the position is the whole point — there is no rule that would
+// reproduce it. Runs last, after grouping and margin-filling, so whatever the nester decided
+// this time, the sheets you arranged yourself come out the way you left them.
+// A sheet is matched by the panels on it, not by its place in the list: sheet 3 this run may
+// be sheet 5 the next.
 function _applyHand(sheets,kerf){
   _handBroken=0;
   if(!_handSheets.length) return sheets;
   const taken=new Set();
   _handSheets.forEach(H=>{
-    if(!H||!Array.isArray(H.strips)||!H.strips.length) return;
+    if(!H||!Array.isArray(H.pos)||!H.pos.length) return;
     const want=(H.keys||[]).slice().sort().join('\u0001');
-    // the sheet holding exactly these panels. Exact, because a strip order only makes sense
-    // for the set it was drawn for — if grouping has moved a panel on or off, say so instead
-    // of forcing a layout that no longer describes the sheet.
     let sh=null;
     for(let i=0;i<sheets.length;i++){
       if(taken.has(i)) continue;
@@ -4393,32 +4392,28 @@ function _applyHand(sheets,kerf){
     if(!sh){ _handBroken++; return; }
     const snap=JSON.parse(JSON.stringify(sh.placements));
     const pool=(sh.placements||[]).slice();
-    const pick=k=>{ const i=pool.findIndex(p=>_hkeyOf(p)===k); return i<0?null:pool.splice(i,1)[0]; };
-    const order=[];
-    for(const strip of H.strips){
-      const items=[];
-      for(const k of strip){ const p=pick(k); if(p) items.push(p); }
-      if(items.length) order.push(items);
-    }
-    if(pool.length||!order.length){ sh.placements=snap; _handBroken++; return; }
-    const total=order.reduce((a,items)=>a+Math.max(...items.map(p=>p.w))+kerf,0)-kerf;
-    if(total>sh.uw+0.001){ sh.placements=snap; _handBroken++; return; }
-    let x=0;
-    order.forEach(items=>{
-      const w=Math.max(...items.map(p=>p.w));
-      let y=0; items.forEach(p=>{ p.x=x; p.y=y; p.bandY=y; y+=p.h+kerf; });
-      x+=w+kerf;
+    let ok=true;
+    H.pos.forEach(r=>{
+      const i=pool.findIndex(q=>_hkeyOf(q)===r.k);
+      if(i<0){ ok=false; return; }
+      const q=pool.splice(i,1)[0];
+      // a panel you turned by hand stays turned
+      q.x=r.x; q.y=r.y; q.bandY=r.y; q.w=r.w; q.h=r.h; if(r.rot!=null) q.rot=r.rot;
     });
-    if(_hasOverlapOrOverhang(sh)||!isSheetRippable(sh)){ sh.placements=snap; _handBroken++; return; }
+    if(!ok||pool.length){ sh.placements=snap; _handBroken++; return; }
+    if(_hasOverlapOrOverhang(sh)){ sh.placements=snap; _handBroken++; return; }
     sh._handArranged=true;
   });
   return sheets;
 }
-// Remember how a sheet now reads, so the next nest can put it back. One entry per sheet;
-// arranging the same sheet again replaces it rather than stacking up stale orders.
+// Remember where every panel on this sheet now sits. One entry per sheet; arranging the same
+// sheet again replaces it rather than stacking up stale positions.
 function _rememberHand(sh){
   const keys=_sheetKeys(sh);
-  const entry={keys, strips:_stripsOf(sh).map(st=>st.items.map(_hkeyOf))};
+  const entry={keys, pos:(sh.placements||[]).map(p=>({
+    k:_hkeyOf(p), x:Math.round(p.x*10)/10, y:Math.round(p.y*10)/10,
+    w:p.w, h:p.h, rot:p.rot
+  }))};
   const sig=keys.join('\u0001');
   const i=_handSheets.findIndex(H=>(H.keys||[]).slice().sort().join('\u0001')===sig);
   if(i>=0) _handSheets[i]=entry; else _handSheets.push(entry);
@@ -5165,17 +5160,20 @@ function getLabelCol(lbl){
 // Rob doesn't offer mitre folds as standard, so a nester that forced them would be wrong
 // on almost every job. It is a hand decision, so it gets a hand tool.
 //
-// The move is expressed the way the saw works: the panel joins a STRIP, at a position in
-// that strip. Not free pixels. That keeps the sheet cuttable by construction, and keeps the
-// cut order sensible, which is what went wrong the first time margins were filled.
+// The move is FREE. Wherever you let go, that is where the panel goes. No strip rules, no
+// tidying it up afterwards, no refusing it because the sheet would need a second setup —
+// those were all my idea and all three got in the way. The only two things still refused are
+// the two that aren't choices: a panel cannot sit on top of another panel, and it cannot hang
+// off the board.
+//
+// A sheet no straight cut will separate still gets the "can't cut straight" flag in its
+// header, same as always. That is a warning, not a veto: it tells you what you've made and
+// leaves the call with you.
 function _stripsOf(sh){
   const cols={}; (sh.placements||[]).forEach(p=>{ const k=Math.round(p.x); (cols[k]=cols[k]||[]).push(p); });
   return Object.keys(cols).map(Number).sort((a,b)=>a-b)
     .map(x=>({x, w:Math.max(...cols[x].map(p=>p.w)), items:cols[x].slice().sort((a,b)=>a.y-b.y)}));
 }
-// Re-stack every strip from the top with one kerf between panels, strips packed from the
-// left edge. Same routine the gap-closing uses, so a hand move leaves the sheet as tidy as
-// the nester would.
 function _reflowSheet(sh,kerf){
   const strips=_stripsOf(sh);
   let x=0;
@@ -5185,75 +5183,75 @@ function _reflowSheet(sh,kerf){
     x+=st.w+kerf;
   });
 }
+// Snap to what is already there, so panels butt up with exactly one kerf between them and
+// line up flush at their edges. Aiming a drop to the millimetre on a phone is impossible;
+// this means you only have to get within about 20mm of where you mean.
+function _snapTo(sh,panel,x,y,kerf){
+  const TOL=20;
+  const others=(sh.placements||[]).filter(p=>p!==panel);
+  const xs=[0, sh.uw-panel.w], ys=[0, sh.uh-panel.h];
+  others.forEach(p=>{
+    xs.push(p.x+p.w+kerf, p.x-panel.w-kerf, p.x, p.x+p.w-panel.w);
+    ys.push(p.y+p.h+kerf, p.y-panel.h-kerf, p.y, p.y+p.h-panel.h);
+  });
+  const near=(v,cands)=>{
+    let best=v, d=TOL+1;
+    cands.forEach(c=>{ const dd=Math.abs(c-v); if(dd<d && dd<=TOL){ d=dd; best=c; } });
+    return best;
+  };
+  return {x:near(x,xs), y:near(y,ys)};
+}
 let _moveWhy='';
+// pt is where the panel's top-left corner should land (the drag keeps hold of the spot you
+// grabbed it by, so the panel doesn't jump under your finger).
 function _moveWithinSheet(sh,panel,pt,kerf){
   _moveWhy='';
-  const snap=JSON.parse(JSON.stringify(sh.placements||[]));
-  const strips=_stripsOf(sh);
-  const i=sh.placements.indexOf(panel);
-  if(i<0) return false;
-  sh.placements.splice(i,1);
+  if((sh.placements||[]).indexOf(panel)<0) return false;
+  const was={x:panel.x, y:panel.y, bandY:panel.bandY};
 
-  // Which strip was it dropped on, and which side of that strip?
-  let di=-1;
-  for(let k2=0;k2<strips.length;k2++){
-    const st=strips[k2];
-    if(pt.x>=st.x-kerf && pt.x<=st.x+st.w+kerf){ di=k2; break; }
-  }
-  const after = di>=0 ? (pt.x > strips[di].x+strips[di].w/2) : true;
-
-  // WHERE in the strip you let go decides what happens, because both answers are wanted:
-  //   • middle of a strip  -> join it, stacked down its length. The usual tidy answer.
-  //   • near its left or right edge -> sit BESIDE it as a strip of its own.
-  // The second is the mitre fold. A shelf top, face and bottom are all the same length, so
-  // stacking them would put them end to end — the figure has to carry ACROSS the folds, so
-  // they must be side by side in order. Same for a pair of doors that need matching figure.
-  const edge = di>=0 && (Math.abs(pt.x-strips[di].x) < strips[di].w*0.25
-                      || Math.abs(pt.x-(strips[di].x+strips[di].w)) < strips[di].w*0.25);
-  if(di>=0 && !edge){
-    const rest=strips[di].items.filter(p=>p!==panel);
-    const used=rest.reduce((a,p)=>a+p.h+kerf,0);
-    if(panel.w<=strips[di].w+1 && used+panel.h<=sh.uh+0.001){
-      let at=rest.length;
-      for(let k2=0;k2<rest.length;k2++){ if(pt.y < rest[k2].y+rest[k2].h/2){ at=k2; break; } }
-      rest.splice(at,0,panel);
-      let y=0; rest.forEach(p=>{ p.x=strips[di].x; p.y=y; p.bandY=y; y+=p.h+kerf; });
-      sh.placements.push(panel);
-      _reflowSheet(sh,kerf);
-      if(_hasOverlapOrOverhang(sh)||!isSheetRippable(sh)){
-        sh.placements=snap; _moveWhy='that would leave the sheet impossible to cut straight'; return false;
-      }
-      sh._handArranged=true; _rememberHand(sh); return true;
-    }
+  let {x,y}=_snapTo(sh,panel,pt.x,pt.y,kerf);
+  // keep it on the board
+  x=Math.max(0,Math.min(x, sh.uw-panel.w));
+  y=Math.max(0,Math.min(y, sh.uh-panel.h));
+  if(panel.w>sh.uw+0.001||panel.h>sh.uh+0.001){
+    _moveWhy=panel.label+' is bigger than this board'; return false;
   }
 
-  // Otherwise it becomes a strip of its OWN, inserted where it was dropped. This is the
-  // mitre-fold case: a shelf top, face and bottom are all the same length, so they can
-  // never stack in one strip — they have to sit side by side, in order, with the grain
-  // running through all three. Dropping the face on the right-hand side of the top's strip
-  // puts it immediately after it.
-  const order=strips.filter(st=>st.items.some(p=>p!==panel)).map(st=>st.items.filter(p=>p!==panel));
-  const at = di<0 ? order.length : (after ? di+1 : di);
-  order.splice(Math.max(0,Math.min(order.length,at)),0,[panel]);
-  // width check before committing: every strip side by side must fit the board
-  const total=order.reduce((a,items)=>a+Math.max(...items.map(p=>p.w))+kerf,0)-kerf;
-  if(total>sh.uw+0.001){
-    sh.placements=snap;
-    _moveWhy='no room for another rip on this sheet — it needs '+Math.round(total-sh.uw)+'mm more width';
+  panel.x=x; panel.y=y; panel.bandY=y;
+
+  // The only refusal: it would sit on top of something. Name what, so you can move that first.
+  const hit=(sh.placements||[]).find(p=>p!==panel
+    && x < p.x+p.w-0.5 && x+panel.w > p.x+0.5
+    && y < p.y+p.h-0.5 && y+panel.h > p.y+0.5);
+  if(hit){
+    panel.x=was.x; panel.y=was.y; panel.bandY=was.bandY;
+    _moveWhy='it would sit on top of '+(hit.label||'another panel');
     return false;
   }
-  let x=0;
-  order.forEach(items=>{
-    const w=Math.max(...items.map(p=>p.w));
-    let y=0; items.forEach(p=>{ p.x=x; p.y=y; p.bandY=y; y+=p.h+kerf; });
-    x+=w+kerf;
-  });
-  sh.placements.push(panel);
-  if(_hasOverlapOrOverhang(sh)||!isSheetRippable(sh)){
-    sh.placements=snap; _moveWhy='that would leave the sheet impossible to cut straight'; return false;
-  }
+
   sh._handArranged=true;
   _rememberHand(sh);
+  return true;
+}
+
+// Move a panel from one sheet to another, landing where you dropped it. Same two refusals
+// as a move within a sheet: nothing on top of anything, nothing off the board.
+function _moveToSheet(src,target,panel,pt,kerf){
+  _moveWhy='';
+  const i=(src.placements||[]).indexOf(panel);
+  if(i<0) return false;
+  if(panel.w>target.uw+0.001||panel.h>target.uh+0.001){
+    _moveWhy=panel.label+' is bigger than that board'; return false;
+  }
+  const snapS=JSON.parse(JSON.stringify(src.placements));
+  const snapT=JSON.parse(JSON.stringify(target.placements));
+  src.placements.splice(i,1);
+  target.placements.push(panel);
+  panel.sheetIdx=_lastSheets.indexOf(target);
+  if(!_moveWithinSheet(target,panel,pt,kerf)){
+    src.placements=snapS; target.placements=snapT; return false;
+  }
+  if(src.placements.length){ src._handArranged=true; _rememberHand(src); }
   return true;
 }
 
@@ -5264,7 +5262,7 @@ function _moveWithinSheet(sh,panel,pt,kerf){
 // first version of margin-filling placed panels wherever they fitted and produced sheets
 // that were a nuisance to cut; letting the nester lay out what you've asked for avoids
 // repeating that.
-let _dragP=null, _dragFromIdx=-1, _dragGhost=null;
+let _dragP=null, _dragFromIdx=-1, _dragGhost=null, _dragOff={x:0,y:0};
 function _gkeyOf(p){ return String(p&&p.label||'')+'|'+Math.round(+(p&&(p.origL!=null?p.origL:p.l))||0)+'x'+Math.round(+(p&&(p.origW!=null?p.origW:p.w))||0); }
 function _cvPoint(cv,sheet,ev){
   const r=cv.getBoundingClientRect();
@@ -5306,7 +5304,11 @@ function _attachDrag(cv,idx){
   cv.addEventListener('pointerdown',ev=>{
     const sh=(_lastSheets||[])[idx]; if(!sh) return;
     const p=_panelAt(sh,_cvPoint(cv,sh,ev)); if(!p) return;
+    const gp=_cvPoint(cv,sh,ev);
     _dragP=p; _dragFromIdx=idx;
+    // Hold the panel by the spot you grabbed it, not by its corner — otherwise it jumps
+    // under your finger the moment you pick it up and you cannot aim at anything.
+    _dragOff={x:gp.x-p.x, y:gp.y-p.y};
     _dragGhost=document.createElement('div');
     _dragGhost.textContent='→ '+p.label;
     _dragGhost.style.cssText='position:fixed;z-index:9999;pointer-events:none;background:#d4820a;color:#fff;'
@@ -5335,7 +5337,8 @@ function _attachDrag(cv,idx){
       // matching and mitre folds — see _moveWithinSheet.
       const sh=(_lastSheets||[])[from]; if(!sh) return;
       const kerf=parseFloat((document.getElementById('kerf')||{}).value)||3.2;
-      const pt=_cvPoint(cv,sh,ev);
+      const c=_cvPoint(cv,sh,ev);
+      const pt={x:c.x-_dragOff.x, y:c.y-_dragOff.y};
       if(_moveWithinSheet(sh,dragged,pt,kerf)){
         drawSheet('cv-'+from,sh);
         renderGroups();
@@ -5350,10 +5353,30 @@ function _attachDrag(cv,idx){
         +' and you dropped it on '+(target.name||'')+'. A panel can only move to a sheet of its own material.');
       return;
     }
-    if(!_dropOnSheet(target,dragged)) return;
+    // Dropping on ANOTHER sheet is a free move too. It used to record "keep these together"
+    // and re-nest the whole job, which is what threw away every sheet you had already
+    // arranged by hand. Now the panel simply goes where you put it.
+    const src=(_lastSheets||[])[from];
+    const tcv=document.getElementById('cv-'+tgt);
+    if(!tcv) return;
+    const kerf2=parseFloat((document.getElementById('kerf')||{}).value)||3.2;
+    const c2=_cvPoint(tcv,target,ev);
+    if(!_moveToSheet(src,target,dragged,{x:c2.x-_dragOff.x, y:c2.y-_dragOff.y},kerf2)){
+      if(typeof toast==='function') toast('Won\u2019t go there \u2014 '+(_moveWhy||'no room on that sheet'),true);
+      return;
+    }
     try{ saveLocal(); }catch(e){}
-    if(typeof toast==='function') toast('Keeping '+dragged.label+' with that board — re-nesting…');
-    _recalcKeepingPlace();
+    if(src.placements.length){
+      drawSheet('cv-'+from,src); drawSheet('cv-'+tgt,target); renderGroups();
+      if(typeof toast==='function') toast('Moved '+dragged.label+' to sheet '+(tgt+1));
+    } else {
+      // last panel off that board — the sheet goes, so the whole panel has to be rebuilt
+      const y=window.scrollY||document.documentElement.scrollTop||0;
+      _lastSheets=_lastSheets.filter(sh=>(sh.placements||[]).length);
+      try{ renderResults(_lastSheets,_lastUnplaced||[]); }catch(e){}
+      requestAnimationFrame(()=>requestAnimationFrame(()=>window.scrollTo(0,y)));
+      if(typeof toast==='function') toast('Moved '+dragged.label+' \u2014 that board is now empty, one sheet saved');
+    }
   });
 }
 // The groups you have asked for, listed so they can be undone. Without this a drag is a
@@ -5379,17 +5402,17 @@ function renderGroups(){
 function _handHtml(){
   if(!_handSheets.length) return '';
   const lbl=H=>{
-    const names=[]; (H.strips||[]).forEach(st=>st.forEach(k=>{ const n=String(k).split('|')[0]; if(names.indexOf(n)<0) names.push(n); }));
+    const names=[]; (H.pos||[]).forEach(r=>{ const n=String(r.k).split('|')[0]; if(names.indexOf(n)<0) names.push(n); });
     return names.slice(0,4).join(', ')+(names.length>4?' +'+(names.length-4)+' more':'');
   };
   return '<div style="margin:0 0 10px;padding:9px 12px;background:rgba(90,160,255,.10);'
     +'border:1px solid rgba(90,160,255,.45);border-radius:8px;font-size:12.5px;line-height:1.7;color:#cfe3ff">'
-    +'<b>Arranged by hand</b> — sheets you laid out yourself. Put back after every re-calculate.'
+    +'<b>Arranged by hand</b> — sheets you laid out yourself. Exact positions, put back after every re-calculate.'
     +(_handBroken?'<div style="color:#ffb4b4;margin-top:4px">\u26a0 '+_handBroken+' could not be put back this time — the panels on that sheet changed, so it was nested normally.</div>':'')
     +_handSheets.map((H,i)=>'<div style="margin-top:6px;display:flex;gap:8px;align-items:flex-start">'
       +'<button onclick="unhand('+i+')" title="Let the optimiser lay this sheet out again" style="background:none;border:1px solid rgba(255,255,255,.25);'
       +'color:#cfe3ff;border-radius:4px;cursor:pointer;font-size:11px;padding:0 6px;line-height:18px">\u2715</button>'
-      +'<span style="font-family:var(--mono);font-size:11px">'+((H.strips||[]).length)+' rips \u2014 '+esc(lbl(H))+'</span></div>').join('')
+      +'<span style="font-family:var(--mono);font-size:11px">'+((H.pos||[]).length)+' panels \u2014 '+esc(lbl(H))+'</span></div>').join('')
     +'<div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="unhandAll()">Clear all</button></div>'
     +'</div>';
 }
