@@ -465,7 +465,7 @@ label{font-size:12px;color:#8ab;display:block;margin-bottom:4px}
 // says so. A device can run week-old code while you are told a fix is live. So the app asks
 // the server what the current build is and says plainly when it is behind. It never reloads
 // by itself — that is your call, not the app's.
-const TCE_BUILD='2026-11-16-a';
+const TCE_BUILD='2026-11-25-a';
 function _tceShowUpdateBar(serverBuild){
   if(document.getElementById('tceUpdateBar')) return;
   const b=document.createElement('div');
@@ -1967,6 +1967,7 @@ async function buildQuote() {
       <button class="btn btn-secondary btn-sm" onclick="extraAdd()">+ Add line</button>
       <button class="btn btn-secondary btn-sm" onclick="extraAdd('Labour — cutting from customer&#39;s own offcuts',1,'hrs',0)">+ Time</button>
       <button class="btn btn-secondary btn-sm" onclick="extraAdd('Recuts — cutlist revisions',1,'job',0)">+ Recuts</button>
+      <button class="btn btn-secondary btn-sm" onclick="sheetAddOpen()">+ Sheet</button>
       <span style="font-size:11px;color:#6b8f7e;margin-left:8px">Shows on the customer PDF exactly as worded here.</span>
     </td></tr>`;
     if(ex.length) rows += `<tr class="subtotal"><td colspan="5">Additional charges subtotal</td><td class="r">£${ex.reduce((s,x)=>s+(Number(x.qty)||0)*(Number(x.rate)||0),0).toFixed(2)}</td></tr>`;
@@ -2092,6 +2093,76 @@ async function buildQuote() {
 
 // Extra quote lines live inside _quoteOverrides so they save and reload with the quote.
 // "__" prefix keeps them clear of the per-material entries.
+// ── Supply a full sheet ─────────────────────────────────────────────────────
+// A customer wanting a whole board rather than cut parts. It was possible already — add a
+// line, type a description and a price — but a typed price is a typed mistake, and the
+// board name on the invoice wouldn't necessarily match what gets ordered. This picks the
+// board from the same catalogue the cut material is priced from, so the rate is the real
+// one with the customer's tier markup already on it.
+//
+// The board name and quantity are stored on the line (not just baked into the wording), so
+// these can be fed into the materials order later without anything being re-entered.
+function sheetAddOpen(){
+  const tier=(document.getElementById('qTier')||{}).value||'retail';
+  const seen={}, opts=[];
+  (_customBoards||[]).forEach(b=>{
+    if(!((parseFloat(b.base_cost)||0)>0)) return;                 // unpriced rows would quote at nothing
+    const nm=(b.thickness_mm?b.thickness_mm+'mm ':'')+b.board_name+(b.sheet_size?' '+b.sheet_size:'');
+    if(seen[nm]) return; seen[nm]=1;
+    opts.push(nm);
+  });
+  Object.keys(_pricing||{}).sort().forEach(code=>{ if(!seen[code]){ seen[code]=1; opts.push(code); } });
+  const old=document.getElementById('sheetAddOv'); if(old) old.remove();
+  const ov=document.createElement('div'); ov.id='sheetAddOv';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.innerHTML='<div style="background:#15171e;border:1px solid #2a2e38;border-radius:12px;max-width:470px;width:100%;padding:20px;color:#f0eeea">'
+    +'<div style="font-size:17px;font-weight:600;margin-bottom:3px">Supply full sheets</div>'
+    +'<div style="font-size:12px;color:#8fa;margin-bottom:14px">Whole uncut boards. Priced from the catalogue at this customer’s tier.</div>'
+    +'<label style="font-size:12px;color:#a8b0bd">Board</label>'
+    +'<input id="shBoard" list="shBoardList" autocomplete="off" placeholder="start typing…" style="width:100%;box-sizing:border-box;background:#1e2128;border:1px solid #2a2e38;color:#f0eeea;border-radius:8px;padding:10px;font-size:15px;margin-bottom:10px">'
+    +'<datalist id="shBoardList">'+opts.map(o=>'<option value="'+String(o).replace(/"/g,'&quot;')+'">').join('')+'</datalist>'
+    +'<div style="display:flex;gap:10px;margin-bottom:6px">'
+      +'<div style="flex:1"><label style="font-size:12px;color:#a8b0bd">How many sheets</label>'
+      +'<input id="shQty" type="number" min="1" step="1" value="1" style="width:100%;box-sizing:border-box;background:#1e2128;border:1px solid #2a2e38;color:#f0eeea;border-radius:8px;padding:10px;font-size:16px"></div>'
+      +'<div style="flex:1"><label style="font-size:12px;color:#a8b0bd">Price each</label>'
+      +'<input id="shRate" type="number" step="0.01" placeholder="—" style="width:100%;box-sizing:border-box;background:#1e2128;border:1px solid #2a2e38;color:#f0eeea;border-radius:8px;padding:10px;font-size:16px"></div>'
+    +'</div>'
+    +'<div id="shNote" style="font-size:12px;color:#8fa;min-height:17px;margin-bottom:12px"></div>'
+    +'<div style="display:flex;gap:10px;justify-content:flex-end">'
+      +'<button class="btn btn-secondary btn-sm" onclick="document.getElementById(\'sheetAddOv\').remove()">Cancel</button>'
+      +'<button class="btn btn-primary btn-sm" onclick="sheetAddConfirm()">Add to quote</button>'
+    +'</div></div>';
+  document.body.appendChild(ov);
+  const look=()=>{
+    const nm=(document.getElementById('shBoard')||{}).value||'';
+    const note=document.getElementById('shNote'), rate=document.getElementById('shRate');
+    if(!nm.trim()){ note.textContent=''; return; }
+    let p=null; try{ p=lookupBoardPrice(nm,tier); }catch(e){ p=null; }
+    if(p==null){ note.textContent='No catalogue price for that board — type the price yourself.'; note.style.color='#ffc46b'; }
+    else { rate.value=(Math.round(p*100)/100).toFixed(2);
+      note.textContent='£'+(Math.round(p*100)/100).toFixed(2)+' per sheet at '+tier+' — change it if this one is different.';
+      note.style.color='#8fa'; }
+  };
+  document.getElementById('shBoard').addEventListener('input',look);
+  document.getElementById('shBoard').addEventListener('change',look);
+  setTimeout(()=>{ const el=document.getElementById('shBoard'); if(el) el.focus(); },80);
+}
+function sheetAddConfirm(){
+  const nm=((document.getElementById('shBoard')||{}).value||'').trim();
+  const qty=Math.max(1,parseInt((document.getElementById('shQty')||{}).value,10)||1);
+  const rate=parseFloat((document.getElementById('shRate')||{}).value);
+  if(!nm){ alert('Pick a board first.'); return; }
+  if(!(rate>=0)){ alert('No price for that board. Type one in before adding it.'); return; }
+  extraLines().push({
+    desc: nm+' — full sheet'+(qty!==1?'s':'')+', supplied uncut',
+    qty, unit:'sheet', rate,
+    board: nm,        // kept so the materials order can pick these up later
+    supply: true      // supplied whole: nothing to cut, nothing to edge
+  });
+  const ov=document.getElementById('sheetAddOv'); if(ov) ov.remove();
+  buildQuote();
+}
+
 function extraLines(){ if(!Array.isArray(_quoteOverrides.__extras)) _quoteOverrides.__extras=[]; return _quoteOverrides.__extras; }
 function extraAdd(desc,qty,unit,rate){
   extraLines().push({desc:desc||'', qty:qty!=null?qty:1, unit:unit||'hrs', rate:rate!=null?rate:0});
@@ -3873,8 +3944,27 @@ async function lamSaveBoard(){
     showToast(finalName+' saved at £'+c.total.toFixed(2)+'/sheet ✓');
   }catch(e){ alert('Error saving board: '+e.message); }
 }
+// One spelling per board, here most of all — this list is what the optimiser and the quote
+// both match against, so a second spelling of a board that already exists quietly splits a
+// board in two and takes its price with it. Same word-key as the optimiser and the offcuts
+// page; keep the three in step.
+function _matWordKey(s){
+  return String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().split(/\s+/).filter(Boolean).sort().join(' ');
+}
+function _canonBoardName(name){
+  const k=_matWordKey(name); if(!k) return name;
+  const hit=(_customBoards||[]).map(b=>b.board_name).find(n=>_matWordKey(n)===k);
+  return (hit&&hit!==name)?hit:name;
+}
 async function addCustomBoard() {
-  const name = document.getElementById('newBoardName').value.trim();
+  let name = document.getElementById('newBoardName').value.trim();
+  const _typed=name; name=_canonBoardName(name);
+  if(name!==_typed){
+    if(!confirm('You already have a board called "'+name+'".\n\nAdd this as "'+name+'" so it stays one board?\n\n'
+      +'Cancel to keep "'+_typed+'" as a separate board — but the two will not be treated as the same material.')){
+      name=_typed;
+    } else { document.getElementById('newBoardName').value=name; }
+  }
   const thick = parseInt(document.getElementById('newBoardThick').value) || 0;
   const size = document.getElementById('newBoardSize').value;
   const cost = parseFloat(document.getElementById('newBoardCost').value) || 0;
